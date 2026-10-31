@@ -16,6 +16,8 @@
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_texture_cache.h"
 #include "runtime/ps2_store_patch.h"
+#include "runtime/native/native_movie.h"
+#include <mutex>
 
 #include <cstdio>
 #include <algorithm>
@@ -821,6 +823,57 @@ namespace tmb::twod
             return pc == kDialogKick && address == 0x1000a000u && on();
         }
 
+        // ---- movies: the pictures the MPEG decoder hands to sceMpegGetPicture, shown under the 2D by loadImage (each
+        // vblank while a movie plays) instead of the GS image transfers the game built of them ----
+        constexpr uint32_t kLoadImage = TMB_ADDR(0x001E0A48u);
+        std::mutex g_movieMutex;
+        std::shared_ptr<const ps2x::native::TextureCache::Texture> g_moviePicture; // under g_movieMutex
+
+        void moviePicture(uint32_t, uint32_t width, uint32_t height, const uint8_t *rgba)
+        {
+            static uint64_t s_version = 0;
+            ps2x::native::TextureCache::Texture picture;
+            picture.width = width;
+            picture.height = height;
+            picture.key = 0x4d4f5649u; // one picture at a time: its GPU copy replaced
+            picture.version = ++s_version;
+            picture.rgba.resize(static_cast<size_t>(width) * height);
+            std::memcpy(picture.rgba.data(), rgba, picture.rgba.size() * 4u);
+            auto shared = std::make_shared<const ps2x::native::TextureCache::Texture>(std::move(picture));
+            std::lock_guard<std::mutex> lock(g_movieMutex);
+            g_moviePicture = std::move(shared);
+        }
+
+        // loadImage(chain): the last picture, centred in the frame (as dispSetTags places it: a 640 x 448 frame in NTSC,
+        // 640 x 512 in PAL), under the overlay; no transfer.
+        void loadImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            std::shared_ptr<const ps2x::native::TextureCache::Texture> picture;
+            {
+                std::lock_guard<std::mutex> lock(g_movieMutex);
+                picture = g_moviePicture;
+            }
+            if (!on() || !picture)
+            {
+                loadImage__FPUi_0x1e0a48(rdram, ctx, runtime);
+                return;
+            }
+#if TMB_REGION_US
+            constexpr float kFrameHeight = 448.0f;
+#else
+            constexpr float kFrameHeight = 512.0f;
+#endif
+            ps2x::native::Screen screen;
+            screen.originX = 2048.0f - 320.0f;
+            screen.originY = 2048.0f - kFrameHeight * 0.5f;
+            screen.width = 640.0f;
+            screen.height = kFrameHeight;
+            const float width = static_cast<float>(picture->width), height = static_cast<float>(picture->height);
+            ps2x::native::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
+                                                           screen.originY + (kFrameHeight - height) * 0.5f, width, height);
+            ctx->pc = getRegU32(ctx, 31); // jr $ra
+        }
+
         // updateBarVSyncCallback: each vblank the bar creeps one 1024th (until the next step sets the real progress)
         // and the field parity flips; the buffer swap and the packet's DMA are the GS's, not done.
         void barVSyncOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -907,6 +960,9 @@ namespace tmb::twod
         runtime.registerFunction(kBarVSync, &barVSyncOverride);
         runtime.registerFunction(kFinishShellLoop, &finishShellLoopOverride);
         ps2x::setStorePatch(&dialogKick);
+        runtime.registerFunction(kLoadImage, &loadImageOverride);
+        if (on())
+            ps2x::native::setMoviePictureHook(&moviePicture);
         runtime.registerFunction(kOverheat, &overheatOverride);
     }
 }

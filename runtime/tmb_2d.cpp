@@ -15,6 +15,7 @@
 #include "tmb_region.h"
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_texture_cache.h"
+#include "runtime/ps2_store_patch.h"
 
 #include <cstdio>
 #include <algorithm>
@@ -43,6 +44,13 @@ namespace tmb::twod
     namespace
     {
         constexpr uint32_t kFontBuildPrim = TMB_ADDR(0x001C5B28u);
+        // displayDialog (a match's pause, won / lost and results overlays): where its loop flushes the font, and its D2
+        // kick of the darkening sprite that follows (inline; its offsets differ between the regions).
+#if TMB_REGION_US
+        constexpr uint32_t kDialogFontReturn = 0x163940u, kDialogKick = 0x163a50u;
+#else
+        constexpr uint32_t kDialogFontReturn = 0x163798u, kDialogKick = 0x1638acu;
+#endif
         constexpr uint32_t kFontDmaFontData = TMB_ADDR(0x001C4FE0u);
 #if TMB_REGION_US
         constexpr uint32_t kFontRecords = 0x504540u, kFontRecordBytes = 0x20u;
@@ -159,6 +167,8 @@ namespace tmb::twod
             ctx->pc = getRegU32(ctx, 31); // jr $ra
         }
 
+        void dialogDim(uint8_t *rdram, uint32_t gp);
+
         // fontDmaFontData: what it leaves after sending the font's packet (nothing sent: the glyphs are drawn natively).
         void fontDmaFontDataOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
@@ -168,6 +178,7 @@ namespace tmb::twod
                 return;
             }
             const uint32_t gp = getRegU32(ctx, 28);
+            dialogDim(rdram, getRegU32(ctx, 31) == kDialogFontReturn ? gp : 0u);
             g_rdram.store(rdram, std::memory_order_relaxed);
             g_gp.store(gp, std::memory_order_relaxed);
             ctx->pc = getRegU32(ctx, 31); // jr $ra
@@ -795,6 +806,21 @@ namespace tmb::twod
             ctx->pc = getRegU32(ctx, 31); // jr $ra
         }
 
+        // displayDialog's darkening, after the overlay's text (its font flush): the current view a quarter darker
+        // towards (0, 0, 10) (alpha 0x21, the font's (Cs - Cd) As + Cd). Its kick is patched out (dialogKick).
+        void dialogDim(uint8_t *rdram, uint32_t gp)
+        {
+            if (gp == 0u)
+                return;
+            const View v = viewOf(rdram, word(rdram, gp + kGpCurView));
+            const float left = static_cast<float>(v.cx - (v.w >> 1)), top = static_cast<float>(v.cy - (v.h >> 1));
+            hudSprite(left, top, left + static_cast<float>(v.w), top + static_cast<float>(v.h), rgba(0, 0, 0x0a, 0x21), true);
+        }
+        bool dialogKick(uint32_t pc, uint32_t address, uint32_t)
+        {
+            return pc == kDialogKick && address == 0x1000a000u && on();
+        }
+
         // updateBarVSyncCallback: each vblank the bar creeps one 1024th (until the next step sets the real progress)
         // and the field parity flips; the buffer swap and the packet's DMA are the GS's, not done.
         void barVSyncOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -880,6 +906,7 @@ namespace tmb::twod
         runtime.registerFunction(kBuildProgressBar, &buildProgressBarOverride);
         runtime.registerFunction(kBarVSync, &barVSyncOverride);
         runtime.registerFunction(kFinishShellLoop, &finishShellLoopOverride);
+        ps2x::setStorePatch(&dialogKick);
         runtime.registerFunction(kOverheat, &overheatOverride);
     }
 }

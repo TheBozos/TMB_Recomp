@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <unordered_map>
 
 namespace tmb::native
 {
@@ -130,7 +131,9 @@ namespace tmb::twod
             // TMB_NATIVE_LOG_2D=1: the first glyphs, where they land.
             static const bool s_log = std::getenv("TMB_NATIVE_LOG_2D") != nullptr;
             static uint32_t s_logged = 0;
-            if (s_log && s_logged++ < 12u)
+            static std::unordered_map<uint64_t, bool> s_seen; // each glyph at each place once
+            const uint64_t place = (static_cast<uint64_t>(static_cast<uint32_t>(c)) << 40) ^ (static_cast<uint64_t>(x0) << 20) ^ static_cast<uint64_t>(y0);
+            if (s_log && s_logged < 400u && !s_seen[place] && (s_seen[place] = true) && ++s_logged)
                 std::fprintf(stderr, "[tmb:2d] glyph %c: (%.1f %.1f)-(%.1f %.1f) uv (%.3f %.3f)-(%.3f %.3f) rgba %08x view %u centre %d %d size %dx%d\n",
                              static_cast<char>(c), xs[0], ys[0], xs[1], ys[1], us[0], vs[0], us[1], vs[1], rgba, view, centreX, centreY, viewW, viewH);
             ps2x::native::Renderer::instance().drawOverlay(material, triangles, 6u, tmb::textures::font());

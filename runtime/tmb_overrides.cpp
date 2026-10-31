@@ -1577,6 +1577,46 @@ namespace
         aiUpdateFrozenInput__7Vehicle_0x1017c8(rdram, ctx, runtime);
     }
 
+    // A multitap in pad port 0, as the game's own sceMtap library would find one (its IOP module is not run): four
+    // players on that port's slots (the runtime's PSPadBackend: player N on the Nth gamepad or PS2X_PADN_SCRIPT),
+    // which the game needs for its 3 and 4 player modes. TMB_MULTITAP=0: none.
+    constexpr uint32_t kMtapInit = TMB_ADDR(0x00207460u), kMtapPortOpen = TMB_ADDR(0x002076E0u),
+                       kMtapPortClose = TMB_ADDR(0x00207750u), kMtapGetConnection = TMB_ADDR(0x002077C0u);
+    bool multitap()
+    {
+        static const bool s_on = []
+        {
+            const char *value = std::getenv("TMB_MULTITAP");
+            return !(value && *value == '0');
+        }();
+        return s_on;
+    }
+    void mtapInit(uint8_t *, R5900Context *ctx, PS2Runtime *)
+    {
+        setReturnS32(ctx, 1);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+    void mtapPortOpen(uint8_t *, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const bool open = multitap() && getRegU32(ctx, 4) == 0u;
+        if (open)
+            runtime->padBackend().setMultitap(true);
+        setReturnS32(ctx, open ? 1 : 0);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+    void mtapPortClose(uint8_t *, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (getRegU32(ctx, 4) == 0u)
+            runtime->padBackend().setMultitap(false);
+        setReturnS32(ctx, 1);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+    void mtapGetConnection(uint8_t *, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        setReturnS32(ctx, getRegU32(ctx, 4) == 0u && runtime->padBackend().multitap() ? 1 : 0);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
     constexpr uint32_t kParticleMove = TMB_ADDR(0x001E6368u);
     constexpr uint32_t kParticleCreateFx = TMB_ADDR(0x001E7820u);
     constexpr uint32_t kFxTestReturn = TMB_ADDR(0x00100264u);
@@ -1753,6 +1793,10 @@ namespace
             runtime.registerFunction(TMB_ADDR(0x00204D90u), &sceGsSyncVTimeline);
         }
         runtime.registerFunction(kSubstepReturn, &substepReturn);
+        runtime.registerFunction(kMtapInit, &mtapInit);
+        runtime.registerFunction(kMtapPortOpen, &mtapPortOpen);
+        runtime.registerFunction(kMtapPortClose, &mtapPortClose);
+        runtime.registerFunction(kMtapGetConnection, &mtapGetConnection);
         if (const char *noAi = std::getenv("TMB_NO_AI"); noAi && *noAi == '1')
             runtime.registerFunction(kAiUpdateInputs, &aiUpdateInputsFrozen);
         if (const char *fx = std::getenv("TMB_FX_TEST"); fx && *fx)

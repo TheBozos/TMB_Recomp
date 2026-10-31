@@ -662,6 +662,57 @@ namespace tmb::twod
             hudSprite(x0, y0, x0 + w, y0 + fill, colour, true);
         }
 
+        constexpr uint32_t kChargeUp = TMB_ADDR(0x00140990u);
+
+        // BuildChargeUpBar(hud, packet): the charge (car + 0x220c of car + 0x2210) as a bar 4 pixels high, 108 long at
+        // full charge, from 54 pixels left of the current view's centre, 10 to 14 pixels above its bottom edge; ABE, alpha
+        // 0x30. Its colour is the Hud's (+ 0x5a0 red, + 0x5a4 green, blue 0): green under half charge, easing to yellow
+        // under 75%, then to red (smoothEasyIn, state the game's builder keeps); from 85% it blinks black (+ 0x5a8 set
+        // for 15 of every 30 frames, counted at + 0x5ac).
+        void chargeUpOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            BuildChargeUpBar__3HudP6QwData_0x140990(rdram, ctx, runtime);
+            if (!on())
+                return;
+            setWord(rdram, hud + 4u, 1u);
+            const uint32_t car = word(rdram, hud + 0x5e0u);
+            const int32_t charge = static_cast<int32_t>(word(rdram, car + 0x220cu)), most = static_cast<int32_t>(word(rdram, car + 0x2210u));
+            if (most == 0)
+                return;
+            const int32_t length = charge * 108 / most;
+            const uint32_t colour = word(rdram, hud + 0x5a8u) ? rgba(0, 0, 0, 0x30) : rgba(word(rdram, hud + 0x5a0u), word(rdram, hud + 0x5a4u), 0, 0x30);
+            const View v = viewOf(rdram, word(rdram, gp + kGpCurView));
+            const float x0 = static_cast<float>(v.cx - 54), y0 = static_cast<float>(v.cy + v.h / 2 - 14);
+            hudSprite(x0, y0, x0 + length, y0 + 4.0f, colour, true);
+        }
+
+        // in install():
+
+        constexpr uint32_t kOverheat = TMB_ADDR(0x00140CE0u);
+
+        // BuildOverheatBar(hud, packet): a small lamp right of the current view's centre, its colour by the heat of the
+        // car's weapon (car + 0x2220 of car + 0x2224, in percent): the game's own builder eases Hud + 0x5b0 (red) and
+        // Hud + 0x5b4 (green) between green (under 50), yellow (under 75), orange to red (under 85), and red over that,
+        // when Hud + 0x5b8 blinks it off (on 15 frames of every 30, counted by Hud + 0x5bc). Two blended sprites: a
+        // black backing of 20 x 7, then the lamp of 16 x 5 inside it (black while blinked off); alpha 0x30.
+        void overheatOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            BuildOverheatBar__3HudP6QwData_0x140ce0(rdram, ctx, runtime);
+            if (!on())
+                return;
+            setWord(rdram, hud + 4u, 1u);
+            // From the current view's centre: 30 left of its right edge, 40 under its centre (10 over it when the
+            // screen is split one view over the other).
+            const View v = viewOf(rdram, word(rdram, gp + kGpCurView));
+            const float x = static_cast<float>(v.cx + (v.w >> 1) - 30), y = static_cast<float>(screenDisplay(rdram) == 2 ? v.cy - 10 : v.cy + 40);
+            hudSprite(x, y, x + 20.0f, y + 7.0f, rgba(0, 0, 0, 0x30), true);
+            const uint32_t colour = word(rdram, hud + 0x5b8u) ? rgba(0, 0, 0, 0x30)
+                                                              : rgba(word(rdram, hud + 0x5b0u), word(rdram, hud + 0x5b4u), 0, 0x30);
+            hudSprite(x + 2.0f, y + 1.0f, x + 18.0f, y + 6.0f, colour, true);
+        }
+
         void separator4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t hud = getRegU32(ctx, 4);
@@ -728,5 +779,7 @@ namespace tmb::twod
         runtime.registerFunction(kTurbo4p, &turbo4pOverride);
         runtime.registerFunction(kEnergy4p, &energy4pOverride);
         runtime.registerFunction(kHealth4p, &health4pOverride);
+        runtime.registerFunction(kChargeUp, &chargeUpOverride);
+        runtime.registerFunction(kOverheat, &overheatOverride);
     }
 }

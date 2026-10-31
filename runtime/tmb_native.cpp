@@ -119,6 +119,10 @@ namespace tmb::native
                                        {0x1198u, 0x01f4012cu}, {0x0cf8u, 0x800206bcu}};
         constexpr Program kVertexPasses[] = {{0x0000u, 0x400001d4u}, {0x0010u, 0x400001aeu}, {0x0020u, 0x40000015u},
                                              {0x0030u, 0x40000058u}, {0x0040u, 0x40000091u}};
+        // The split screen's resume (0xc78, between the views): it reloads vf19, vf6 (VU 4: the depth factor) and vf31
+        // (VU 5: the colour scale) for the strips that follow, and runs setup 0x1700 again when that was the last setup
+        // (vi13 = 0x2e9, which only 0x1700 sets). Drawn natively exactly when the last setup is.
+        constexpr Program kResume[] = {{0x0c78u, 0x01f30004u}};
 
         template <size_t N>
         bool matches(const Program (&programs)[N], const uint8_t *vu1Code, uint32_t startPc)
@@ -157,7 +161,7 @@ namespace tmb::native
                     lastSetupNative = false;
                     return true;
                 }
-            if (matches(kVertexPasses, vu1Code, startPc))
+            if (matches(kVertexPasses, vu1Code, startPc) || matches(kResume, vu1Code, startPc))
                 return lastSetupNative;
             lastSetupNative = matches(kSetups, vu1Code, startPc);
             return lastSetupNative;
@@ -208,14 +212,30 @@ namespace tmb::native
         bool drawnNatively(const uint8_t *vu1Code, uint32_t startPc)
         {
             (void)vu1Code;
+            // TMB_NATIVE_LOG_GATE=1: every 20000 questions, how many the decisions answered (native or not), how many
+            // decisions were dropped to find the program asked about, and how many questions found none.
+            static const bool s_log = std::getenv("TMB_NATIVE_LOG_GATE") != nullptr;
+            static uint64_t s_asked = 0, s_native = 0, s_vu1 = 0, s_dropped = 0, s_unseen = 0;
+            if (s_log && ++s_asked % 20000u == 0u)
+            {
+                std::lock_guard<std::mutex> lock(g_decisionsMutex);
+                std::fprintf(stderr, "[tmb:gate] %llu asked: %llu native, %llu VU1, %llu decisions dropped, %llu unseen; %zu queued\n",
+                             static_cast<unsigned long long>(s_asked), static_cast<unsigned long long>(s_native), static_cast<unsigned long long>(s_vu1),
+                             static_cast<unsigned long long>(s_dropped), static_cast<unsigned long long>(s_unseen), g_decisions.size());
+            }
             std::lock_guard<std::mutex> lock(g_decisionsMutex);
             while (!g_decisions.empty())
             {
                 const Decision decision = g_decisions.front();
                 g_decisions.pop_front();
                 if (!decision.direct && decision.pc == startPc)
+                {
+                    ++(decision.skipped ? s_native : s_vu1);
                     return decision.skipped;
+                }
+                ++s_dropped;
             }
+            ++s_unseen;
             return false; // a transfer the adapter did not see: VU1 draws it
         }
 
@@ -323,6 +343,7 @@ namespace tmb::native
             bool setupOnVu1 = false;                           // TMB_NATIVE_VU1_PCS
             Mode mode = Mode::None;
             float matrix[16] = {};     // object to GS screen: camera (VU 9-12) x object (VU 0-3), columns
+            float depthFactor = 1.0f;  // the VU 4.z the matrix's z row is scaled by (1: not scaled)
             std::vector<float> pool;   // x, y, z per pool vertex (the object's space)
             uint64_t tex0 = 0;
             bool haveTexture = false;
@@ -433,6 +454,8 @@ namespace tmb::native
             return clampByte(c[0]) | (clampByte(c[1]) << 8) | (clampByte(c[2]) << 16) | (clampByte(c[3]) << 24);
         }
 
+        void setupMatrix(State &s);
+
         void setup(State &s, uint32_t pc)
         {
             s.mode = modeForSetup(pc);
@@ -440,6 +463,15 @@ namespace tmb::native
             ps2x::native::Renderer::instance().setKey(0); // sprites: screen space, not interpolated
             ++g_stats.objects;
             g_stats.skipped += s.mode == Mode::None ? 1u : 0u;
+            setupMatrix(s);
+            s.haveTexture = false;
+            s.reflectParams = s.mode == Mode::Reflective;
+        }
+
+        // The setup's object-to-screen matrix, from the camera and the object as VU memory has them now (vf1-4, which the
+        // setup's subroutine at 0x1c08 computes and the vertex passes use).
+        void setupMatrix(State &s)
+        {
             // M = camera (VU 9-12) x object (VU 0-3): column j of M is camera applied to column j of the object's.
             for (int j = 0; j < 4; ++j)
                 for (int k = 0; k < 4; ++k)
@@ -451,10 +483,26 @@ namespace tmb::native
             // The unlit skinned loops (0x878, 0x9e8) scale it too (MULz.z vf24, vf24, vf6z at 0x948, 0xa90); the lit one does not.
             if (s.mode == Mode::Unlit || s.mode == Mode::Scaled || s.mode == Mode::Directional || s.mode == Mode::Point ||
                 s.mode == Mode::Reflective || s.mode == Mode::SkinUnlit)
+            {
+                s.depthFactor = s.vu.f(4, 2);
                 for (int j = 0; j < 4; ++j)
-                    s.matrix[j * 4 + 2] *= s.vu.f(4, 2);
-            s.haveTexture = false;
-            s.reflectParams = s.mode == Mode::Reflective;
+                    s.matrix[j * 4 + 2] *= s.depthFactor;
+            }
+            else
+                s.depthFactor = 1.0f;
+        }
+
+        // The split screen's resume (0xc78): the matrix (vf1-4) stays, the depth factor is VU 4.z as it is now.
+        void resumeSetup(State &s)
+        {
+            if (s.depthFactor == 1.0f && !(s.mode == Mode::Unlit || s.mode == Mode::Scaled || s.mode == Mode::Directional ||
+                                           s.mode == Mode::Point || s.mode == Mode::Reflective || s.mode == Mode::SkinUnlit))
+                return;
+            const float factor = s.vu.f(4, 2);
+            if (s.depthFactor != 0.0f)
+                for (int j = 0; j < 4; ++j)
+                    s.matrix[j * 4 + 2] *= factor / s.depthFactor;
+            s.depthFactor = factor;
         }
 
         // An object's key for interpolation (Renderer::setKey): its setup, its vertex count and its pool's words as
@@ -2494,6 +2542,10 @@ namespace tmb::native
                             s.mode = Mode::None; // its MSCNTs are skipped too
                             if (active)
                             {
+                                // VU1 skips it too, and the VIF1 interpreter numbers it as a group: so must the adapter, or
+                                // every later group's draws wait for a marker that never comes (the split screen's 0xc78
+                                // left the whole 2P match undrawn).
+                                ++s.group;
                                 static std::unordered_map<uint64_t, bool> s_reported;
                                 uint32_t lower = 0;
                                 if (pc + 8u <= sizeof(s.code))
@@ -2637,6 +2689,13 @@ namespace tmb::native
                                 morphPass(s);
                             else if (pc == 0x0020u || pc == 0x0030u || pc == 0x0040u)
                                 skinnedPass(s, pc == 0x0020u ? 3 : pc == 0x0030u ? 2 : 1);
+                            else if (matches(kResume, s.code, pc))
+                            {
+                                if (s.setupPc == 0x1700u)
+                                    setup(s, 0x1700u);
+                                else
+                                    resumeSetup(s);
+                            }
                             else
                                 setup(s, pc);
                             if (s.check && pc != 0x1d40u)
@@ -2830,10 +2889,10 @@ namespace tmb::native
             if (++s_frames % 250u == 0u)
             {
                 const State &s = state();
-                std::fprintf(stderr, "[tmb:native] per 250 frames: %llu chains, %llu objects (%llu not native), %llu strips, %llu triangles, %llu textured batches; matrix col3 (%.1f %.1f %.1f %.1f)\n",
+                std::fprintf(stderr, "[tmb:native] per 250 frames: %llu chains, %llu objects (%llu not native), %llu strips, %llu triangles, %llu textured batches, group %llu; matrix col3 (%.1f %.1f %.1f %.1f)\n",
                              static_cast<unsigned long long>(g_stats.chains), static_cast<unsigned long long>(g_stats.objects),
                              static_cast<unsigned long long>(g_stats.skipped), static_cast<unsigned long long>(g_stats.strips),
-                             static_cast<unsigned long long>(g_stats.triangles), static_cast<unsigned long long>(g_stats.textured),
+                             static_cast<unsigned long long>(g_stats.triangles), static_cast<unsigned long long>(g_stats.textured), static_cast<unsigned long long>(s.group),
                              s.matrix[12], s.matrix[13], s.matrix[14], s.matrix[15]);
                 g_stats = Stats{};
             }

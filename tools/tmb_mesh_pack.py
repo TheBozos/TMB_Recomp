@@ -39,7 +39,7 @@ What it reads:
   recorded with kind "skinned", their header fields and no strips.
 
 The pack, all little-endian:
-  "TMBMESH1", u32 file count, then per file:
+  "TMBMESH2", u32 file count, then per file:
     u16 name length, name (upper case, no directory, e.g. "JUNKYARD.NGP"), u32 image size (inflated), u32 image CRC32,
     u32 object count, then per object (sorted by offset):
       u32 offset (obj - 0x980000 in the image), u32 kind (0 rigid, 1 pool-less, 2 sprite, 3 ribbon, 4 skinned),
@@ -47,6 +47,9 @@ The pack, all little-endian:
       u32 pool object (pool-less: the offset of the object whose pool it uses, else 0xffffffff),
       u32 position count, u32 has aux, then per position f32 x, y, z, w (pools: w = 0; inline points: their w),
         then, if has aux, per position f32 x, y, z, 0 (the @373 block; 0 where none),
+      u32 pool source count, then per pool the object uses: u32 the image offset of its x, y, z floats (V3-32 @181
+        data: the runtime reads the positions there, where a game that moves a mesh's vertices writes them;
+        0xffffffff when they are not in one piece), u32 its first position, u32 its position count,
       u32 parameter count, then per parameter u32 the index of the strip it comes before, f32[4],
       u32 strip count, then per strip:
         u16 prim (GIF PRIM, 11 bits), u16 gif flags (bit 0 PRE, bit 1 EOP), u32 material header (GIF tag word 3),
@@ -166,7 +169,25 @@ def packet_segments(image, start):
 def packet_stream(image, obj):
     """The object's VIF stream: what its DMA chain sends, in order (an UNPACK in a tag's upper half carries on into
     the data after it)."""
-    return b''.join(data for data, _ in packet_segments(image, obj + 0x70 + 0x30 * u16(image, obj + 0x5a)))
+    return packet_stream_mapped(image, obj)[0]
+
+
+def packet_stream_mapped(image, obj):
+    """The same, with where each piece of it is in the image: (stream, [(stream offset, image offset, length)])."""
+    pieces, at = [], 0
+    segments = packet_segments(image, obj + 0x70 + 0x30 * u16(image, obj + 0x5a))
+    for data, offset in segments:
+        pieces.append((at, offset, len(data)))
+        at += len(data)
+    return b''.join(data for data, _ in segments), pieces
+
+
+def image_offset(pieces, at, length):
+    """The image offset of stream bytes [at, at + length) when one piece holds them all, else None."""
+    for start, offset, size in pieces:
+        if start <= at and at + length <= start + size:
+            return offset + at - start
+    return None
 
 
 class Strip:
@@ -178,8 +199,9 @@ class Strip:
 
 
 class Pool:
-    def __init__(self, positions):
+    def __init__(self, positions, source=None):
         self.positions = positions  # [(x, y, z, 0.0)]
+        self.source = source  # the image offset of its x, y, z floats (None: not in one piece)
         self.aux = None  # V3-32 @373 (billboards): [(x, y, z, 0.0)], one per position
 
 
@@ -188,6 +210,7 @@ class Mesh:
         self.offset, self.kind, self.flags, self.sphere, self.textures = offset, kind, flags, sphere, textures
         self.pool_from = 0xffffffff
         self.positions = []  # (x, y, z, w)
+        self.sources = []  # (image offset of a pool's x, y, z floats or 0xffffffff, first position, count)
         self.aux = []  # per position (x, y, z, 0) from a pool's @373 block, or zeros
         self.params = []  # (index of the strip it precedes, (f32 x4)): batches with only a V4-32 @0 qword
         self.strips = []  # (prim, gif flags, material header, slot, [(pos index, nx, ny, nz, vflags, rgba, s, t)])
@@ -199,7 +222,7 @@ def decode_strips(image, obj, inherited_pool):
     current_pool = inherited_pool
     cycle = (4, 4)
     strip = Strip()
-    data = packet_stream(image, obj)
+    data, pieces = packet_stream_mapped(image, obj)
     for at, cmd, num, imm, payload in vif_codes(data, 0, len(data)):
         if cmd == 0x01:
             cycle = ((imm >> 8) & 0xff, imm & 0xff)
@@ -208,7 +231,8 @@ def decode_strips(image, obj, inherited_pool):
             if addr == 180 and fmt == 0:
                 continue
             if addr == 181 and fmt == 8:
-                current_pool = Pool([struct.unpack_from('<3f', data, payload + 12 * i) + (0.0,) for i in range(num)])
+                current_pool = Pool([struct.unpack_from('<3f', data, payload + 12 * i) + (0.0,) for i in range(num)],
+                                    image_offset(pieces, payload, 12 * num))
                 pools.append(current_pool)
             elif addr == 373 and fmt == 8 and current_pool is not None and len(current_pool.positions) == num:
                 current_pool.aux = [struct.unpack_from('<3f', data, payload + 12 * i) + (0.0,) for i in range(num)]
@@ -277,6 +301,8 @@ def build_mesh(image, obj, kind, inherited_pool):
                 continue
             if id(pool) not in pool_base:
                 pool_base[id(pool)] = len(mesh.positions)
+                mesh.sources.append((0xffffffff if pool.source is None else pool.source, len(mesh.positions),
+                                     len(pool.positions)))
                 mesh.positions.extend(pool.positions)
                 mesh.aux.extend(pool.aux or [(0.0, 0.0, 0.0, 0.0)] * len(pool.positions))
             bad = [w for _, _, _, w in strip.slot1[1] if w >= len(pool.positions)]
@@ -384,7 +410,7 @@ def convert_file(path):
 
 def write_pack(out_path, files):
     with open(out_path, 'wb') as out:
-        out.write(b'TMBMESH1')
+        out.write(b'TMBMESH2')
         out.write(struct.pack('<I', len(files)))
         for name, image, meshes in files:
             encoded = name.encode()
@@ -397,6 +423,8 @@ def write_pack(out_path, files):
                 out.write(b''.join(struct.pack('<4f', *p) for p in m.positions))
                 if has_aux:
                     out.write(b''.join(struct.pack('<4f', *a) for a in m.aux))
+                out.write(struct.pack('<I', len(m.sources)))
+                out.write(b''.join(struct.pack('<III', *src) for src in m.sources))
                 out.write(struct.pack('<I', len(m.params)))
                 out.write(b''.join(struct.pack('<I4f', i, *q) for i, q in m.params))
                 out.write(struct.pack('<I', len(m.strips)))

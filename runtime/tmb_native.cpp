@@ -1983,6 +1983,40 @@ namespace tmb::native
             static const float kScreenSpace[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
             // The texture from the game's own data (runtime/tmb_textures.cpp), never GS memory; none found: untextured.
             std::shared_ptr<const ps2x::native::TextureCache::Texture> texture;
+            // TMB_NATIVE_LOG_FRAMETEX=1: draws textured with the frame (texm's texture 0, displayBuffer): their texture
+            // coordinates and where they land, now and then.
+            if (static const bool s_logFrameTex = std::getenv("TMB_NATIVE_LOG_FRAMETEX") != nullptr; s_logFrameTex && g_rdram)
+            {
+                uint32_t displayBuffer;
+                std::memcpy(&displayBuffer, g_rdram + TMB_ADDR(0x00504014u), 4);
+                static uint32_t s_logged = 0;
+                if ((material.tex0 & 0x3fffu) == (displayBuffer & 0x3fffu) && s_logged++ % 200u == 0u)
+                {
+                    float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f, x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+                    for (const ps2x::native::Vertex &v : triangles)
+                    {
+                        u0 = std::min(u0, v.u), u1 = std::max(u1, v.u), v0 = std::min(v0, v.v), v1 = std::max(v1, v.v);
+                        x0 = std::min(x0, v.x), x1 = std::max(x1, v.x), y0 = std::min(y0, v.y), y1 = std::max(y1, v.y);
+                    }
+                    std::fprintf(stderr, "[tmb:native] frame texture %#llx (displayBuffer %#x) mode %d: uv %.3f-%.3f %.3f-%.3f, xyz %.1f-%.1f %.1f-%.1f, %zu vertices%s",
+                                 static_cast<unsigned long long>(material.tex0), displayBuffer, static_cast<int>(s.mode), u0, u1, v0, v1, x0, x1,
+                                 y0, y1, triangles.size(), "\n");
+                }
+            }
+            // The frame itself as texture (texm's texture 0: TEX0 at displayBuffer, CT24 / CT32), its texture coordinates
+            // the frame's pixels under the draw (HUD panels showing the picture through them): drawn sampling the target, as
+            // the heat haze is, not from the texture pack.
+            if (material.textured && g_rdram)
+            {
+                uint32_t displayBuffer;
+                std::memcpy(&displayBuffer, g_rdram + TMB_ADDR(0x00504014u), 4);
+                const uint32_t psm = (material.tex0 >> 20) & 0x3fu;
+                if ((material.tex0 & 0x3fffu) == (displayBuffer & 0x3fffu) && (psm == 0x00u || psm == 0x01u))
+                {
+                    material.textured = false;
+                    material.sampleTarget = true;
+                }
+            }
             if (material.textured)
             {
                 texture = tmb::textures::lookup(material.tex0, 0u);

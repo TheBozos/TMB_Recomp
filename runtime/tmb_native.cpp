@@ -2022,6 +2022,45 @@ namespace tmb::native
                 texture = tmb::textures::lookup(material.tex0, 0u);
                 material.textured = texture != nullptr;
             }
+            // TMB_NATIVE_LOG_REGION=x0,y0,x1,y1 (GS pixels): the draws landing there (projected), with their texture, once
+            // per TEX0 and mode.
+            if (static const char *s_region = std::getenv("TMB_NATIVE_LOG_REGION"); s_region)
+            {
+                static float r[4] = {0, 0, 0, 0};
+                static const bool s_parsed = std::sscanf(s_region, "%f,%f,%f,%f", &r[0], &r[1], &r[2], &r[3]) == 4;
+                const bool screenSpace = s.mode == Mode::Sprite || s.mode == Mode::Rain || s.mode == Mode::Ribbon || s.mode == Mode::Particles ||
+                                         s.mode == Mode::LensFlares || s.mode == Mode::Streaks || s.mode == Mode::Trails ||
+                                         s.mode == Mode::TexParticles || s.mode == Mode::HeatHaze || s.mode == Mode::Lightning || s.mode == Mode::Beams;
+                float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+                for (const ps2x::native::Vertex &v : triangles)
+                {
+                    float x = v.x, y = v.y;
+                    if (!screenSpace)
+                    {
+                        const float *m = s.matrix;
+                        const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
+                        if (!(w > 0.0f))
+                            continue;
+                        x = (m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12]) / w;
+                        y = (m[1] * v.x + m[5] * v.y + m[9] * v.z + m[13]) / w;
+                    }
+                    x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x), y1 = std::max(y1, y);
+                }
+                static std::unordered_map<uint64_t, bool> s_seen;
+                const uint64_t key = material.tex0 ^ (static_cast<uint64_t>(s.mode) << 58);
+                if (s_parsed && x1 >= r[0] && x0 <= r[2] && y1 >= r[1] && y0 <= r[3] && !s_seen[key])
+                {
+                    s_seen[key] = true;
+                    size_t clear = 0;
+                    if (texture)
+                        for (uint32_t c : texture->rgba)
+                            clear += (c >> 24) == 0u ? 1u : 0u;
+                    std::fprintf(stderr, "[tmb:native] region draw mode %d tex0 %#llx textured %d texture %s (%zu%% clear) at %.0f-%.0f %.0f-%.0f, %zu vertices%s",
+                                 static_cast<int>(s.mode), static_cast<unsigned long long>(material.tex0), material.textured ? 1 : 0,
+                                 texture ? "found" : "none", texture && !texture->rgba.empty() ? clear * 100u / texture->rgba.size() : 0u,
+                                 x0, x1, y0, y1, triangles.size(), "\n");
+                }
+            }
             ps2x::native::Renderer::instance().draw(material, s.mode == Mode::Sprite || s.mode == Mode::Rain || s.mode == Mode::Ribbon || s.mode == Mode::Particles ||
                                                                 s.mode == Mode::LensFlares || s.mode == Mode::Streaks || s.mode == Mode::Trails ||
                                                                 s.mode == Mode::TexParticles || s.mode == Mode::HeatHaze ||

@@ -83,7 +83,8 @@ namespace tmb::textures
                 const Record *record = nullptr;
                 uint32_t x = 0, y = 0;
             };
-            std::unordered_map<uint32_t, Placement> byBlock;
+            std::unordered_map<uint32_t, Placement> byBlock;             // palettes
+            std::unordered_map<uint64_t, const Record *> hAt;           // (block << 8 | psm) -> H texture
             std::unordered_map<uint32_t, uint32_t> idAt;          // TBP -> texture id (texInfo, refresh)
             uint32_t fontTbp = ~0u;
             std::unordered_map<uint64_t, std::shared_ptr<const Texture>> decoded;
@@ -277,6 +278,7 @@ namespace tmb::textures
                 s.rdram = rdram;
                 s.resOrdinal = 0;
                 s.byBlock.clear();
+                s.hAt.clear();
                 s.decoded.clear();
             }
             texmResInit__F10_vramAddrsP6QwData_0x1f9b08(rdram, ctx, runtime);
@@ -299,6 +301,7 @@ namespace tmb::textures
                 s.rdram = rdram;
                 s.resOrdinal = 0;
                 s.byBlock.clear();
+                s.hAt.clear();
                 s.decoded.clear();
             }
             texmLoadResTexture__FP6QwData_0x1f9bc8(rdram, ctx, runtime);
@@ -321,7 +324,12 @@ namespace tmb::textures
                     const uint32_t n = s.resOrdinal++;
                     const Record *r = nth(s, s.resFiles, n);
                     if (r && r->psm == psm && r->width == width && r->height == height)
-                        s.byBlock[block] = {r, getRegU32(ctx, 8) & 0x7ffu, getRegU32(ctx, 9) & 0x7ffu};
+                    {
+                        if (isH(psm)) // T8H / T4HL / T4HH share their blocks' words (top byte, its low / high nibble)
+                            s.hAt[(static_cast<uint64_t>(block) << 8) | psm] = r;
+                        else
+                            s.byBlock[block] = {r, getRegU32(ctx, 8) & 0x7ffu, getRegU32(ctx, 9) & 0x7ffu};
+                    }
                     else
                         mismatch("resident record", n, r, psm, width, height);
                 }
@@ -407,8 +415,8 @@ namespace tmb::textures
         }
         else if (isH(psm))
         {
-            const auto it = s.byBlock.find(tbp);
-            texels = it != s.byBlock.end() ? it->second.record : nullptr;
+            const auto it = s.hAt.find((static_cast<uint64_t>(tbp) << 8) | psm);
+            texels = it != s.hAt.end() ? it->second : nullptr;
         }
         else if (const auto at = s.idAt.find(tbp); at != s.idAt.end())
         {

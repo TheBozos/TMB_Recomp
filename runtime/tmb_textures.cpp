@@ -85,7 +85,7 @@ namespace tmb::textures
             };
             std::unordered_map<uint32_t, Placement> byBlock;             // palettes
             std::unordered_map<uint64_t, const Record *> hAt;           // (block << 8 | psm) -> H texture
-            std::unordered_map<uint32_t, uint32_t> idAt;          // TBP -> texture id (texInfo, refresh)
+            std::vector<uint16_t> idAt = std::vector<uint16_t>(16384u, 0xffffu); // TBP -> texture id (texInfo, refresh)
             uint32_t fontTbp = ~0u;
             std::unordered_map<uint64_t, std::shared_ptr<const Texture>> decoded;
             uint64_t decodes = 0;
@@ -387,13 +387,14 @@ namespace tmb::textures
             s.rdram = rdram;
         if (!s.rdram)
             return;
-        s.idAt.clear();
+        std::fill(s.idAt.begin(), s.idAt.end(), uint16_t{0xffff});
+        const uint8_t *table = s.rdram + kTexInfo;
         for (uint32_t id = 0; id < 1000u; ++id)
         {
             uint32_t info;
-            std::memcpy(&info, s.rdram + kTexInfo + id * 16u + 4u, 4);
+            std::memcpy(&info, table + id * 16u + 4u, 4);
             if ((info >> 31) != 0u)
-                s.idAt[info & 0x3fffu] = id;
+                s.idAt[info & 0x3fffu] = static_cast<uint16_t>(id);
         }
     }
 
@@ -418,9 +419,9 @@ namespace tmb::textures
             const auto it = s.hAt.find((static_cast<uint64_t>(tbp) << 8) | psm);
             texels = it != s.hAt.end() ? it->second : nullptr;
         }
-        else if (const auto at = s.idAt.find(tbp); at != s.idAt.end())
+        else if (s.idAt[tbp] != 0xffffu)
         {
-            const auto it = s.byId.find(at->second);
+            const auto it = s.byId.find(s.idAt[tbp]);
             texels = it != s.byId.end() && it->second->psm == psm ? it->second : nullptr;
         }
         // A palette entry at (px, py) of the CLUT area at CBP (CSM1, CT32 / CT16 blocks of 8 x 8, the second column of

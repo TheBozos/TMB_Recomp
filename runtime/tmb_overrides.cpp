@@ -50,6 +50,7 @@ namespace tmb::native
     void onFrameEnd();
     void onMenuFrameEnd();
     void patchFlareDepth(uint8_t *rdram, uint32_t image, uint32_t dest);
+    bool flareDepthNative();
     void setGuestMemory(const uint8_t *rdram);
     bool enabled();
 }
@@ -867,6 +868,23 @@ namespace
     void sceGsExecStoreImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t image = getRegU32(ctx, 4), dest = getRegU32(ctx, 5), ra = getRegU32(ctx, 31);
+        // The lens flares' Z samples (particleLensFlareTestZbuffer) from the native renderer's depth, not read back from
+        // the GS: each GS readback made the EE wait for the GS thread and the GS pull its targets' pages off the GPU
+        // (about 11 fps in a match). Samples start far (the flare shows), then take the native depth around the light,
+        // read after the frame before (Renderer::depthAt). TMB_NATIVE_FLARE_DEPTH=0: the GS readback, as before.
+        if (ra >= kLensFlareTestZbuffer && ra < kLensFlareTestZbufferEnd && tmb::native::flareDepthNative())
+        {
+            uint64_t trxreg = 0;
+            for (uint32_t q = 0; q < 7u; ++q)
+                if (rdram[(image + q * 16u + 8u) & 0x1FFFFFFu] == 0x52u)
+                    std::memcpy(&trxreg, rdram + ((image + q * 16u) & 0x1FFFFFFu), 8);
+            const uint32_t bytes = static_cast<uint32_t>((trxreg & 0xFFFu) * ((trxreg >> 32) & 0xFFFu) * 4u);
+            std::memset(rdram + (dest & 0x1FFFFFFu), 0, std::min<uint32_t>(bytes, 0x10000u));
+            tmb::native::patchFlareDepth(rdram, image, dest);
+            setReturnS32(ctx, 0);
+            ctx->pc = ra;
+            return;
+        }
         sceGsExecStoreImage_0x2055e8(rdram, ctx, runtime);
         // TMB_LOG_STOREIMAGE=1: each GS readback's caller (ra) and first words, every 100th per caller.
         static const bool s_log = std::getenv("TMB_LOG_STOREIMAGE") != nullptr;

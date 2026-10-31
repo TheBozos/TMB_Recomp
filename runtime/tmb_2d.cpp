@@ -56,6 +56,7 @@ namespace tmb::twod
 
         // The font's packet "sent" (fontDmaFontData) since the last publish: the frame's 2D is complete.
         std::atomic<bool> g_flushed{false};
+        std::atomic<const uint8_t *> g_rdram{nullptr}; // guest memory, from the font's hooks (the publish has none)
 
         bool on()
         {
@@ -162,6 +163,7 @@ namespace tmb::twod
                 return;
             }
             const uint32_t gp = getRegU32(ctx, 28);
+            g_rdram.store(rdram, std::memory_order_relaxed);
             ctx->pc = getRegU32(ctx, 31); // jr $ra
             if (word(rdram, gp + kGpFontMode) == 0u)
                 return;
@@ -568,7 +570,20 @@ namespace tmb::twod
             s_idle = 0;
         else if (++s_idle < 8u)
             return;
-        ps2x::native::Renderer::instance().publishOverlay();
+        // Mapped to the window by the game's own view 0 (its centre and size): a menu's 640 x 448, a match's 640 x 224.
+        const uint8_t *rdram = g_rdram.load(std::memory_order_relaxed);
+        if (!rdram)
+        {
+            ps2x::native::Renderer::instance().publishOverlay();
+            return;
+        }
+        const View v = viewOf(rdram, 0);
+        ps2x::native::Screen screen;
+        screen.originX = static_cast<float>(v.cx) - v.w * 0.5f;
+        screen.originY = static_cast<float>(v.cy) - v.h * 0.5f;
+        screen.width = static_cast<float>(v.w);
+        screen.height = static_cast<float>(v.h);
+        ps2x::native::Renderer::instance().publishOverlay(screen);
     }
 
     void install(PS2Runtime &runtime)

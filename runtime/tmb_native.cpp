@@ -2775,7 +2775,7 @@ namespace tmb::native
         void onVif1(const uint8_t *stream, size_t bytes)
         {
             State &s = state();
-            tmb::textures::refresh(g_rdram); // where the game's textures are in VRAM as it built this chain
+            tmb::textures::refresh(g_rdram); // where the game's textures are in VRAM as it built this chain (texInfo)
             if (const VIFRegisters *regs = ps2x::native::vif1Registers())
             {
                 if (!s.sawMask)
@@ -2847,20 +2847,23 @@ namespace tmb::native
     // TMB's lens flares (particleLensFlareTestZbuffer) read the GS Z buffer back around each light (a StoreImage of a
     // few pixels) to see whether something hides it; the native frame is not in the GS Z buffer, so in a match the
     // samples are replaced by the native frame's depth there (from the frame presented last).
-    void patchFlareDepth(uint8_t *rdram, uint32_t image, uint32_t dest)
+    // The flares' depth from the native renderer (probes read after each frame, Renderer::depthAt) rather than read back
+    // from the GS. TMB_NATIVE_FLARE_DEPTH=0: the GS readback.
+    bool flareDepthNative()
     {
-        // TMB_NATIVE_FLARE_DEPTH=0: the flares keep the GS's samples (no depth read back from the native frame).
-        // With the native GS renderer (PS2X_GS_RENDERER=native, the default) the native frame is drawn into the GS's
-        // own targets, Z buffer included, so the GS's samples are right as they are; the native renderer's depth copy
-        // (present()) is then never refreshed, and its stale values made headlight flares shine through buildings.
         static const bool s_on = []
         {
             const char *value = std::getenv("TMB_NATIVE_FLARE_DEPTH");
-            const char *gs = std::getenv("PS2X_GS_RENDERER");
-            if (value && *value)
-                return *value != '0';
-            return !(gs && std::string_view(gs) == "native");
+            return !(value && *value == '0');
         }();
+        return s_on && enabled() && inMatch();
+    }
+
+    void patchFlareDepth(uint8_t *rdram, uint32_t image, uint32_t dest)
+    {
+        // The samples from the native renderer's depth around the light (Renderer::depthAt: with stream draws, probes
+        // read from the GS's target after the frame, so one frame late), instead of the GS's readback.
+        const bool s_on = flareDepthNative();
         // TMB_NATIVE_LOG_FLARES=1: what the GS read back for the flares (format, size, the first samples), whether or not
         // they are then replaced, every 50th read.
         static const bool s_logGs = std::getenv("TMB_NATIVE_LOG_FLARES") != nullptr;
@@ -2919,7 +2922,7 @@ namespace tmb::native
             {
                 uint32_t z = 0;
                 if (!renderer.depthAt(view.originX + static_cast<float>(x0 + x) + 0.5f, view.originY + static_cast<float>(y0 + y) + 0.5f, z))
-                    return;
+                    continue; // not read yet: far
                 const uint32_t at = (dest + (y * width + x) * (sixteen ? 2u : 4u)) & 0x1ffffffu;
                 // TMB_NATIVE_LOG_FLARES=1: some samples, the GS's then the native one.
                 static const bool s_log = std::getenv("TMB_NATIVE_LOG_FLARES") != nullptr;

@@ -1,4 +1,4 @@
-// TMB's particles drawn natively from the game's particle systems (TMB_NATIVE_PARTICLES=1, with TMB_NATIVE=1): no VIF
+// TMB's particles drawn natively from the game's particle systems (on with TMB_NATIVE=1, TMB_NATIVE_PARTICLES=0 turns it off): no VIF
 // packet is read and no GS packet is sent for the types done here.
 //
 // particleDraw(view) walks the active systems (_ParticleType, 0x2e80 bytes each, list nodes of 12 bytes, next at +8),
@@ -138,7 +138,7 @@ namespace tmb::particles
             {
                 Settings s;
                 const char *on = std::getenv("TMB_NATIVE_PARTICLES");
-                s.on = kRegionSupported && on && *on == '1';
+                s.on = kRegionSupported && !(on && *on == '0'); // on with TMB_NATIVE=1 unless =0
                 // TMB_NATIVE_PARTICLE_TYPES=<type>[,<type>...]: the types drawn natively (default: all done here).
                 s.types = (1u << 1) | (1u << 2) | (1u << 3);
                 if (const char *types = std::getenv("TMB_NATIVE_PARTICLE_TYPES"); types && *types)

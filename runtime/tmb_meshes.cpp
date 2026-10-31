@@ -1,6 +1,6 @@
 // TMB's rigid 3D objects drawn natively from the mesh pack (tools/tmb_mesh_pack.py: the disc's NGP files converted
 // offline, generated_us/tmb_meshes.pack) and the EE state the game computes per object, at its per-object hook: no VIF
-// or GIF packet is read for them. TMB_NATIVE_MESHES=1 (with TMB_NATIVE=1) turns it on; default off.
+// or GIF packet is read for them. On with TMB_NATIVE=1; TMB_NATIVE_MESHES=0 turns it off.
 //
 // - Which NGP file an object is in: fileOnlyNgpFile / fileAddNgpFile (address, size) after fileReadf / zipInflateAll
 //   read a file there (its name, tmb::textures::nameAt); the pack's file of that name, its size and CRC checked
@@ -97,7 +97,7 @@ namespace tmb::meshes
             static const bool s_on = []
             {
                 const char *value = std::getenv("TMB_NATIVE_MESHES");
-                return value && *value == '1' && tmb::native::enabled();
+                return !(value && *value == '0') && tmb::native::enabled(); // on with TMB_NATIVE=1 unless =0
             }();
             return s_on;
         }

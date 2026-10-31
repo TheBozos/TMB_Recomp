@@ -468,6 +468,33 @@ namespace tmb::textures
         return shared;
     }
 
+    // The font's texture (the pack's FONT, at the VRAM block fontInit gave it), for the 2D rewritten natively.
+    std::shared_ptr<const Texture> font()
+    {
+        Store &s = store();
+        std::lock_guard<std::mutex> lock(s.mutex);
+        loadPack(s);
+        static std::shared_ptr<const Texture> s_font;
+        const auto it = s.pack.find("FONT");
+        if (s_font || it == s.pack.end() || it->second.size() < 2u)
+            return s_font;
+        const Record &texels = it->second[0], &palette = it->second[1];
+        Texture texture;
+        texture.width = texels.width;
+        texture.height = texels.height;
+        texture.key = 0xf0f7f0f7u;
+        texture.version = ++s.decodes;
+        texture.rgba.resize(static_cast<size_t>(texels.width) * texels.height);
+        for (size_t i = 0; i < texture.rgba.size(); ++i)
+        {
+            uint32_t px = 0, py = 0;
+            ps2x::native::csm1Position(texels.texels[i] & 0xfu, px, py);
+            texture.rgba[i] = px < palette.width && py < palette.height ? colour(palette, py * palette.width + px, 0u) : 0u;
+        }
+        s_font = std::make_shared<const Texture>(std::move(texture));
+        return s_font;
+    }
+
     void install(PS2Runtime &runtime)
     {
         runtime.registerFunction(kFileReadf, &fileReadfOverride);

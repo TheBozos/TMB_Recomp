@@ -38,6 +38,11 @@
 #include <unordered_map>
 #include <vector>
 
+namespace tmb::twod
+{
+    void publish();
+}
+
 namespace tmb::textures
 {
     void refresh(const uint8_t *rdram);
@@ -2759,6 +2764,7 @@ namespace tmb::native
                              s.matrix[12], s.matrix[13], s.matrix[14], s.matrix[15]);
                 g_stats = Stats{};
             }
+            tmb::twod::publish(); // the 2D the game's rewritten builders drew (runtime/tmb_2d.cpp), on this frame's screen
             renderer.endFrame();
             renderer.beginFrame(screen());
             state().keysThisFrame.clear();

@@ -45,11 +45,13 @@ namespace tmb::twod
 #if TMB_REGION_US
         constexpr uint32_t kFontRecords = 0x504540u, kFontRecordBytes = 0x20u;
         constexpr uint32_t kViews = 0x4dfcd0u;
+        constexpr int32_t kGpNumViews = -0x322c;
         constexpr int32_t kGpCurView = -0x3228, kGpFontMode = -0x3034, kGpFontUpload = -0x3630, kGpFontCount = -0x303c,
                           kGpFontAt = -0x3038, kGpFontTagAt = -0x3030, kGpFontStart = -0x302c;
 #else
         constexpr uint32_t kFontRecords = 0x50caf0u, kFontRecordBytes = 0x38u;
         constexpr uint32_t kViews = 0x4e2cd0u;
+        constexpr int32_t kGpNumViews = -0x2f5c;
         constexpr int32_t kGpCurView = -0x2f58, kGpFontMode = -0x2d28, kGpFontUpload = -0x3360, kGpFontCount = -0x2d30,
                           kGpFontAt = -0x2d2c, kGpFontTagAt = -0x2d24, kGpFontStart = -0x2d20;
 #endif
@@ -57,6 +59,7 @@ namespace tmb::twod
         // The font's packet "sent" (fontDmaFontData) since the last publish: the frame's 2D is complete.
         std::atomic<bool> g_flushed{false};
         std::atomic<const uint8_t *> g_rdram{nullptr}; // guest memory, from the font's hooks (the publish has none)
+        std::atomic<uint32_t> g_gp{0};                  // the game's gp, from the same hooks
 
         bool on()
         {
@@ -164,6 +167,7 @@ namespace tmb::twod
             }
             const uint32_t gp = getRegU32(ctx, 28);
             g_rdram.store(rdram, std::memory_order_relaxed);
+            g_gp.store(gp, std::memory_order_relaxed);
             ctx->pc = getRegU32(ctx, 31); // jr $ra
             if (word(rdram, gp + kGpFontMode) == 0u)
                 return;
@@ -542,13 +546,64 @@ namespace tmb::twod
             hudSprite(l + 3, b - 1, l + 4, t + 1, black, false);
         }
 
-        // The builders that may run last on a path: their packet never sent either.
+        // boundFAngle: an angle into [-pi, pi).
+        float boundAngle(float a)
+        {
+            constexpr float kPi = 3.14159265f, kTwoPi = 6.28318531f;
+            return a - kTwoPi * std::floor((a + kPi) / kTwoPi);
+        }
+        // mathfRotMatrixRPH(m, angles): the rotation of angles (x, y, z) (sines and cosines as the game combines them),
+        // rows of three.
+        void rotationRph(const float angles[3], float m[3][3])
+        {
+            const float sx = std::sin(angles[0]), cx = std::cos(angles[0]), sy = std::sin(angles[1]), cy = std::cos(angles[1]);
+            const float sz = std::sin(angles[2]), cz = std::cos(angles[2]);
+            m[0][0] = cy * cz + sy * sx * sz;
+            m[0][1] = -cy * sz + sy * sx * cz;
+            m[0][2] = -sy * cx;
+            m[1][0] = cx * sz;
+            m[1][1] = cx * cz;
+            m[1][2] = sx;
+            m[2][0] = sy * cz - cy * sx * sz;
+            m[2][1] = -sy * sz - cy * sx * cz;
+            m[2][2] = cy * cx;
+        }
+#if TMB_REGION_US
+        constexpr uint32_t kLaserOffsets = 0x4e6ef0u; // {0.006, -7.05, 4.08}, then {0.016, 9.204, 1.649}
+#else
+        constexpr uint32_t kLaserOffsets = 0x4edf40u;
+#endif
+
+        // BuildLaserStuff: the laser sight, a line from the gun (the car's frame by one offset, then its turret's angles
+        // by another) to its target (car + 0x2438), both projected as mathfTransform3dTo2d; alpha 0x1a red.
         void laserOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t hud = getRegU32(ctx, 4);
+            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
             BuildLaserStuff__3HudP6QwData_0x1424c8(rdram, ctx, runtime);
-            if (on())
-                setWord(rdram, hud + 4u, 1u);
+            if (!on())
+                return;
+            setWord(rdram, hud + 4u, 1u);
+            const uint32_t car = word(rdram, hud + 0x5e0u), target = word(rdram, car + 0x2438u);
+            if (!car || !target)
+                return;
+            const uint32_t body = word(rdram, car + 0x2018u);
+            float p[4] = {flt(rdram, car + 0x1d0u), flt(rdram, car + 0x1d4u), flt(rdram, car + 0x1d8u), 1.0f};
+            const float c1[3] = {flt(rdram, kLaserOffsets), flt(rdram, kLaserOffsets + 4u), flt(rdram, kLaserOffsets + 8u)};
+            const float c2[3] = {flt(rdram, kLaserOffsets + 16u), flt(rdram, kLaserOffsets + 20u), flt(rdram, kLaserOffsets + 24u)};
+            for (int k = 0; k < 3; ++k) // mathfMulTransVec(body + 0x20, c1): rows weighted by c1
+                p[k] += flt(rdram, body + 0x20u + 4u * k) * c1[0] + flt(rdram, body + 0x30u + 4u * k) * c1[1] + flt(rdram, body + 0x40u + 4u * k) * c1[2];
+            float angles[3], r[3][3];
+            for (int k = 0; k < 3; ++k)
+                angles[k] = boundAngle(flt(rdram, car + 0x23d0u + 4u * k) + flt(rdram, body + 0x60u + 4u * k));
+            rotationRph(angles, r);
+            for (int k = 0; k < 3; ++k)
+                p[k] += r[0][k] * c2[0] + r[1][k] * c2[1] + r[2][k] * c2[2];
+            const uint32_t view = word(rdram, gp + kGpCurView);
+            float a[4], b[4];
+            const float q[4] = {flt(rdram, target + 0x10u), flt(rdram, target + 0x14u), flt(rdram, target + 0x18u), 1.0f};
+            project(rdram, view, p, a);
+            project(rdram, view, q, b);
+            hudLine(std::trunc(a[0]), std::trunc(a[1]), std::trunc(b[0]), std::trunc(b[1]), rgba(0xff, 0x28, 0x28, 0x1a), true);
         }
         void separator4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
@@ -577,12 +632,29 @@ namespace tmb::twod
             ps2x::native::Renderer::instance().publishOverlay();
             return;
         }
-        const View v = viewOf(rdram, 0);
+        // The whole display: every view the game shows (viewGetNumViews), e.g. a rear view over the main one.
+        const uint32_t views = std::clamp<uint32_t>(word(rdram, g_gp.load(std::memory_order_relaxed) + kGpNumViews), 1u, 4u);
+        float left = 1e9f, top = 1e9f, right = -1e9f, bottom = -1e9f;
+        for (uint32_t i = 0; i < views; ++i)
+        {
+            const View v = viewOf(rdram, i);
+            if (v.w <= 0 || v.h <= 0)
+                continue;
+            left = std::min(left, v.cx - v.w * 0.5f);
+            top = std::min(top, v.cy - v.h * 0.5f);
+            right = std::max(right, v.cx + v.w * 0.5f);
+            bottom = std::max(bottom, v.cy + v.h * 0.5f);
+        }
+        if (!(right > left && bottom > top))
+        {
+            ps2x::native::Renderer::instance().publishOverlay();
+            return;
+        }
         ps2x::native::Screen screen;
-        screen.originX = static_cast<float>(v.cx) - v.w * 0.5f;
-        screen.originY = static_cast<float>(v.cy) - v.h * 0.5f;
-        screen.width = static_cast<float>(v.w);
-        screen.height = static_cast<float>(v.h);
+        screen.originX = left;
+        screen.originY = top;
+        screen.width = right - left;
+        screen.height = bottom - top;
         ps2x::native::Renderer::instance().publishOverlay(screen);
     }
 

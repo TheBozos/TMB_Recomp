@@ -26,6 +26,9 @@ python tools/tmb_region_map.py "$PAL_ELF" "$ELF" runtime > "$STAGING/tmb_region.
 # The textures as a native pack (tools/tmb_texture_pack.py): converted once from the disc's files, nothing read from
 # the game's texture records while it runs.
 python tools/tmb_texture_pack.py "$GAME_DIR" "$ELF" "$STAGING/tmb_textures.pack"
+# The 3D models as a native pack (tools/tmb_mesh_pack.py): the NGP files' prebuilt VIF packets converted once from the
+# disc, nothing read from them while the game runs.
+python tools/tmb_mesh_pack.py "$GAME_DIR" "$STAGING/tmb_meshes.pack"
 
 # -c compares content, not mtimes; --delete drops functions that are no longer generated.
 changed=$(rsync -rc --delete --out-format='%n' "$STAGING/" "$GENERATED/" | grep -vc '/$' || true)

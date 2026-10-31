@@ -74,6 +74,20 @@ path (`scripts/run_native.sh`, at twice the PS2's resolution) a match runs at 58
 | Higher internal resolution (`PS2X_GS_SCALE`, 2x by default) | ✅ |
 | Widescreen, frame rates above the PS2's | ⏳ |
 
+**Native port** (no PS2 hardware emulation left, not even a small part: the shared goal of the fork's ports). Native
+means the game's draws built straight from its own data (vertices, matrices, materials), with no GIF packet, no GS
+state machine and no copy of GS memory in between.
+
+| Layer | |
+|---|:---:|
+| IOP modules (989SND, LIBSD, PADMAN, SIO2MAN, MTAPMAN, MCMAN, MCSERV, USBD, LGDEV) recompiled to C++, none interpreted | ✅ |
+| Sound and IOP on the PC's clock (`PS2X_SPU2_WALLCLOCK=1`, `PS2X_IOP_WALLCLOCK=1`) | ✅ |
+| No paraLLEl-GS: OpenGL on the GPU (the GS native back end) | ✅ |
+| Frame loop on the PC's clock (`FramePacer`; `TMB_NATIVE_FRAMES=0`: the vblanks) | ✅ |
+| Every VU1 program translated to C++ (3D, skinning, effects), no VU interpreter and no sandbox | ✅ |
+| 3D drawn natively from the game's data (meshes, matrices, lights, materials), textures from an offline native pack | ✅ |
+| Menus, HUD, 2D and particles drawn natively, no GS front end and no copy of GS memory | ⏳ |
+
 ✅ works · 🔧 in progress · ⏳ not reached yet
 
 [docs/RECOMP_NOTES.md](docs/RECOMP_NOTES.md) records how the port is brought up, every fix and how it was found, and

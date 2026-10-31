@@ -38,6 +38,8 @@ namespace tmb::textures
 
 namespace tmb::twod
 {
+    void publish();
+
     namespace
     {
         constexpr uint32_t kFontBuildPrim = TMB_ADDR(0x001C5B28u);
@@ -720,6 +722,94 @@ namespace tmb::twod
             if (on())
                 setWord(rdram, hud + 4u, 1u);
         }
+
+        // ---- the loading bar (Shell::LoadLevelFiles): buildProgressBar and, on the loads without the shell, the vblank
+        // callback that sends it between the load's steps; drawn and published here, as no game frame ends meanwhile ----
+        constexpr uint32_t kBuildProgressBar = TMB_ADDR(0x001FD4B8u), kBarVSync = TMB_ADDR(0x00203448u);
+#if TMB_REGION_US
+        constexpr int32_t kGpBarMode = -0x3290, kGpBarFlip = -0x328c, kGpBarShown = -0x3280, kGpBarProgress = -0x327c;
+#else
+        constexpr int32_t kGpBarMode = -0x2fc0, kGpBarFlip = -0x2fbc, kGpBarShown = -0x2fb0, kGpBarProgress = -0x2fac;
+#endif
+        std::atomic<uint32_t> g_barGp{0}; // the game's gp at buildProgressBar (the vblank callback's own may differ)
+
+        // The bar over view 0 (initProgressBar's viewCreate: 0x11 on the first load after the shell, a frame view; 0x12
+        // on the others, a field view): the fill (0x4c, 0x1a, 0x0d), progress / 1024 of its width, over the top half of
+        // the view (first load) or, 6 and 2 smaller, the whole of it over a dark track (0x13, 6, 0x10); opaque.
+        // Published mapped by view 0's frame buffer (its own rectangle is the bar's).
+        void loadingBar(uint8_t *rdram, uint32_t gp)
+        {
+            const bool track = word(rdram, gp + kGpBarMode) != 0u;
+            const int32_t progress = static_cast<int32_t>(std::min<uint32_t>(word(rdram, gp + kGpBarProgress), 0x400u));
+            View v = viewOf(rdram, 0);
+            if (track)
+                v.w -= 6, v.h -= 2;
+            const int32_t left = v.cx - (v.w >> 1), top = v.cy - (v.h >> 1);
+            if (track)
+                hudSprite(static_cast<float>(left), static_cast<float>(top), static_cast<float>(left + v.w), static_cast<float>(top + v.h),
+                          rgba(0x13, 0x06, 0x10, 0x80), false);
+            const int32_t bottom = track ? top + v.h : top + (v.h >> 1);
+            hudSprite(static_cast<float>(left), static_cast<float>(top), static_cast<float>(left + ((v.w * progress) >> 10)),
+                      static_cast<float>(bottom), rgba(0x4c, 0x1a, 0x0d, 0x80), false);
+            const uint32_t def = word(rdram, kViews + 4u);
+            const float width = half(rdram, def + 8u), height = half(rdram, def + 0xau);
+            ps2x::native::Screen screen;
+            screen.width = width > 0.0f ? width : 640.0f;
+            screen.height = height > 0.0f ? height : 448.0f;
+            screen.originX = 2048.0f - screen.width * 0.5f;
+            screen.originY = 2048.0f - screen.height * 0.5f;
+            ps2x::native::Renderer::instance().publishOverlay(screen);
+        }
+
+        // buildProgressBar(progress): the bar at min(progress, 1024) / 1024, drawn instead of sent.
+        void buildProgressBarOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (!on())
+            {
+                buildProgressBar__FUi_0x1fd4b8(rdram, ctx, runtime);
+                return;
+            }
+            const uint32_t gp = getRegU32(ctx, 28);
+            g_barGp.store(gp, std::memory_order_relaxed);
+            g_rdram.store(rdram, std::memory_order_relaxed);
+            setWord(rdram, gp + kGpBarProgress, std::min<uint32_t>(getRegU32(ctx, 4), 0x400u));
+            loadingBar(rdram, gp);
+            ctx->pc = getRegU32(ctx, 31); // jr $ra
+        }
+
+        // finishShellLoop (a memory card save started from a match's overlay): the current view darkened by a quarter
+        // (black, alpha 0x21, the font's (Cs - Cd) As + Cd), over the overlay's text; drawn instead of sent.
+        constexpr uint32_t kFinishShellLoop = TMB_ADDR(0x0019FC70u);
+        void finishShellLoopOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (!on())
+            {
+                finishShellLoop__Fv_0x19fc70(rdram, ctx, runtime);
+                return;
+            }
+            const View v = viewOf(rdram, word(rdram, getRegU32(ctx, 28) + kGpCurView));
+            const float left = static_cast<float>(v.cx - (v.w >> 1)), top = static_cast<float>(v.cy - (v.h >> 1));
+            hudSprite(left, top, left + static_cast<float>(v.w), top + static_cast<float>(v.h), rgba(0, 0, 0, 0x21), true);
+            g_flushed.store(true, std::memory_order_relaxed);
+            publish();
+            ctx->pc = getRegU32(ctx, 31); // jr $ra
+        }
+
+        // updateBarVSyncCallback: each vblank the bar creeps one 1024th (until the next step sets the real progress)
+        // and the field parity flips; the buffer swap and the packet's DMA are the GS's, not done.
+        void barVSyncOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t gp = g_barGp.load(std::memory_order_relaxed);
+            if (!on() || gp == 0u)
+            {
+                updateBarVSyncCallback__Fi_0x203448(rdram, ctx, runtime);
+                return;
+            }
+            setWord(rdram, gp + kGpBarFlip, word(rdram, gp + kGpBarFlip) ^ 1u);
+            setWord(rdram, gp + kGpBarProgress, std::min<uint32_t>(word(rdram, gp + kGpBarProgress) + 1u, 0x400u));
+            loadingBar(rdram, gp);
+            ctx->pc = getRegU32(ctx, 31); // jr $ra
+        }
     }
 
     // At the end of a game frame (the adapter's publish): the 2D drawn since the last one goes on screen once the game
@@ -728,6 +818,13 @@ namespace tmb::twod
     {
         if (!on())
             return;
+        // A level loading: its bar (no other 2D then).
+        if (const uint32_t barGp = g_barGp.load(std::memory_order_relaxed); barGp != 0u)
+            if (uint8_t *rdram = const_cast<uint8_t *>(g_rdram.load(std::memory_order_relaxed)); rdram && word(rdram, barGp + kGpBarShown) == 1u)
+            {
+                loadingBar(rdram, barGp);
+                return;
+            }
         static uint32_t s_idle = 0;
         if (g_flushed.exchange(false, std::memory_order_relaxed))
             s_idle = 0;
@@ -780,6 +877,9 @@ namespace tmb::twod
         runtime.registerFunction(kEnergy4p, &energy4pOverride);
         runtime.registerFunction(kHealth4p, &health4pOverride);
         runtime.registerFunction(kChargeUp, &chargeUpOverride);
+        runtime.registerFunction(kBuildProgressBar, &buildProgressBarOverride);
+        runtime.registerFunction(kBarVSync, &barVSyncOverride);
+        runtime.registerFunction(kFinishShellLoop, &finishShellLoopOverride);
         runtime.registerFunction(kOverheat, &overheatOverride);
     }
 }

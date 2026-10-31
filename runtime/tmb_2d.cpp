@@ -826,6 +826,15 @@ namespace tmb::twod
         // ---- movies: the pictures the MPEG decoder hands to sceMpegGetPicture, shown under the 2D by loadImage (each
         // vblank while a movie plays) instead of the GS image transfers the game built of them ----
         constexpr uint32_t kLoadImage = TMB_ADDR(0x001E0A48u);
+        // handler_endimage's work (the GIF DMA end interrupt the transfer raised): with the picture still held (the flag at
+        // gp + kImageHeld), voBufDecCount on the movie's picture buffer frees it for the decoder.
+#if TMB_REGION_US
+        constexpr uint32_t kVoBufDecCount = 0x001FEF58u, kVoBuf = 0x004C4A18u;
+        constexpr int32_t kImageHeld = -0x36d8;
+#else
+        constexpr uint32_t kVoBufDecCount = 0x00200168u, kVoBuf = 0x004C7A18u;
+        constexpr int32_t kImageHeld = -0x3408;
+#endif
         std::mutex g_movieMutex;
         std::shared_ptr<const ps2x::native::TextureCache::Texture> g_moviePicture; // under g_movieMutex
 
@@ -871,6 +880,14 @@ namespace tmb::twod
             const float width = static_cast<float>(picture->width), height = static_cast<float>(picture->height);
             ps2x::native::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
                                                            screen.originY + (kFrameHeight - height) * 0.5f, width, height);
+            const uint32_t held = getRegU32(ctx, 28) + static_cast<uint32_t>(kImageHeld);
+            if (word(rdram, held) != 0u)
+            {
+                setWord(rdram, held, 0u);
+                SET_GPR_U32(ctx, 4, kVoBuf);
+                ctx->pc = kVoBufDecCount; // tail call: returns to loadImage's caller
+                return;
+            }
             ctx->pc = getRegU32(ctx, 31); // jr $ra
         }
 

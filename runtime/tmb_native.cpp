@@ -2829,6 +2829,21 @@ namespace tmb::native
         return on;
     }
 
+    // For the particles drawn natively (runtime/tmb_particles.cpp): whether the stream's effects programs are drawn
+    // natively now (a match or a native menu, VU1 skipping them, draws in the GS stream), and the group the next
+    // natively drawn program gets (particleDraw's chain head ends with the effects constants' MSCALF, which is that
+    // program: draws given its group are drawn where the particle chain sits in the GS stream).
+    bool effectsInStream()
+    {
+        const char *keep = std::getenv("TMB_NATIVE_VU1");
+        return enabled() && !(keep && *keep == '1') && (inMatch() || menusNative());
+    }
+
+    uint64_t nextStreamGroup()
+    {
+        return state().group + 1u;
+    }
+
     namespace
     {
         void onVif1(const uint8_t *stream, size_t bytes)

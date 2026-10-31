@@ -398,18 +398,45 @@ namespace tmb::textures
         }
     }
 
+    namespace
+    {
+        std::shared_ptr<const Texture> lookupLocked(Store &s, uint64_t tex0, uint64_t texa, int32_t forcedId);
+    }
+
     // The texture a draw's TEX0 shows (null when the game set up none there: reported once).
     std::shared_ptr<const Texture> lookup(uint64_t tex0, uint64_t texa)
     {
         Store &s = store();
         std::lock_guard<std::mutex> lock(s.mutex);
+        return lookupLocked(s, tex0, texa, -1);
+    }
+
+    // The texture of a texture id (texmSetupTexture's), with TEX0's format, size and palette (CBP, CSA): for draws
+    // that know which texture they show without it being in VRAM (the particles drawn natively: the game uploads a
+    // particle texture only when it sends that system's packet).
+    std::shared_ptr<const Texture> lookupId(uint32_t id, uint64_t tex0, uint64_t texa)
+    {
+        Store &s = store();
+        std::lock_guard<std::mutex> lock(s.mutex);
+        return lookupLocked(s, tex0, texa, static_cast<int32_t>(id & 0xffffu));
+    }
+
+    namespace
+    {
+    std::shared_ptr<const Texture> lookupLocked(Store &s, uint64_t tex0, uint64_t texa, int32_t forcedId)
+    {
         const uint32_t tbp = tex0 & 0x3fffu, psm = (tex0 >> 20) & 0x3fu;
         const uint32_t cbp = (tex0 >> 37) & 0x3fffu, csa = (tex0 >> 56) & 0x1fu;
         const uint32_t width = 1u << std::min<uint32_t>(10u, (tex0 >> 26) & 0xfu);
         const uint32_t height = 1u << std::min<uint32_t>(10u, (tex0 >> 30) & 0xfu);
 
         const Record *texels = nullptr, *palette = nullptr;
-        if (tbp == s.fontTbp && s.pack.count("FONT"))
+        if (forcedId >= 0)
+        {
+            const auto it = s.byId.find(static_cast<uint32_t>(forcedId));
+            texels = it != s.byId.end() && it->second->psm == psm ? it->second : nullptr;
+        }
+        else if (tbp == s.fontTbp && s.pack.count("FONT"))
         {
             texels = &s.pack["FONT"][0];
             palette = &s.pack["FONT"][1];
@@ -526,6 +553,7 @@ namespace tmb::textures
         auto shared = std::make_shared<const Texture>(std::move(texture));
         s.decoded[key] = shared;
         return shared;
+    }
     }
 
     // The font's texture (the pack's FONT, at the VRAM block fontInit gave it), for the 2D rewritten natively.

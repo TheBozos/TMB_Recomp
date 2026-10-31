@@ -140,7 +140,7 @@ namespace tmb::twod
             static uint32_t s_logged = 0;
             static std::unordered_map<uint64_t, bool> s_seen; // each glyph at each place once
             const uint64_t place = (static_cast<uint64_t>(static_cast<uint32_t>(c)) << 40) ^ (static_cast<uint64_t>(x0) << 20) ^ static_cast<uint64_t>(y0);
-            if (s_log && s_logged < 400u && !s_seen[place] && (s_seen[place] = true) && ++s_logged)
+            if (s_log && s_logged < 6000u && !s_seen[place] && (s_seen[place] = true) && ++s_logged)
                 std::fprintf(stderr, "[tmb:2d] glyph %c: (%.1f %.1f)-(%.1f %.1f) uv (%.3f %.3f)-(%.3f %.3f) rgba %08x view %u centre %d %d size %dx%d\n",
                              static_cast<char>(c), xs[0], ys[0], xs[1], ys[1], us[0], vs[0], us[1], vs[1], rgba, view, centreX, centreY, viewW, viewH);
             ps2x::native::Renderer::instance().drawOverlay(material, triangles, 6u, tmb::textures::font());
@@ -188,6 +188,7 @@ namespace tmb::twod
 
         constexpr uint32_t kRadar = TMB_ADDR(0x0013EA28u), kHealthBar = TMB_ADDR(0x001419D8u), kSeparator = TMB_ADDR(0x0013E028u),
                            kRearViewEdge = TMB_ADDR(0x0013E2C8u), kLaser = TMB_ADDR(0x001424C8u), k4pSeparator = TMB_ADDR(0x0013E720u);
+        constexpr uint32_t kTurbo4p = TMB_ADDR(0x00141220u), kEnergy4p = TMB_ADDR(0x00141790u), kHealth4p = TMB_ADDR(0x00141488u);
 #if TMB_REGION_US
         constexpr int32_t kGpGame = -0x4154, kGpSettings = -0x4148, kGpRearLarge = -0x3224;
         constexpr int32_t kGpThreat[4] = {-0x38bc, -0x38f8, -0x37a4, -0x3760};
@@ -605,6 +606,62 @@ namespace tmb::twod
             project(rdram, view, q, b);
             hudLine(std::trunc(a[0]), std::trunc(a[1]), std::trunc(b[0]), std::trunc(b[1]), rgba(0xff, 0x28, 0x28, 0x1a), true);
         }
+        // build4PTurboBar / build4PEnergyBar(hud, packet, x, y, w, h): a horizontal bar of the current view's bottom-left
+        // corner (y up from its bottom), filling from its right end; opaque.
+        void horizontalBar4p(uint8_t *rdram, uint32_t gp, int32_t x, int32_t y, int32_t w, int32_t h, int32_t fill, uint32_t colour)
+        {
+            const View v = viewOf(rdram, word(rdram, gp + kGpCurView));
+            const float x0 = static_cast<float>(v.cx - v.w / 2 - 2 + x + w - fill), y0 = static_cast<float>(v.cy + v.h / 2 + 1 - y);
+            hudSprite(x0, y0, x0 + fill, y0 - 2 + h, colour, false);
+        }
+        void turbo4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
+            const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
+            build4PTurboBar__3HudP6QwDataiiii_0x141220(rdram, ctx, runtime);
+            if (!on())
+                return;
+            setWord(rdram, hud + 4u, 1u);
+            const float turbo = flt(rdram, word(rdram, hud + 0x5e0u) + 0x410u);
+            const int32_t fill = turbo <= 0.0f ? 0 : std::min(static_cast<int32_t>(static_cast<float>(w - 4) * turbo / 100.0f + 1.0f), w - 4);
+            horizontalBar4p(rdram, gp, x, y, w, h, fill, rgba(0x14, 0x58, 0x80, 0x20));
+        }
+        void energy4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
+            const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
+            build4PEnergyBar__3HudP6QwDataiiii_0x141790(rdram, ctx, runtime);
+            if (!on())
+                return;
+            setWord(rdram, hud + 4u, 1u);
+            const uint32_t car = word(rdram, hud + 0x5e0u);
+            const int32_t current = static_cast<int32_t>(word(rdram, car + 0x2214u)), most = static_cast<int32_t>(word(rdram, car + 0x2218u));
+            const int32_t fill = current <= 0 || most == 0 ? 0 : std::min((w - 4) * current / most + 1, w - 4);
+            horizontalBar4p(rdram, gp, x, y, w, h, fill, rgba(0x89, 0x44, 0x20, 0x20));
+        }
+        // build4PHealthBar(hud, packet, x, y, w, h): a vertical bar rising from the current view's bottom edge (y up), red /
+        // yellow / green by the health left; blended.
+        void health4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
+            const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
+            build4PHealthBar__3HudP6QwDataiiii_0x141488(rdram, ctx, runtime);
+            if (!on())
+                return;
+            setWord(rdram, hud + 4u, 1u);
+            const uint32_t car = word(rdram, hud + 0x5e0u);
+            const float hp = flt(rdram, car + 0x3f4u), most = flt(rdram, car + 0x3f0u);
+            const int32_t fill = hp <= 0.0f || most == 0.0f ? 0 : std::min(static_cast<int32_t>(static_cast<float>(h - 4) * hp / most + 1.0f), h - 4);
+            const uint32_t colour = word(rdram, hud + 0x5ccu) ? rgba(0, 0, 0, 0x3f)
+                                                              : rgba(word(rdram, hud + 0x5c0u), word(rdram, hud + 0x5c4u), word(rdram, hud + 0x5c8u), 0x40);
+            const View v = viewOf(rdram, word(rdram, gp + kGpCurView));
+            const float x0 = static_cast<float>(v.cx - v.w / 2 + x), y0 = static_cast<float>(v.cy + v.h / 2 - (y + fill));
+            hudSprite(x0, y0, x0 + w, y0 + fill, colour, true);
+        }
+
         void separator4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t hud = getRegU32(ctx, 4);
@@ -668,5 +725,8 @@ namespace tmb::twod
         runtime.registerFunction(kRearViewEdge, &rearViewEdgeOverride);
         runtime.registerFunction(kLaser, &laserOverride);
         runtime.registerFunction(k4pSeparator, &separator4pOverride);
+        runtime.registerFunction(kTurbo4p, &turbo4pOverride);
+        runtime.registerFunction(kEnergy4p, &energy4pOverride);
+        runtime.registerFunction(kHealth4p, &health4pOverride);
     }
 }

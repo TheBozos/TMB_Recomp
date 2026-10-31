@@ -68,8 +68,8 @@ path (`scripts/run_native.sh`, at twice the PS2's resolution) a match runs at 58
 | Every IOP module recompiled (sound driver, pad, memory card...), sound mixed on the PC's clock (not tied to the frame rate) | ✅ |
 | The match's 3D drawn from the game's own data (translated VU1 programs) | ✅ |
 | Every VU1 program translated (menus, 3D, beams, chrome and water, particles, flares, trails, heat haze, lightning): no VU1 sandbox | ✅ |
-| No GS emulation (still: the GS front end interprets the GS packets of the menus, HUD, 2D and particles and keeps a copy of GS memory, drawn with OpenGL) | ⏳ |
-| Multi-player split screen (two controllers; `PS2X_PAD2_SCRIPT` for a scripted player 2) | ✅ |
+| No GS emulation (still: the GS front end takes the native 3D into its render targets and presents the frame; the effects' register state comes from their GIF packets) | ⏳ |
+| Multi-player split screen, 2 to 4 players (a multitap on port 0: players 1-4 on their own controllers; `PS2X_PAD2_SCRIPT` to `PS2X_PAD4_SCRIPT` for scripted players) | ✅ |
 | Every arena and story level to the endings | 🔧 |
 | Higher internal resolution (`PS2X_GS_SCALE`, 2x by default) | ✅ |
 | Widescreen, frame rates above the PS2's | ⏳ |
@@ -85,8 +85,11 @@ state machine and no copy of GS memory in between.
 | No paraLLEl-GS: OpenGL on the GPU (the GS native back end) | ✅ |
 | Frame loop on the PC's clock (`FramePacer`; `TMB_NATIVE_FRAMES=0`: the vblanks) | ✅ |
 | Every VU1 program translated to C++ (3D, skinning, effects), no VU interpreter and no sandbox | ✅ |
-| 3D drawn natively from the game's data (meshes, matrices, lights, materials), textures from an offline native pack | ✅ |
-| Menus, HUD, 2D and particles drawn natively, no GS front end and no copy of GS memory | ⏳ |
+| Textures from an offline native pack, looked up by the game's own texture ids | ✅ |
+| Font, HUD, loading bar, overlays' darkening and movies drawn natively from the game's variables (no GIF packet built or read) | ✅ |
+| 3D meshes from an offline native pack (`tools/tmb_mesh_pack.py`) drawn at the game's per-object hook from its own state; today still read from the VIF stream the game sends | 🔧 |
+| Effects (particles, flares, rain...) drawn from the game's particle lists; today read from the VIF stream | ⏳ |
+| No GS front end, no copy of GS memory, no VIF stream read: the native renderer draws and presents the whole frame | ⏳ |
 
 ✅ works · 🔧 in progress · ⏳ not reached yet
 
@@ -109,11 +112,12 @@ program piece by piece. Each piece below replaces a part of the PS2 that was sim
 | Game code (EE, MIPS R5900) | the EE CPU | 3,572 functions recompiled to C++ (`generated/`), with the ELF's own symbols |
 | IOP modules (989SND, LIBSD, PADMAN, SIO2MAN, MTAPMAN, MCMAN, MCSERV, USBD, LGDEV) | R3000A code on the IOP | all recompiled to C++ by the fork's `tools/iop_recomp.py` (`scripts/iop_recomp.sh`); none left interpreted |
 | Sound mixing (SPU2) | the SPU2 chip, at the IOP's pace | mixed when the PC's audio device asks (`PS2X_SPU2_WALLCLOCK=1`), with the IOP on the PC's clock (`PS2X_IOP_WALLCLOCK=1`): the sound no longer slows down with the frame rate |
-| 3D (hier renderer: terrain, buildings, cars, characters) | VU1 microprograms, then the GS | read from the game's own data as it is sent (meshes, matrices, lights, materials) and drawn by the native renderer (`runtime/tmb_native.cpp`, `TMB_NATIVE=1`); VU1 does not run them |
+| 3D (hier renderer: terrain, buildings, cars, characters) | VU1 microprograms, then the GS | today: read from the VIF stream the game sends (a model of VU1 memory) and drawn by the native renderer with the translated programs (`runtime/tmb_native.cpp`, `TMB_NATIVE=1`); VU1 does not run them. Being replaced: the NGP files' prebuilt packets converted offline into a native mesh pack (`tools/tmb_mesh_pack.py`), drawn at the game's per-object hook (`pktAddVu1Obj`) from its own state |
 | Skinned characters, sprites, rain, fog, blending | VU1, GS | translated into the native renderer's terms (bones, fog factor, blend modes) |
 | Effects VU1 programs (beams, chrome and water, particles, flares, streaks, trails, heat haze, lightning) | VU1 | one native function per program, each derived from VU1 recordings and checked against VU1's own output (`TMB_NATIVE_CHECK`); a program not translated is not run at all (reported once) |
 | Textures | GS memory | converted once, offline, from the disc's `.TEX` / `.RTX` files into a native pack in the build tree (`tools/tmb_texture_pack.py`, run by `scripts/recomp.sh`); at runtime looked up by the game's own keys, caught in its texture code (each texture's id as `texmSetupTexture` sets it up, each palette's VRAM block as `texmLoadResTexture` loads it): nothing read from texture records, GS packets or GS memory while the game runs (`runtime/tmb_textures.cpp`) |
-| Menus, HUD, 2D, movies, everything else sent to the GS | GS, IPU | **still emulated in part**: the fork's GS front end interprets the GS packets (its registers and memory layout) and draws them with OpenGL (the GS native back end, no paraLLEl-GS), the native 3D drawn into the same render targets in stream order; movies decoded with FFmpeg |
+| Font, HUD, loading bar, overlays, movies | GS, IPU | drawn natively from the game's variables: each packet builder rewritten in C++ (`runtime/tmb_2d.cpp`), nothing built or read as a GS packet; movies decoded with FFmpeg and shown as the native renderer's backdrop |
+| Everything else sent to the GS | GS | **still emulated in part**: the fork's GS front end takes the remaining packets (the effects' register state) and the native 3D into its render targets and presents the frame (OpenGL, no paraLLEl-GS) |
 
 ```
 disc files (game_us/, game/) ──► ps2_analyzer ──► recomp/tmb_scus97101.toml, tmb_sces50360.toml (+ recomp/tmb_manual.toml)

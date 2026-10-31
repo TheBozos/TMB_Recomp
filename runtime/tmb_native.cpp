@@ -2822,9 +2822,9 @@ namespace tmb::native
                                 {
                                     submitDrawn(s, drawn);
                                     s.suppress = true;
+                                    s.hookObject = drawn.checkStrips.empty() ? 0u : drawn.object; // TMB_NATIVE_MESHES_CHECK only
                                     s.hookStrips = std::move(drawn.checkStrips);
                                     s.hookStrip = 0;
-                                    s.hookObject = drawn.object;
                                 }
                             }
                             if (s.check && pc != 0x1d40u)
@@ -2956,6 +2956,21 @@ namespace tmb::native
             return value && *value == '1';
         }();
         return on;
+    }
+
+    // For the particles drawn natively (runtime/tmb_particles.cpp): whether the stream's effects programs are drawn
+    // natively now (a match or a native menu, VU1 skipping them, draws in the GS stream), and the group the next
+    // natively drawn program gets (particleDraw's chain head ends with the effects constants' MSCALF, which is that
+    // program: draws given its group are drawn where the particle chain sits in the GS stream).
+    bool effectsInStream()
+    {
+        const char *keep = std::getenv("TMB_NATIVE_VU1");
+        return enabled() && !(keep && *keep == '1') && (inMatch() || menusNative());
+    }
+
+    uint64_t nextStreamGroup()
+    {
+        return state().group + 1u;
     }
 
     namespace

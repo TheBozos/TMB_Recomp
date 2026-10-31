@@ -398,134 +398,174 @@ namespace tmb::textures
         }
     }
 
+    namespace
+    {
+        // The texture TEX0 shows, its texels found by the TBP (texInfo) or, with id set, by that texture id (the
+        // number a hierobject keeps at +0x50, texmSetupTexture's id); the palette by CBP either way.
+        std::shared_ptr<const Texture> lookupLocked(Store &s, uint64_t tex0, uint64_t texa, uint32_t id)
+        {
+            const uint32_t tbp = tex0 & 0x3fffu, psm = (tex0 >> 20) & 0x3fu;
+            const uint32_t cbp = (tex0 >> 37) & 0x3fffu, csa = (tex0 >> 56) & 0x1fu;
+            const uint32_t width = 1u << std::min<uint32_t>(10u, (tex0 >> 26) & 0xfu);
+            const uint32_t height = 1u << std::min<uint32_t>(10u, (tex0 >> 30) & 0xfu);
+
+            const Record *texels = nullptr, *palette = nullptr;
+            if (tbp == s.fontTbp && s.pack.count("FONT"))
+            {
+                texels = &s.pack["FONT"][0];
+                palette = &s.pack["FONT"][1];
+            }
+            else if (isH(psm))
+            {
+                const auto it = s.hAt.find((static_cast<uint64_t>(tbp) << 8) | psm);
+                texels = it != s.hAt.end() ? it->second : nullptr;
+            }
+            else if (id != ~0u)
+            {
+                const auto it = s.byId.find(id);
+                texels = it != s.byId.end() && it->second->psm == psm ? it->second : nullptr;
+            }
+            else if (s.idAt[tbp] != 0xffffu)
+            {
+                const auto it = s.byId.find(s.idAt[tbp]);
+                texels = it != s.byId.end() && it->second->psm == psm ? it->second : nullptr;
+            }
+            // A palette entry at (px, py) of the CLUT area at CBP (CSM1, CT32 / CT16 blocks of 8 x 8, the second column of
+            // blocks at block + 1, the second row at + 2): from the record loaded over it.
+            const auto paletteEntry = [&](uint32_t px, uint32_t py, uint32_t &out)
+            {
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    const uint32_t block = pass == 0 ? cbp : cbp + (px >> 3) + ((py >> 3) << 1);
+                    const uint32_t lx = pass == 0 ? px : (px & 7u), ly = pass == 0 ? py : (py & 7u);
+                    const auto it = s.byBlock.find(block);
+                    if (it == s.byBlock.end() || !it->second.record)
+                        continue;
+                    const Store::Placement &p = it->second;
+                    if (lx >= p.x && ly >= p.y && lx - p.x < p.record->width && ly - p.y < p.record->height)
+                    {
+                        out = colour(*p.record, (ly - p.y) * p.record->width + (lx - p.x), texa);
+                        return true;
+                    }
+                }
+                return false;
+            };
+            bool paletteFound = palette != nullptr;
+            if (texels && indexed(psm) && !palette)
+            {
+                uint32_t ignored;
+                for (uint32_t i = 0; i < 16u && !paletteFound; ++i)
+                {
+                    uint32_t px = 0, py = 0;
+                    ps2x::native::csm1Position(psm == T8 || psm == T8H ? i : (csa * 16u + i) & 0xffu, px, py);
+                    paletteFound = paletteEntry(px, py, ignored);
+                }
+                if (const auto it = s.byBlock.find(cbp); it != s.byBlock.end())
+                    palette = it->second.record;
+            }
+            if (!texels || (indexed(psm) && !paletteFound))
+            {
+                static std::unordered_map<uint64_t, bool> s_reported;
+                const uint64_t reportKey = tex0 & ~(uint64_t{7} << 61);
+                if (!s_reported[reportKey])
+                {
+                    s_reported[reportKey] = true;
+                    std::fprintf(stderr, "[tmb:tex] TEX0 %#llx (tbp %u psm %#x %ux%u cbp %u): no %s set up there\n",
+                                 static_cast<unsigned long long>(tex0), tbp, psm, width, height, cbp, texels ? "palette" : "texture");
+                }
+                return nullptr;
+            }
+
+            const uint64_t key = (reinterpret_cast<uintptr_t>(texels) * 0x9e3779b97f4a7c15ull) ^
+                                 (reinterpret_cast<uintptr_t>(palette) * 0xc2b2ae3d27d4eb4full) ^
+                                 (tex0 & ~((uint64_t{3} << 35) | (uint64_t{7} << 61))) ^ (texa * 0x165667b19e3779f9ull);
+            if (const auto found = s.decoded.find(key); found != s.decoded.end())
+                return found->second;
+
+            uint32_t colours[256] = {};
+            if (indexed(psm))
+            {
+                const bool eight = psm == T8 || psm == T8H;
+                for (uint32_t i = 0; i < (eight ? 256u : 16u); ++i)
+                {
+                    uint32_t px = 0, py = 0;
+                    ps2x::native::csm1Position(eight ? i : (csa * 16u + i) & 0xffu, px, py);
+                    if (palette == &s.pack["FONT"][1] && !s.pack["FONT"].empty())
+                    {
+                        if (px < palette->width && py < palette->height)
+                            colours[i] = colour(*palette, py * palette->width + px, texa);
+                    }
+                    else
+                        paletteEntry(px, py, colours[i]);
+                }
+            }
+
+            Texture texture;
+            texture.width = width;
+            texture.height = height;
+            texture.key = key;
+            texture.version = ++s.decodes;
+            texture.rgba.resize(static_cast<size_t>(width) * height);
+            for (uint32_t y = 0; y < height; ++y)
+                for (uint32_t x = 0; x < width; ++x)
+                {
+                    uint32_t c = 0;
+                    if (x < texels->width && y < texels->height)
+                    {
+                        const uint32_t at = y * texels->width + x;
+                        c = indexed(psm) ? colours[texels->texels[at]] : colour(*texels, at, texa);
+                    }
+                    texture.rgba[static_cast<size_t>(y) * width + x] = c;
+                }
+            // A texture with no texel showing: reported once (a palette or texels taken from the wrong record).
+            if (std::all_of(texture.rgba.begin(), texture.rgba.end(), [](uint32_t c) { return (c >> 24) == 0u; }))
+            {
+                static std::unordered_map<uint64_t, bool> s_reported;
+                if (!s_reported[tex0])
+                {
+                    s_reported[tex0] = true;
+                    std::fprintf(stderr, "[tmb:tex] TEX0 %#llx (tbp %u psm %#x %ux%u cbp %u csa %u): every texel transparent (texels %ux%u psm %#x, palette %ux%u psm %#x)\n",
+                                 static_cast<unsigned long long>(tex0), tbp, psm, width, height, cbp, csa, texels->width, texels->height,
+                                 texels->psm, palette ? palette->width : 0u, palette ? palette->height : 0u, palette ? palette->psm : 0u);
+                }
+            }
+            auto shared = std::make_shared<const Texture>(std::move(texture));
+            s.decoded[key] = shared;
+            return shared;
+        }
+    }
+
     // The texture a draw's TEX0 shows (null when the game set up none there: reported once).
     std::shared_ptr<const Texture> lookup(uint64_t tex0, uint64_t texa)
     {
         Store &s = store();
         std::lock_guard<std::mutex> lock(s.mutex);
-        const uint32_t tbp = tex0 & 0x3fffu, psm = (tex0 >> 20) & 0x3fu;
-        const uint32_t cbp = (tex0 >> 37) & 0x3fffu, csa = (tex0 >> 56) & 0x1fu;
-        const uint32_t width = 1u << std::min<uint32_t>(10u, (tex0 >> 26) & 0xfu);
-        const uint32_t height = 1u << std::min<uint32_t>(10u, (tex0 >> 30) & 0xfu);
+        return lookupLocked(s, tex0, texa, ~0u);
+    }
 
-        const Record *texels = nullptr, *palette = nullptr;
-        if (tbp == s.fontTbp && s.pack.count("FONT"))
-        {
-            texels = &s.pack["FONT"][0];
-            palette = &s.pack["FONT"][1];
-        }
-        else if (isH(psm))
-        {
-            const auto it = s.hAt.find((static_cast<uint64_t>(tbp) << 8) | psm);
-            texels = it != s.hAt.end() ? it->second : nullptr;
-        }
-        else if (s.idAt[tbp] != 0xffffu)
-        {
-            const auto it = s.byId.find(s.idAt[tbp]);
-            texels = it != s.byId.end() && it->second->psm == psm ? it->second : nullptr;
-        }
-        // A palette entry at (px, py) of the CLUT area at CBP (CSM1, CT32 / CT16 blocks of 8 x 8, the second column of
-        // blocks at block + 1, the second row at + 2): from the record loaded over it.
-        const auto paletteEntry = [&](uint32_t px, uint32_t py, uint32_t &out)
-        {
-            for (int pass = 0; pass < 2; ++pass)
-            {
-                const uint32_t block = pass == 0 ? cbp : cbp + (px >> 3) + ((py >> 3) << 1);
-                const uint32_t lx = pass == 0 ? px : (px & 7u), ly = pass == 0 ? py : (py & 7u);
-                const auto it = s.byBlock.find(block);
-                if (it == s.byBlock.end() || !it->second.record)
-                    continue;
-                const Store::Placement &p = it->second;
-                if (lx >= p.x && ly >= p.y && lx - p.x < p.record->width && ly - p.y < p.record->height)
-                {
-                    out = colour(*p.record, (ly - p.y) * p.record->width + (lx - p.x), texa);
-                    return true;
-                }
-            }
-            return false;
-        };
-        bool paletteFound = palette != nullptr;
-        if (texels && indexed(psm) && !palette)
-        {
-            uint32_t ignored;
-            for (uint32_t i = 0; i < 16u && !paletteFound; ++i)
-            {
-                uint32_t px = 0, py = 0;
-                ps2x::native::csm1Position(psm == T8 || psm == T8H ? i : (csa * 16u + i) & 0xffu, px, py);
-                paletteFound = paletteEntry(px, py, ignored);
-            }
-            if (const auto it = s.byBlock.find(cbp); it != s.byBlock.end())
-                palette = it->second.record;
-        }
-        if (!texels || (indexed(psm) && !paletteFound))
-        {
-            static std::unordered_map<uint64_t, bool> s_reported;
-            const uint64_t reportKey = tex0 & ~(uint64_t{7} << 61);
-            if (!s_reported[reportKey])
-            {
-                s_reported[reportKey] = true;
-                std::fprintf(stderr, "[tmb:tex] TEX0 %#llx (tbp %u psm %#x %ux%u cbp %u): no %s set up there\n",
-                             static_cast<unsigned long long>(tex0), tbp, psm, width, height, cbp, texels ? "palette" : "texture");
-            }
-            return nullptr;
-        }
+    // The same with the texels taken by texture id (a hierobject's texture number, +0x50), not from the TBP.
+    std::shared_ptr<const Texture> lookupId(uint32_t id, uint64_t tex0, uint64_t texa)
+    {
+        Store &s = store();
+        std::lock_guard<std::mutex> lock(s.mutex);
+        return lookupLocked(s, tex0, texa, id);
+    }
 
-        const uint64_t key = (reinterpret_cast<uintptr_t>(texels) * 0x9e3779b97f4a7c15ull) ^
-                             (reinterpret_cast<uintptr_t>(palette) * 0xc2b2ae3d27d4eb4full) ^
-                             (tex0 & ~((uint64_t{3} << 35) | (uint64_t{7} << 61))) ^ (texa * 0x165667b19e3779f9ull);
-        if (const auto found = s.decoded.find(key); found != s.decoded.end())
-            return found->second;
+    // The texture id texInfo gives the TBP now (0xffff: none), to check a lookup by id against it.
+    uint32_t idAtTbp(uint32_t tbp)
+    {
+        Store &s = store();
+        std::lock_guard<std::mutex> lock(s.mutex);
+        return s.idAt[tbp & 0x3fffu];
+    }
 
-        uint32_t colours[256] = {};
-        if (indexed(psm))
-        {
-            const bool eight = psm == T8 || psm == T8H;
-            for (uint32_t i = 0; i < (eight ? 256u : 16u); ++i)
-            {
-                uint32_t px = 0, py = 0;
-                ps2x::native::csm1Position(eight ? i : (csa * 16u + i) & 0xffu, px, py);
-                if (palette == &s.pack["FONT"][1] && !s.pack["FONT"].empty())
-                {
-                    if (px < palette->width && py < palette->height)
-                        colours[i] = colour(*palette, py * palette->width + px, texa);
-                }
-                else
-                    paletteEntry(px, py, colours[i]);
-            }
-        }
-
-        Texture texture;
-        texture.width = width;
-        texture.height = height;
-        texture.key = key;
-        texture.version = ++s.decodes;
-        texture.rgba.resize(static_cast<size_t>(width) * height);
-        for (uint32_t y = 0; y < height; ++y)
-            for (uint32_t x = 0; x < width; ++x)
-            {
-                uint32_t c = 0;
-                if (x < texels->width && y < texels->height)
-                {
-                    const uint32_t at = y * texels->width + x;
-                    c = indexed(psm) ? colours[texels->texels[at]] : colour(*texels, at, texa);
-                }
-                texture.rgba[static_cast<size_t>(y) * width + x] = c;
-            }
-        // A texture with no texel showing: reported once (a palette or texels taken from the wrong record).
-        if (std::all_of(texture.rgba.begin(), texture.rgba.end(), [](uint32_t c) { return (c >> 24) == 0u; }))
-        {
-            static std::unordered_map<uint64_t, bool> s_reported;
-            if (!s_reported[tex0])
-            {
-                s_reported[tex0] = true;
-                std::fprintf(stderr, "[tmb:tex] TEX0 %#llx (tbp %u psm %#x %ux%u cbp %u csa %u): every texel transparent (texels %ux%u psm %#x, palette %ux%u psm %#x)\n",
-                             static_cast<unsigned long long>(tex0), tbp, psm, width, height, cbp, csa, texels->width, texels->height,
-                             texels->psm, palette ? palette->width : 0u, palette ? palette->height : 0u, palette ? palette->psm : 0u);
-            }
-        }
-        auto shared = std::make_shared<const Texture>(std::move(texture));
-        s.decoded[key] = shared;
-        return shared;
+    // The disc file fileReadf / zipInflateAll last read to this address ("" if none): the mesh pack's NGP binding.
+    std::string nameAt(uint32_t address)
+    {
+        Store &s = store();
+        std::lock_guard<std::mutex> lock(s.mutex);
+        const auto it = s.nameAt.find(address);
+        return it != s.nameAt.end() ? it->second : std::string();
     }
 
     // The font's texture (the pack's FONT, at the VRAM block fontInit gave it), for the 2D rewritten natively.

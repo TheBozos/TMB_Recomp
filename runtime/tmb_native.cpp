@@ -20,6 +20,8 @@
 #include "runtime/native/native_vu1_sandbox.h"
 #include "runtime/ps2_memory.h"
 #include "tmb_region.h" // TMB_REGION_US / TMB_REGION_PAL
+#include "tmb_meshes.h"
+#include "tmb_vu1_shading.h"
 
 #include <algorithm>
 #include <array>
@@ -291,18 +293,10 @@ namespace tmb::native
             return draws;
         }
 
-        // VU1 data memory as the chain fills it: 1024 quadwords, read as words or floats.
-        struct VuImage
-        {
-            uint32_t words[1024 * 4] = {};
-            float f(uint32_t qw, int lane) const
-            {
-                float v;
-                std::memcpy(&v, &words[(qw & 0x3ffu) * 4 + lane], 4);
-                return v;
-            }
-            uint32_t w(uint32_t qw, int lane) const { return words[(qw & 0x3ffu) * 4 + lane]; }
-        };
+        // VU1 data memory as the chain fills it, and the strip programs' maths (runtime/tmb_vu1_shading.h).
+        using tmb::vu1::VuImage;
+        using tmb::vu1::fogFactor;
+        using tmb::vu1::clampByte;
 
         const uint8_t *g_rdram = nullptr; // guest memory, from the first hier (setGuestMemory)
 
@@ -383,6 +377,11 @@ namespace tmb::native
             bool batchDepthMasked = false;
             uint64_t test = 0;             // TEST_1 as the stream's DIRECT packets set it (TMB toggles its alpha test)
             uint64_t batchTest = 0;
+            uint32_t hookMark = 0;         // the last NOP's immediate: the mesh pack path's mark on a header it drew
+            bool suppress = false;         // the object's strips were drawn from the mesh pack: not translated here
+            std::vector<std::vector<ps2x::native::Vertex>> hookStrips; // TMB_NATIVE_MESHES_CHECK: the pack's strips
+            size_t hookStrip = 0;
+            uint32_t hookObject = 0;
         };
 
         struct Stats
@@ -390,68 +389,13 @@ namespace tmb::native
             uint64_t chains = 0, objects = 0, strips = 0, triangles = 0, textured = 0, skipped = 0;
         } g_stats;
 
-        // The fog factor a microprogram writes in XYZF2's F, over 255: clamp(VU 4.w + VU 21.x + VU 21.w / w, 0, VU 21.y)
-        // (the same in the strip and sprite programs; checked on 3000 strip vertices of the match trace).
-        float fogFactor(const VuImage &vu, float q)
-        {
-            return std::min(std::max(vu.f(4, 3) + vu.f(21, 0) + vu.f(21, 3) * q, 0.0f), vu.f(21, 1)) / 255.0f;
-        }
-
-        uint32_t clampByte(float v)
-        {
-            if (!(v > 0.0f))
-                return 0u;
-            return v >= 255.0f ? 255u : static_cast<uint32_t>(v);
-        }
-
-        // The colour a strip's microprogram writes for one vertex (tools/tmb_mesh_decode.py, Strip.shade).
+        // The colour a strip's microprogram writes for one vertex (tmb::vu1::shade).
         uint32_t shade(const State &s, const uint32_t normal[3], const uint32_t rgba[4], const float *pos)
         {
-            const VuImage &vu = s.vu;
-            float c[4];
-            // The unlit strips (0x10a8) scale their colour by VU 5 too, as the scaled ones (0xf60): colour * vf31 +
-            // vf11. VU 5 is the object's tint (the health bar's green, orange, red).
-            if (s.mode == Mode::Unlit || s.mode == Mode::Scaled)
-                for (int k = 0; k < 4; ++k)
-                    c[k] = static_cast<float>(rgba[k]) * vu.f(5, k) + vu.f(20, k);
-            else if (s.mode == Mode::Directional)
-            {
-                float n[3], d[3];
-                for (int k = 0; k < 3; ++k)
-                    n[k] = 1.0f - static_cast<float>(normal[k] & 0xffu) / 128.0f;
-                for (int i = 0; i < 3; ++i)
-                    d[i] = std::max(0.0f, vu.f(6, i) * n[0] + vu.f(7, i) * n[1] + vu.f(8, i) * n[2]);
-                for (int k = 0; k < 3; ++k)
-                {
-                    const float light = (vu.f(17, k) * d[0] + vu.f(18, k) * d[1] + vu.f(19, k) * d[2]) * vu.f(5, k);
-                    c[k] = static_cast<float>(rgba[k]) * light + vu.f(20, k);
-                }
-                c[3] = static_cast<float>(rgba[3]) * vu.f(5, 3) + vu.f(20, 3);
-            }
-            else // point lights
-            {
-                float n[3];
-                for (int k = 0; k < 3; ++k)
-                    n[k] = static_cast<float>(normal[k] & 0xffu) / 127.0f - 128.0f / 127.0f;
-                for (int k = 0; k < 4; ++k)
-                    c[k] = static_cast<float>(rgba[k]) * vu.f(5, k) + vu.f(20, k);
-                for (int i = 0; i < 3; ++i)
-                {
-                    const float d[3] = {-(vu.f(169, i) + pos[0]), -(vu.f(170, i) + pos[1]), -(vu.f(171, i) + pos[2])};
-                    const float d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-                    if (d2 <= 0.0f)
-                        continue;
-                    const float inv = 1.0f / std::sqrt(d2);
-                    const float facing = std::max(0.0f, (d[0] * n[0] + d[1] * n[1] + d[2] * n[2]) * inv);
-                    const float att = std::min(0.5f, facing * inv * inv * vu.f(175, i));
-                    float cone = std::max(0.0f, (d[0] * vu.f(165, i) + d[1] * vu.f(166, i) + d[2] * vu.f(167, i)) * inv + vu.f(168, i));
-                    cone *= cone;
-                    cone *= cone;
-                    for (int k = 0; k < 3; ++k)
-                        c[k] += vu.f(172 + i, k) * att * cone;
-                }
-            }
-            return clampByte(c[0]) | (clampByte(c[1]) << 8) | (clampByte(c[2]) << 16) | (clampByte(c[3]) << 24);
+            const tmb::vu1::Shading mode = s.mode == Mode::Unlit || s.mode == Mode::Scaled ? tmb::vu1::Shading::Unlit
+                                           : s.mode == Mode::Directional                ? tmb::vu1::Shading::Directional
+                                                                                        : tmb::vu1::Shading::Point;
+            return tmb::vu1::shade(mode, s.vu, normal, rgba, pos);
         }
 
         void setupMatrix(State &s);
@@ -1890,10 +1834,95 @@ namespace tmb::native
             }
         }
 
+        // TMB_NATIVE_MESHES_CHECK=1: an object the mesh pack path drew, its strips translated here as strip() does from
+        // the stream (pool, normal, colour, texture coordinates) and compared with the pack's, vertex by vertex.
+        struct HookCheck
+        {
+            uint64_t objects = 0, strips = 0, vertices = 0, vertexDiffs = 0, stripCountDiffs = 0, objectsDiffering = 0;
+            bool differs = false;
+        } g_hookCheck;
+
+        void compareHookStrip(State &s)
+        {
+            if (s.hookStrips.empty() && s.hookStrip == 0u && s.hookObject == 0u)
+                return;
+            HookCheck &c = g_hookCheck;
+            const uint32_t top = s.top;
+            const uint32_t nloop = s.vu.w(top, 0) & 0x7fffu;
+            const size_t k = s.hookStrip++;
+            ++c.strips;
+            if (k >= s.hookStrips.size() || s.hookStrips[k].size() != nloop)
+            {
+                c.differs = true;
+                ++c.stripCountDiffs;
+                return;
+            }
+            const std::vector<ps2x::native::Vertex> &mine = s.hookStrips[k];
+            const float uOffset = s.vu.f(4, 0), vOffset = s.vu.f(4, 1);
+            for (uint32_t v = 0; v < nloop; ++v)
+            {
+                ++c.vertices;
+                const uint32_t q = top + 1u + 3u * v;
+                const uint32_t index = s.vu.w(q, 3) & 0x7fffu;
+                const ps2x::native::Vertex &m = mine[v];
+                bool same;
+                if (static_cast<size_t>(index) * 3u + 2u >= s.pool.size())
+                    same = m.rgba == 0xdeadu;
+                else
+                {
+                    const float *pos = &s.pool[index * 3u];
+                    const uint32_t normal[3] = {s.vu.w(q, 0), s.vu.w(q, 1), s.vu.w(q, 2)};
+                    const uint32_t rgba[4] = {s.vu.w(q + 1, 0), s.vu.w(q + 1, 1), s.vu.w(q + 1, 2), s.vu.w(q + 1, 3)};
+                    const uint32_t colour = shade(s, normal, rgba, pos);
+                    const float u = static_cast<float>(static_cast<int32_t>(s.vu.w(q + 2, 0))) / 4096.0f + uOffset;
+                    const float vv = static_cast<float>(static_cast<int32_t>(s.vu.w(q + 2, 1))) / 4096.0f + vOffset;
+                    same = m.x == pos[0] && m.y == pos[1] && m.z == pos[2] && m.rgba == colour && std::fabs(m.u - u) < 1e-5f &&
+                           std::fabs(m.v - vv) < 1e-5f;
+                    static uint32_t s_logged = 0;
+                    if (!same && s_logged++ < 20u)
+                        std::fprintf(stderr, "[tmb:mesh] geometry: object %#x strip %zu vertex %u: pack (%g %g %g) %08x uv %g %g, stream (%g %g %g) %08x uv %g %g\n",
+                                     s.hookObject, k, v, m.x, m.y, m.z, m.rgba, m.u, m.v, pos[0], pos[1], pos[2], colour, u, vv);
+                }
+                if (!same)
+                {
+                    ++c.vertexDiffs;
+                    c.differs = true;
+                }
+            }
+        }
+
+        void endHookCheck(State &s)
+        {
+            HookCheck &c = g_hookCheck;
+            if (s.hookObject == 0u)
+                return;
+            ++c.objects;
+            if (s.hookStrip != s.hookStrips.size())
+            {
+                ++c.stripCountDiffs;
+                c.differs = true;
+            }
+            c.objectsDiffering += c.differs ? 1u : 0u;
+            c.differs = false;
+            s.hookStrips.clear();
+            s.hookStrip = 0;
+            s.hookObject = 0;
+            if (c.objects % 20000u == 0u)
+                std::fprintf(stderr, "[tmb:mesh] geometry: %llu objects (%llu differing), %llu strips, %llu vertices: %llu vertex and %llu strip count differences against the stream\n",
+                             static_cast<unsigned long long>(c.objects), static_cast<unsigned long long>(c.objectsDiffering),
+                             static_cast<unsigned long long>(c.strips), static_cast<unsigned long long>(c.vertices),
+                             static_cast<unsigned long long>(c.vertexDiffs), static_cast<unsigned long long>(c.stripCountDiffs));
+        }
+
         void strip(State &s, std::vector<ps2x::native::Vertex> &triangles)
         {
             if (s.mode == Mode::None)
                 return;
+            if (s.suppress)
+            {
+                compareHookStrip(s);
+                return;
+            }
             if (s.mode == Mode::Particles)
             {
                 particles(s, triangles, false);
@@ -2117,6 +2146,84 @@ namespace tmb::native
                                                             : s.matrix, triangles.data(),
                                                     static_cast<uint32_t>(triangles.size()), std::move(texture));
             triangles.clear();
+        }
+
+        // An object the mesh pack path drew at its hook (tmb::meshes), at its setup in the stream: its batches in the
+        // current group, with the GS state the stream has here (ALPHA_1, TEST_1, ZBUF_1, FOGCOL) as flush() takes it,
+        // and the GS registers its register blocks set followed the way useMaterial follows them.
+        // TMB_NATIVE_MESHES_CHECK=1: VU 0-21 as the hook built them from EE state, against this stream's.
+        void submitDrawn(State &s, const tmb::meshes::Drawn &drawn)
+        {
+            static const bool s_check = std::getenv("TMB_NATIVE_MESHES_CHECK") != nullptr;
+            if (s_check)
+            {
+                static uint64_t s_objects = 0, s_differing = 0, s_qwords[22] = {};
+                ++s_objects;
+                bool differs = false;
+                for (uint32_t q = 0; q < 22u; ++q)
+                    for (int k = 0; k < 4; ++k)
+                    {
+                        if (q >= 6u && q <= 8u && drawn.setupPc != 0x0ce8u)
+                            break; // the light directions: only the directional setup reads them
+                        float a, b;
+                        std::memcpy(&a, &drawn.check[q][k], 4);
+                        std::memcpy(&b, &s.vu.words[q * 4u + k], 4);
+                        if (drawn.check[q][k] != s.vu.words[q * 4u + k] && !(std::fabs(a - b) <= 1e-4f * std::max(1.0f, std::fabs(b))))
+                        {
+                            differs = true;
+                            ++s_qwords[q];
+                            static uint32_t s_logged = 0;
+                            if (s_logged++ < 40u)
+                                std::fprintf(stderr, "[tmb:mesh] check: object %#x (setup %#x) VU %u.%d: hook %g (%08x), stream %g (%08x)\n", drawn.object,
+                                             drawn.setupPc, q, k, a, drawn.check[q][k], b, s.vu.words[q * 4u + k]);
+                            break;
+                        }
+                    }
+                s_differing += differs ? 1u : 0u;
+                if (s_objects % 20000u == 0u)
+                {
+                    std::string list;
+                    for (uint32_t q = 0; q < 22u; ++q)
+                        if (s_qwords[q])
+                            list += " VU" + std::to_string(q) + ":" + std::to_string(s_qwords[q]);
+                    std::fprintf(stderr, "[tmb:mesh] check: %llu objects, %llu with VU 0-21 differing from the stream's;%s\n",
+                                 static_cast<unsigned long long>(s_objects), static_cast<unsigned long long>(s_differing), list.c_str());
+                }
+            }
+            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            renderer.setKey(drawn.key);
+            for (const tmb::meshes::Batch &batch : drawn.batches)
+            {
+                if (batch.setsAlpha)
+                    s.alpha = batch.alpha;
+                if (batch.setsTest)
+                    s.test = batch.test;
+                if (batch.setsZbuf)
+                    s.depthMasked = batch.depthMasked;
+                if (batch.setsTex0)
+                    s.lastTex0 = batch.tex0;
+                if (batch.vertices.empty())
+                    continue;
+                g_stats.triangles += batch.vertices.size() / 3u;
+                g_stats.textured += batch.textured ? 1u : 0u;
+                ps2x::native::Material material;
+                material.textured = batch.textured && batch.texture != nullptr;
+                material.tex0 = batch.tex0;
+                material.blend = batch.blended ? blendFor(s.alpha) : ps2x::native::Material::Blend::Opaque;
+                material.depthWrite = !s.depthMasked;
+                const uint32_t atst = (s.test >> 1) & 7u, aref = (s.test >> 4) & 0xffu;
+                if ((s.test & 1u) && (atst == 5u || atst == 6u))
+                {
+                    material.alphaTest = atst == 6u || aref > 0u;
+                    material.alphaRef = static_cast<uint8_t>(atst == 6u ? aref : aref - 1u);
+                }
+                material.fog = batch.fogged;
+                if (batch.fogged)
+                    s.fogColour = gameFogColour(s.fogColour);
+                material.fogColour = s.fogColour;
+                renderer.draw(material, drawn.matrix, batch.vertices.data(), static_cast<uint32_t>(batch.vertices.size()),
+                              material.textured ? batch.texture : nullptr);
+            }
         }
 
         // The effects image's rain (0x1d40, setup at 0x1c38): VU 20.w drops, each a line from A (p + VU 12) to
@@ -2440,6 +2547,7 @@ namespace tmb::native
                 }
                 switch (cmd)
                 {
+                case 0x00: s.hookMark = code & 0xffffffu; break; // NOP: an object the mesh pack path drew marks it
                 case 0x01: s.cl = imm & 0xffu; s.wl = (imm >> 8) & 0xffu; if (s.wl == 0) s.wl = 1; break;
                 case 0x02: s.offset = imm & 0x3ffu; s.tops = s.base; break;
                 case 0x03: s.base = imm & 0x3ffu; s.tops = s.base; break;
@@ -2449,6 +2557,8 @@ namespace tmb::native
                 case 0x15: // MSCALF
                 case 0x17: // MSCNT
                 {
+                    const uint32_t mark = s.hookMark; // the header's NOP right before (tmb_meshes.cpp)
+                    s.hookMark = 0;
                     s.top = s.tops;
                     s.tops = s.tops == s.base ? s.base + s.offset : s.base;
                     // TMB_NATIVE_DUMP_MIRROR=<file>,<pc>: the adapter's copy of VU1 data memory at each MSCAL of that
@@ -2522,7 +2632,12 @@ namespace tmb::native
                             return pcs;
                         }();
                         if (!matches(kVertexPasses, s.code, pc))
+                        {
                             s.setupOnVu1 = std::find(s_onVu1.begin(), s_onVu1.end(), pc) != s_onVu1.end();
+                            if (s.suppress)
+                                endHookCheck(s);
+                            s.suppress = false; // a new object: its strips are drawn here unless the mesh pack path drew it
+                        }
                         // The translated programs in the menus too (their 3D: the car and driver previews, the 2D
                         // drawn by the same strip setups); TMB_NATIVE_MENUS=0 leaves the menus to VU1. A setup in
                         // TMB_NATIVE_VU1_PCS stays on VU1 even when translated (a PS2X_VU1_RECORD reference).
@@ -2697,7 +2812,21 @@ namespace tmb::native
                                     resumeSetup(s);
                             }
                             else
+                            {
                                 setup(s, pc);
+                                // An object the mesh pack path drew at its hook (runtime/tmb_meshes.cpp): its draws
+                                // here, in this group, instead of the strips' translation (the setup's state is kept
+                                // for a resume after it).
+                                tmb::meshes::Drawn drawn;
+                                if (mark != 0u && tmb::meshes::take(mark, drawn) && drawn.setupPc == pc)
+                                {
+                                    submitDrawn(s, drawn);
+                                    s.suppress = true;
+                                    s.hookStrips = std::move(drawn.checkStrips);
+                                    s.hookStrip = 0;
+                                    s.hookObject = drawn.object;
+                                }
+                            }
                             if (s.check && pc != 0x1d40u)
                             {
                                 if (!matches(kVertexPasses, s.code, pc))
@@ -2900,6 +3029,7 @@ namespace tmb::native
             renderer.endFrame();
             renderer.beginFrame(screen());
             state().keysThisFrame.clear();
+            tmb::meshes::endFrame();
         }
     }
 

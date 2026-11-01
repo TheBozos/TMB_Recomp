@@ -421,6 +421,7 @@ namespace tmb::meshes
         constexpr uint32_t kHierCheckVifComplete = TMB_ADDR(0x001D59D8u);
         constexpr uint32_t kHierKickReturn = TMB_ADDR(0x001D4610u); // hier__Fi's call of hierCheckVifComplete, before its kick
         constexpr uint32_t kHier2pFlushDma = TMB_ADDR(0x001D3B00u);
+        constexpr uint32_t kHier2pCacheReturn = TMB_ADDR(0x001D3D34u); // hier2p's call of hierCacheForAsm, its view's start
         constexpr uint32_t kPktLinkAlphaObjAsm = TMB_ADDR(0x001EC194u);
 
         bool g_inHier2pFlush = false;
@@ -431,6 +432,9 @@ namespace tmb::meshes
             std::vector<Drawn> opaque;
             std::vector<std::vector<Drawn>> buckets = std::vector<std::vector<Drawn>>(129);
             bool pending = false; // an alpha object drawn at the hook, waiting for its pktLinkAlphaObjAsm
+            // Built by hier2p: sent only by hier2pFlushDma. On the frame a split screen ends hier2p builds its view once
+            // more and nothing sends it (the game drops the chain), so it is dropped too rather than drawn in the next view.
+            bool hier2p = false;
             Drawn pendingAlpha;
             uint32_t frame = 0;
             bool empty() const
@@ -448,6 +452,7 @@ namespace tmb::meshes
                 for (std::vector<Drawn> &b : buckets)
                     b.clear();
                 pending = false;
+                hier2p = false;
             }
         };
         // The view being built (the hook's objects): hier__Fi's until its kick, hier2p's until hier2pFlushDma.
@@ -1618,6 +1623,21 @@ namespace tmb::meshes
             list.clear();
         }
 
+        // A view built and not kicked: the menus' (sent with the frame) now; hier2p's never sent by the game, dropped.
+        void sendUnkicked(ViewList &list)
+        {
+            if (list.empty())
+                return;
+            if (list.hier2p)
+            {
+                ++g_listDrops;
+                list.clear();
+                return;
+            }
+            ++g_unsentFlushes;
+            submitList(list);
+        }
+
         // hier__Fi, its chain built (the alpha list attached when it has objects) and queued, asks hierCheckVifComplete
         // whether VIF1 is free: kicked now (hierFlushObjQ) or by hierDmaHandler when the transfer before it ends, but in
         // this order either way. Its view's draws are submitted there. (Not at hier__Fi's return: a recompiled function
@@ -1651,10 +1671,10 @@ namespace tmb::meshes
                 std::memcpy(g_lastLights[q], ee.at(kConstVu5 + 16u + q * 16u), 16);
             g_previous.valid = false;
             // A view before it whose chain hier__Fi did not kick (the menus send theirs with the frame): its objects first.
-            if (!g_lists[0].empty() && hookOrder())
+            if (hookOrder())
             {
-                ++g_unsentFlushes;
-                submitList(g_lists[0]);
+                sendUnkicked(g_lists[0]);
+                g_lists[0].hier2p = getRegU32(ctx, 31) == kHier2pCacheReturn;
             }
         }
     }
@@ -1775,10 +1795,9 @@ namespace tmb::meshes
     // was not sent), and every 250 frames the counts.
     void flushUnsent()
     {
-        if (!active() || !hookOrder() || g_lists[0].empty())
+        if (!active() || !hookOrder())
             return;
-        ++g_unsentFlushes;
-        submitList(g_lists[0]);
+        sendUnkicked(g_lists[0]);
     }
 
     void endFrame()

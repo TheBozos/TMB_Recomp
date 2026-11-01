@@ -84,6 +84,11 @@ namespace tmb::twod
         std::atomic<bool> g_flushed{false};
         std::atomic<const uint8_t *> g_rdram{nullptr}; // guest memory, from the font's hooks (the publish has none)
         std::atomic<uint32_t> g_gp{0};                  // the game's gp, from the same hooks
+        uint32_t noteGp(uint32_t gp) // an override's gp, kept for those read where no register is at hand (viewClip)
+        {
+            g_gp.store(gp, std::memory_order_relaxed);
+            return gp;
+        }
 
         bool on()
         {
@@ -118,7 +123,7 @@ namespace tmb::twod
                 fontBuildPrim__FicP6QwData_0x1c5b28(rdram, ctx, runtime);
                 return;
             }
-            const uint32_t gp = getRegU32(ctx, 28);
+            const uint32_t gp = noteGp(getRegU32(ctx, 28));
             const uint32_t record = kFontRecords + getRegU32(ctx, 4) * kFontRecordBytes;
             int32_t c = static_cast<int8_t>(getRegU32(ctx, 5) & 0xffu);
             // The current view's top-left corner, as viewGetCenter / viewGetWH give it.
@@ -191,7 +196,7 @@ namespace tmb::twod
                 fontDmaFontData__Fv_0x1c4fe0(rdram, ctx, runtime);
                 return;
             }
-            const uint32_t gp = getRegU32(ctx, 28);
+            const uint32_t gp = noteGp(getRegU32(ctx, 28));
             dialogDim(rdram, getRegU32(ctx, 31) == kDialogFontReturn ? gp : 0u);
             g_rdram.store(rdram, std::memory_order_relaxed);
             g_gp.store(gp, std::memory_order_relaxed);
@@ -381,7 +386,7 @@ namespace tmb::twod
         // over each enemy on screen. Drawn before the game's builder runs, which clears the enemies' hit flags.
         void radar(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t hud, uint32_t viewIndex)
         {
-            const uint32_t gp = getRegU32(ctx, 28);
+            const uint32_t gp = noteGp(getRegU32(ctx, 28));
             // Part A: the blips (Hud + 0x1c of them), around the radar's centre (Hud + 0x800 / 0x804, pixels).
             const int32_t centreX = static_cast<int32_t>(word(rdram, hud + 0x800u)) << 4, centreY = static_cast<int32_t>(word(rdram, hud + 0x804u)) << 4;
             const uint32_t blips = std::min<uint32_t>(word(rdram, hud + 0x1cu), 100u);
@@ -500,7 +505,7 @@ namespace tmb::twod
             const uint32_t hud = getRegU32(ctx, 4), car = getRegU32(ctx, 10);
             const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
             const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
-            const uint32_t gp = getRegU32(ctx, 28);
+            const uint32_t gp = noteGp(getRegU32(ctx, 28));
             BuildHealthBar__3HudP6QwDataiiiiP7Vehicle_0x1419d8(rdram, ctx, runtime);
             if (!on())
                 return;
@@ -532,7 +537,7 @@ namespace tmb::twod
         // BuildSeparator: the black line between the two views of a split screen (drawn by view 0's HUD).
         void separatorOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             BuildSeparator__3HudP6QwData_0x13e028(rdram, ctx, runtime);
             if (!on())
                 return;
@@ -606,7 +611,7 @@ namespace tmb::twod
         // by another) to its target (car + 0x2438), both projected as mathfTransform3dTo2d; alpha 0x1a red.
         void laserOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             BuildLaserStuff__3HudP6QwData_0x1424c8(rdram, ctx, runtime);
             if (!on())
                 return;
@@ -643,7 +648,7 @@ namespace tmb::twod
         }
         void turbo4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
             const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
             build4PTurboBar__3HudP6QwDataiiii_0x141220(rdram, ctx, runtime);
@@ -656,7 +661,7 @@ namespace tmb::twod
         }
         void energy4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
             const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
             build4PEnergyBar__3HudP6QwDataiiii_0x141790(rdram, ctx, runtime);
@@ -672,7 +677,7 @@ namespace tmb::twod
         // yellow / green by the health left; blended.
         void health4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
             const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
             build4PHealthBar__3HudP6QwDataiiii_0x141488(rdram, ctx, runtime);
@@ -698,7 +703,7 @@ namespace tmb::twod
         // for 15 of every 30 frames, counted at + 0x5ac).
         void chargeUpOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             BuildChargeUpBar__3HudP6QwData_0x140990(rdram, ctx, runtime);
             if (!on())
                 return;
@@ -725,7 +730,7 @@ namespace tmb::twod
         // black backing of 20 x 7, then the lamp of 16 x 5 inside it (black while blinked off); alpha 0x30.
         void overheatOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            const uint32_t hud = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             BuildOverheatBar__3HudP6QwData_0x140ce0(rdram, ctx, runtime);
             if (!on())
                 return;
@@ -794,7 +799,7 @@ namespace tmb::twod
                 buildProgressBar__FUi_0x1fd4b8(rdram, ctx, runtime);
                 return;
             }
-            const uint32_t gp = getRegU32(ctx, 28);
+            const uint32_t gp = noteGp(getRegU32(ctx, 28));
             g_barGp.store(gp, std::memory_order_relaxed);
             g_rdram.store(rdram, std::memory_order_relaxed);
             if (getRegU32(ctx, 4) == 0u) // a load's start: the picture the menus were drawn over is gone
@@ -947,6 +952,23 @@ namespace tmb::twod
             loadingBar(rdram, gp);
             ctx->pc = getRegU32(ctx, 31); // jr $ra
         }
+    }
+
+    // The view the game draws now (viewGetCurView), as a clip in GS primitive coordinates (x0, y0, x1, y1): where the GS
+    // scissor cut each view of a split screen. False before the game's gp is known.
+    bool viewClip(const uint8_t *rdram, float (&clip)[4])
+    {
+        const uint32_t gp = g_gp.load(std::memory_order_relaxed);
+        if (gp == 0u || !rdram)
+            return false;
+        const View v = viewOf(rdram, word(rdram, gp + kGpCurView));
+        if (v.w <= 0 || v.h <= 0)
+            return false;
+        clip[0] = static_cast<float>(v.cx) - static_cast<float>(v.w) * 0.5f;
+        clip[1] = static_cast<float>(v.cy) - static_cast<float>(v.h) * 0.5f;
+        clip[2] = static_cast<float>(v.cx) + static_cast<float>(v.w) * 0.5f;
+        clip[3] = static_cast<float>(v.cy) + static_cast<float>(v.h) * 0.5f;
+        return true;
     }
 
     // At the end of a game frame (the adapter's publish): the 2D drawn since the last one goes on screen once the game

@@ -43,6 +43,7 @@
 namespace tmb::twod
 {
     void publish();
+    bool viewClip(const uint8_t *rdram, float (&clip)[4]);
 }
 
 namespace tmb::textures
@@ -523,6 +524,51 @@ namespace tmb::native
             for (uint32_t i = 0; i < count; ++i)
                 for (int k = 0; k < 3; ++k)
                     s.pool[i * 3u + k] = s.vu.f(181 + i, k);
+        }
+
+        // The draws that follow clipped to the view the game draws now (a split screen's: the GS scissor's cut). The
+        // first draw of each view in a frame clears it to the fog colour (fogUpdate's; viewGetBgColor's until it is
+        // known), as the GS frame was before its objects: where nothing is drawn (a sky left to the fog) it shows.
+#if TMB_REGION_US
+        constexpr uint32_t kBgColour = 0x004E04F0u;
+#else
+        constexpr uint32_t kBgColour = 0x004E34F0u;
+#endif
+        float g_viewCleared[4] = {0, 0, 0, 0}; // the view last cleared this frame (reset by publish)
+        void viewClip()
+        {
+            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            float clip[4];
+            if (!g_rdram || !tmb::twod::viewClip(g_rdram, clip))
+            {
+                renderer.clearClip();
+                return;
+            }
+            renderer.setClip(clip[0], clip[1], clip[2], clip[3]);
+            if (!renderer.presentsAlone() || std::memcmp(clip, g_viewCleared, sizeof(clip)) == 0 || menusNative())
+                return;
+            std::memcpy(g_viewCleared, clip, sizeof(clip));
+            uint32_t background;
+            std::memcpy(&background, g_rdram + kBgColour, 4);
+            static uint32_t s_logged = 0;
+            if (s_logged++ < 4u)
+                std::fprintf(stderr, "[tmb:native] view clear: background %06x, fog %06x\n", background & 0xffffffu, gameFogColour(0u));
+            const uint32_t colour = gameFogColour(background & 0xffffffu) | 0x80000000u;
+            ps2x::native::Vertex corner[4];
+            for (int i = 0; i < 4; ++i)
+            {
+                corner[i].x = (i & 1) ? clip[2] : clip[0];
+                corner[i].y = (i & 2) ? clip[3] : clip[1];
+                corner[i].rgba = colour;
+            }
+            const ps2x::native::Vertex quad[6] = {corner[0], corner[1], corner[2], corner[1], corner[3], corner[2]};
+            static constexpr float kScreenSpace[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+            ps2x::native::Material material;
+            material.blend = ps2x::native::Material::Blend::Opaque;
+            material.depthTest = false;
+            material.depthWrite = false;
+            renderer.setKey(0);
+            renderer.draw(material, kScreenSpace, quad, 6u, nullptr);
         }
 
         void flush(State &s, std::vector<ps2x::native::Vertex> &triangles);
@@ -2708,6 +2754,7 @@ namespace tmb::native
                             // interpreter numbers the programs it skips the same way).
                             flush(s, triangles);
                             ps2x::native::Renderer::instance().beginGroup(++s.group);
+                        viewClip();
                             if (pc == 0x1d40u)
                                 rain(s, triangles);
                             else if (pc == 0x0000u && !matches(kVertexPasses, s.code, pc))
@@ -2901,6 +2948,7 @@ namespace tmb::native
                     {
                         flush(s, triangles);
                         ps2x::native::Renderer::instance().beginGroup(++s.group);
+                        viewClip();
                         ps2x::native::Renderer::instance().setKey(0);
                         s.direct->setSource(0xd1ec7u);
                         s.direct->packet(reinterpret_cast<const uint8_t *>(words + i), have * 4u);
@@ -2922,12 +2970,14 @@ namespace tmb::native
         ps2x::native::Screen screen()
         {
             ps2x::native::Screen screen;
+            // A match draws fields (the frame's every other line), the shell's menus whole frames.
+            const float lines = menusNative() ? 2.0f : 1.0f;
 #if defined(TMB_REGION_US)
-            screen.originY = 2048.0f - 112.0f; // NTSC: a 640 x 224 field
-            screen.height = 224.0f;
+            screen.originY = 2048.0f - 112.0f * lines; // NTSC: a 640 x 224 field
+            screen.height = 224.0f * lines;
 #else
-            screen.originY = 2048.0f - 128.0f;
-            screen.height = 256.0f;
+            screen.originY = 2048.0f - 128.0f * lines;
+            screen.height = 256.0f * lines;
 #endif
             // The microprograms write Z as FTOI4 of z / w, but into XYZF2 (the strips, the sprites: they carry fog),
             // whose 24-bit Z is that word over 16: GS Z is z / w itself. With 16, the adapter's scenery sat 16 times
@@ -3025,7 +3075,12 @@ namespace tmb::native
             ps2x::native::setDirectGate(&directDrawnNatively);
             // In the GS stream where VU1's output would have been (with PS2X_GS_RENDERER=native: particles, the 2D
             // and the other GS draws sort with the 3D); with other GS renderers present() draws over the GS frame.
-            ps2x::native::Renderer::instance().setStreamDraws(true);
+            // TMB_NATIVE_FRAME=1: the native renderer's own frame instead (its targets, presented by it), the GS front end
+            // left out of it.
+            const char *own = std::getenv("TMB_NATIVE_FRAME");
+            const bool ownFrame = own && *own == '1';
+            ps2x::native::Renderer::instance().setStreamDraws(!ownFrame);
+            ps2x::native::Renderer::instance().setPresentsAlone(ownFrame);
         }
     }
 
@@ -3050,6 +3105,7 @@ namespace tmb::native
             renderer.endFrame();
             renderer.beginFrame(screen());
             state().keysThisFrame.clear();
+            std::memset(g_viewCleared, 0, sizeof(g_viewCleared));
             tmb::meshes::endFrame();
         }
     }

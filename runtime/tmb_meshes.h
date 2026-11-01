@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace tmb::meshes
@@ -32,6 +33,10 @@ namespace tmb::meshes
         // adapter compares its own translation).
         std::vector<std::vector<ps2x::native::Vertex>> checkStrips;
     };
+
+    // Where a pack is (the mesh pack, the texture pack): the environment's <envName>, else the path built in when it
+    // exists (the build's generated folder), else the file of that name next to the game's ELF or the runner.
+    std::string packPath(const char *envName, const char *builtIn);
 
     // TMB_NATIVE_MESHES=1 with TMB_NATIVE=1.
     bool enabled();

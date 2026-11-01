@@ -1435,3 +1435,41 @@ What is left for the bundled compiler:
   90 s tools step.
 - The runner taking its defaults (TMB_NATIVE, the wall clocks, PS2X_IOP_NATIVE, the packs and `disc.iso` next to the
   exe) from itself, so `Play TMB.cmd` becomes just the exe.
+
+## The runner as a PC game (2026-11-01)
+
+What a player gets from a double-click, without the scripts (README, "As a PC game"):
+
+- Defaults. `TMB_NATIVE` defaults to 1 (`tmb::host::setEnvDefault` in `tmb::native::enabled()` and in the static
+  initializer of `runtime/tmb_overrides.cpp` that already defaulted `PS2X_GS_RENDERER=native`, `PS2X_IOP_NATIVE=1`,
+  the wall clocks and native audio from it), so nothing `scripts/run_native.sh` exports is needed any more; set
+  variables still win. `PS2X_SHOW_FPS` is no longer defaulted to 1 (run_native.sh sets it); `scripts/run.sh` sets
+  `TMB_NATIVE=0` to stay the PS2 path.
+- The fork's generic part (`ps2xRuntime/include/ps2_app.h`, `src/lib/ps2_app.cpp`), switched on by the port's CMake
+  (`PS2X_APP_TITLE`, `PS2X_APP_FOLDER`, `PS2X_APP_XDG_FOLDER`, `PS2X_APP_BOOT_ELF`, `PS2X_APP_DATA_FOLDER`; a port
+  without them is unchanged): the user folder (`IoPaths::mcRoot`, `input.ini`, `video.ini`, `imgui.ini` there), the
+  boot ELF looked for in `<exe>/game/` then `<user>/game/`, the one-time copy of the old cards and settings, the log,
+  the crash filter and the message boxes. TMB's CMake names them and builds the runner GUI-subsystem
+  (`PS2X_SHOW_WINDOWS_CONSOLE OFF`, the fork's existing switch) with `runtime/app/tmb.rc` (icon as `GLFW_ICON`, which
+  GLFW gives the window class, and version information).
+- The log: stdout and stderr go through two pipes; a reader thread each writes to the log file and to the original
+  handle (the terminal or the redirection when there is one; a GUI runner started from cmd / PowerShell attaches to
+  their console), keeping the last 200 lines for crash reports. The readers use ReadFile / WriteFile, not `_read` /
+  `_write`: those hold the CRT's descriptor lock while blocked. Draining at exit does not ask the pipe
+  (`PeekNamedPipe` waits behind the reader's blocking ReadFile on the same handle: the first version hung at exit);
+  it waits for the readers to be idle 40 ms (at most 1 s).
+- Crash filter (`SetUnhandledExceptionFilter`): the report is written from a fresh thread (a stack overflow leaves the
+  crashed one no room), first without the stack, then with it (an `RtlVirtualUnwind` walk from the exception's
+  context; a fault in the walk ends that thread, the first file stands); a second thread shows the message box after
+  hiding the game's windows asynchronously (their thread may be the crashed one); then `TerminateProcess` with the
+  exception code. A second crashing thread waits for the first report. `std::terminate` and a fatal exception in
+  `main` write the same report (no stack).
+- Packs: `TMB_TEXTURE_PACK` / `TMB_MESH_PACK` are the build's generated folder; when that path does not exist (a copy
+  of the runner elsewhere) the pack of that name next to the ELF or the runner is used.
+- The disc image: the raw sector reads (the sound banks) need the `.iso`, found as before beside or above the ELF, so
+  in a player's `game/` folder with the disc files. Without it the game runs silent (`[tmb] no disc image found`).
+- Checked: from a copy of the runner with `game/` beside it (the disc files, the ISO hard-linked) and only
+  `PS2X_CAPTURE_WINDOW_DIR` set, started as Explorer starts it (no console, no argument), the boot movies, the menus
+  and a Challenge match in Suburbs natively (`[tmb:gs] no GS front end`, the recompiled IOP modules, the native mixer
+  playing), cards and video.ini migrated, the log written; the scripted Challenge runs (`arena.sh`) of main's runner
+  and of this one with the variables and without them; a forced crash (`PS2X_TEST_CRASH`) in a match.

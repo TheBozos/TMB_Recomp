@@ -66,6 +66,7 @@
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_texture_cache.h"
 #include "runtime/ps2_memory.h"
+#include "ps2_app.h"
 
 #include <algorithm>
 #include <cmath>
@@ -73,6 +74,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <immintrin.h>
 #include <memory>
@@ -170,9 +172,8 @@ namespace tmb::meshes
             if (s_loaded)
                 return s_pack;
             s_loaded = true;
-            const char *path = std::getenv("TMB_MESH_PACK");
-            if (!path || !*path)
-                path = TMB_MESH_PACK;
+            const std::string pathText = packPath("TMB_MESH_PACK", TMB_MESH_PACK);
+            const char *path = pathText.c_str();
             if (!s_pack.load(path))
             {
                 if (s_pack.error() == "missing")
@@ -1518,6 +1519,21 @@ namespace tmb::meshes
     }
 
     bool enabled() { return active(); }
+
+    std::string packPath(const char *envName, const char *builtIn)
+    {
+        if (const char *path = std::getenv(envName); path && *path)
+            return path;
+        std::error_code ec;
+        if (std::filesystem::exists(builtIn, ec))
+            return builtIn;
+        // A copy of the runner with its data (the pack beside the game's files, or beside the runner).
+        const std::filesystem::path name = std::filesystem::path(builtIn).filename();
+        for (const std::filesystem::path &dir : {PS2Runtime::getIoPaths().elfDirectory, ps2x::app::executableDirectory()})
+            if (!dir.empty() && std::filesystem::exists(dir / name, ec))
+                return (dir / name).string();
+        return builtIn;
+    }
 
     // The game's order unless the adapter follows the stream (TMB_NATIVE_VIF=1), where TMB_NATIVE_MESHES_CHECK=1 keeps
     // it to compare the two.

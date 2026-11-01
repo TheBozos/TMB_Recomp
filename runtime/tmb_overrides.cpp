@@ -1617,8 +1617,11 @@ namespace
     // 1 is the PS2's own: the 3D and HUD of a 640 x 224 NTSC field look soft on a PC screen); no cost in frame rate.
     // The rest of the native port too: the IOP modules recompiled by scripts/iop_recomp.sh run as native code (the
     // others interpreted), the SPU2 mixed and the IOP run on the PC's clock. Each can be set to 0.
+    // The native port is the default (a double-click starts it, scripts/run_native.sh no longer needed for it):
+    // TMB_NATIVE=1 unless the environment says otherwise (TMB_NATIVE=0 is the GS front end path, a diagnostic).
     const bool g_nativeGsDefault = []
     {
+        tmb::host::setEnvDefault("TMB_NATIVE", "1");
         if (tmb::native::enabled())
         {
             tmb::host::setEnvDefault("PS2X_GS_RENDERER", "native");
@@ -1664,8 +1667,8 @@ namespace
                       << std::endl;
         else if (runtime.gsForPresentation().requestParallelRenderer())
             std::cout << "[tmb] GS on the GPU (PS2X_GS_RENDERER=cpu for the CPU rasterizer)" << std::endl;
-        // The game's frame rate at the top right while the speed work goes on (F3 hides it, PS2X_SHOW_FPS=0 is off).
-        tmb::host::setEnvDefault("PS2X_SHOW_FPS", "1");
+        // The game's frame rate at the top right: off for players (F3 shows it; PS2X_SHOW_FPS=1 starts with it, as
+        // scripts/run_native.sh does).
         // Rasterize on 4 worker threads (TMB_GS_SERIAL=1 keeps the GS thread alone).
         if (const char *serial = std::getenv("TMB_GS_SERIAL"); runtime.hasGs() && !(serial && *serial == '1'))
         {

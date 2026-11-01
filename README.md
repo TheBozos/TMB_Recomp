@@ -207,8 +207,8 @@ scripts/build_tools.sh                                                  # ps2_re
 scripts/recomp.sh                                                       # ELF + recomp/tmb_scus97101.toml -> generated_us/ (VU1 microcode -> generated_us/vu1/)
 scripts/build_runtime.sh                                                # runtime + generated code -> build/game_us
 scripts/iop_recomp.sh                                                   # the IOP modules from game_us/MOD, loaded offline -> generated_us/iop/ (then rebuild)
-scripts/run_native.sh                                                   # the native port (native renderer, recompiled sound driver, sound on the PC clock)
-scripts/run.sh                                                          # the PS2 path only (VU1 and GS simulated), for comparison
+scripts/run_native.sh                                                   # the native port (native renderer, recompiled sound driver, sound on the PC clock), with the fps counter
+scripts/run.sh                                                          # the PS2 path only (VU1 and GS simulated, TMB_NATIVE=0), for comparison
 scripts/pgo.sh                                                          # optional, experimental: profile-guided rebuild (~200 s of scripted play)
 ```
 
@@ -233,11 +233,43 @@ errors) and the last frame.
 `scripts/analyze.sh` regenerates the TOML from scratch; it discards manual edits, so diff before committing.
 The runner build compiles about 70 MB of generated C++ and takes a while the first time.
 
-Run the game with the extracted disc folder as `cdrom0:` (that is what `scripts/run.sh` does):
+Run the game with the extracted disc folder as `cdrom0:` (that is what `scripts/run_native.sh` does):
 
 ```bash
 build/game_us/PS2Recomp/ps2xRuntime/ps2EntryRunner game_us/SCUS_971.01
 ```
+
+### As a PC game (no scripts, no variables)
+
+The runner started with nothing set (a double-click on `ps2EntryRunner.exe`) is the full native port, the same game as
+`scripts/run_native.sh`: everything that script sets (`TMB_NATIVE=1`, the native renderer, the recompiled sound driver,
+the sound and the IOP on the PC's clock) is the runner's default, and the variables below still change it
+(`TMB_NATIVE=0`: the PS2 path). The frame rate counter is off (F3 shows it, `PS2X_SHOW_FPS=1` starts with it, as
+`scripts/run_native.sh` does).
+
+- **Game data.** With no argument the runner looks for `game/SCUS_971.01` next to it, then in the user folder; `game/`
+  holds the disc's files and the disc image (`.iso`, for the raw sector reads: the sound banks). With neither, a message
+  box says the data was not found (run the launcher, or see this README) and where it looked.
+- **Window.** Titled *Twisted Metal: Black*, with an icon (a placeholder, `runtime/app/tmb.ico`; no game art). No
+  console window on Windows: the runner is a GUI-subsystem program. Started from a terminal (MSYS2, cmd, PowerShell) or
+  with its output redirected, it prints there as before.
+- **User folder.** `%APPDATA%\TMB_Recomp` on Windows, `$XDG_DATA_HOME/tmb_recomp` (`~/.local/share/tmb_recomp`) on
+  Linux, created on the first run (`PS2X_USER_DIR=<dir>` for another one):
+
+  | What | Where in the user folder |
+  |---|---|
+  | Memory cards | `mc0/`, `mc1/` |
+  | Settings (F2) | `input.ini`, `video.ini` (`PS2X_INPUT_CONFIG`, `PS2X_VIDEO_CONFIG` still name other files), `imgui.ini` |
+  | Log | `logs/TMB_Recomp.log`, the two runs before as `TMB_Recomp.1.log`, `TMB_Recomp.2.log`: everything the runner prints (`PS2X_LOG_FILE=<file>` another file, `=0` none) |
+  | Crash reports | `crashes/crash-<date>-<time>.txt` |
+
+  The first run copies the cards and settings kept next to the ELF until now (`game_us/mc0`, `mc1`, `input.ini`,
+  `video.ini`) into it, once per old folder (`migrated.txt` lists them): a save already on the new card is not
+  overwritten, nothing is deleted.
+- **Crashes (Windows).** A crash writes a report (the exception, its address and module, the stack as module+offset
+  with the address `addr2line -f -C -e ps2EntryRunner.exe` takes, the last 200 log lines) and a message box points at
+  it and at the log: what a player attaches to a bug report. `PS2X_TEST_CRASH=<s>` crashes on purpose after s seconds
+  to try it; `PS2X_NO_DIALOGS=1` keeps message boxes out of unattended runs (the log has their text).
 
 Player 1 plays with the keyboard and the first controller, player 2 with the second controller. The default keys (US
 key positions):
@@ -254,7 +286,7 @@ key positions):
 | Key | What it does |
 |---|---|
 | F1 | Runtime debugger |
-| F2 | Settings. Controls: rebind every PS2 button and stick direction, per player, to keys, controller buttons, sticks and triggers, mouse buttons, the wheel or mouse movement (sensitivity, invert Y, cursor capture). Saved to `input.ini` in the disc folder (`game_us/input.ini`; `PS2X_INPUT_CONFIG=<file>` for another place). Video: the resolution (common 4:3 and 16:9 sizes up to the monitor's, and the monitor's own), windowed, fullscreen (the monitor switched to that resolution) or borderless window (the monitor's size), and the render scale (the 3D at 50 % to 200 % of the window's resolution; 200 % is supersampled); Apply changes them at once, Apply and save writes `video.ini` next to `input.ini` (`PS2X_VIDEO_CONFIG=<file>` for another place), read when the window opens. The picture stays 4:3, centred with bars, whatever the window's shape. |
+| F2 | Settings. Controls: rebind every PS2 button and stick direction, per player, to keys, controller buttons, sticks and triggers, mouse buttons, the wheel or mouse movement (sensitivity, invert Y, cursor capture). Saved to `input.ini` in the user folder (`%APPDATA%\TMB_Recomp\input.ini`; `PS2X_INPUT_CONFIG=<file>` for another place). Video: the resolution (common 4:3 and 16:9 sizes up to the monitor's, and the monitor's own), windowed, fullscreen (the monitor switched to that resolution) or borderless window (the monitor's size), and the render scale (the 3D at 50 % to 200 % of the window's resolution; 200 % is supersampled); Apply changes them at once, Apply and save writes `video.ini` next to `input.ini` (`PS2X_VIDEO_CONFIG=<file>` for another place), read when the window opens. The picture stays 4:3, centred with bars, whatever the window's shape. |
 | F11, Alt+Enter | Between the window and full screen (the last full-screen mode chosen, borderless by default) |
 
 ### Cheats
@@ -278,7 +310,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 
 | Variable | Effect |
 |---|---|
-| `TMB_NATIVE=1` | The native port: the native renderer at 2x, no GS front end, the recompiled IOP modules, the native sound mixer, the IOP on the PC's clock (`scripts/run_native.sh` sets it; each part has its own switch below) |
+| `TMB_NATIVE=0` | Not the native port (the default, `TMB_NATIVE=1`: the native renderer at 2x, no GS front end, the recompiled IOP modules, the native sound mixer, the IOP on the PC's clock; each part has its own switch below): the PS2 path, as `scripts/run.sh` runs it |
 | `TMB_GS_FRONTEND=1` | The GS front end exists again (constructed, its GS memory, its thread, the GS native back end), headless: it receives nothing and draws nothing, as before the GS front end was removed; `[tmb:gs]` (with `TMB_TRACE_PACKETS=1`) then lists what reaches it. By default (`ps2x::native::setGsFrontEndAbsent`, decided before the runtime starts) there is no GS object, no GS memory, no GS thread and no raster backend; the guest's CSR reads get FIELD from the native display, its writes to the display registers are dropped, the libgraph calls reach no GS. Every switch below that needs the GS front end (`TMB_GS_HEADLESS=0`, `TMB_GS_PACKETS=1`, `TMB_NATIVE_VIF=1`, `TMB_NATIVE_FRAME=0`, `TMB_NATIVE_VU1=1`, `TMB_VIF0_PACKETS=1`, `TMB_VU0_NATIVE=0`, `PS2X_VU0_HLE_CHECK=1`, a `PS2X_GS_RENDERER` other than native) brings it back too |
 | `TMB_GS_HEADLESS=0` | The GS front end back (as `TMB_GS_FRONTEND=1`), drawing its (unseen) frame from the game's packets; by default there is no GS front end |
 | `TMB_GS_PACKETS=1` | The fork reads the game's VIF1 and GIF DMA chains again (its VIF1 interpreter, the GIF tags, the headless GS front end looking for SIGNAL / FINISH / LABEL), for an A/B. By default a DMA kick to VIF1 or the GIF completes unread (`ps2x::native::setGsDmaSkipped`): no DMA tag, VIFcode or GIF tag is read, the libgraph image transfers and drawing environment send nothing, and the channel's end (STR, D_STAT, its DMAC handlers) comes at the kick |
@@ -323,7 +355,8 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `TMB_TRACE_FRAMES=1` | Every 100 frames: frame time split, EE idle and VIF1/GS waits, CPU ms per frame of each host thread |
 | `TMB_TRACE_TIMELINE=<file>` | 4 s of the match as a timeline (game events, game/vif1/gs thread CPU every 0.2 ms) for `tools/timeline.py` |
 | `PS2X_IOP_THREAD=1` | Run the IOP on its own thread (experimental, slower in TMB today) |
-| `PS2X_SHOW_FPS=0` | Hide the frame rate counter at the top right (on by default; F3 toggles it while playing) |
+| `PS2X_SHOW_FPS=1` | Show the frame rate counter at the top right from the start (off by default, on with `scripts/run_native.sh`; F3 toggles it while playing) |
+| `PS2X_USER_DIR=<dir>`, `PS2X_LOG_FILE=<file>\|0`, `PS2X_NO_DIALOGS=1`, `PS2X_TEST_CRASH=<s>` | Another user folder; another log file or none; message boxes to the log only; a crash on purpose after s seconds (As a PC game above) |
 | `PS2X_GS_RENDERER=parallel` / `cpu` | The emulated GS instead of the GS native back end: paraLLEl-GS (Vulkan; the default without `TMB_NATIVE=1`) or the CPU rasterizer |
 | `TMB_TRACE_POS=<file>` | Every vehicle's position at each collision pass (`scripts/bots.sh` and `tools/falls.py` count the falls) |
 | `TMB_TRACE_BLACKBOX=<file>` | Dump the player vehicle's last 64 frames when its position goes wild |

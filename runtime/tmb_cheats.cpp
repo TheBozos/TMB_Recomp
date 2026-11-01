@@ -1,5 +1,5 @@
 // Cheats, switched while playing from the Cheats tab of the settings window (F2), per human player; the environment
-// gives their values at launch (TMB_NO_AI, TMB_PLAYER_GOD, TMB_INFINITE_AMMO, TMB_INFINITE_ENERGY,
+// gives their values at launch (TMB_UNLOCK_ALL, TMB_NO_AI, TMB_PLAYER_GOD, TMB_INFINITE_AMMO, TMB_INFINITE_ENERGY,
 // TMB_ENEMY_HEALTH_CAP; TMB_PLAYER_HEALTH_CAP is the testing opposite, a cap on the player's health).
 //
 // What the game keeps, from its own code:
@@ -17,6 +17,12 @@
 //   reaches 0).
 // - Energy (the freeze / mines / shield moves of the stick combos): int at + 0x2214 of + 0x2218 (the HUD's energy
 //   bar, Hud::build4PEnergyBar).
+// - Progress: the Shell (at 0x40BCC0, the pointer at gp - 0x4148) keeps what is locked as words at Shell + 0x18000 +
+//   offset, 1 locked and 0 open; Shell::Shell (0x15F270) sets a fresh save's (what loadGlobalData then overwrites
+//   from the card's globalFile): the vehicles at + 0x218C + 4 * car (16; uiCarSel and uiAiSel play the locked sound
+//   on a 1; 9-12, 14 and 15 locked at first), the levels at + 0x21CC + 4 * level (21; uiLvlSel, the same; Shell::
+//   EvaluateEnduranceStatus clears 2 Freeway, 15 and 18 when their endurance kills are reached), and per character its
+//   movies, three arrays of 14 at + 0x2220, + 0x2258, + 0x2290 (uiMovies; 2 for a movie the character does not have).
 
 #include "game_overrides.h"
 #include "ps2_runtime.h"
@@ -32,6 +38,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace tmb::cheats
 {
@@ -45,10 +52,19 @@ namespace tmb::cheats
         constexpr uint32_t kHealth = 0x3F4u, kHealthMax = 0x3F0u, kDriver = 0x580u;
         constexpr uint32_t kWeaponCounts = 0x22C4u, kEnergy = 0x2214u, kEnergyMax = 0x2218u;
         constexpr int kMaxPlayers = 4;
+        constexpr uint32_t kGpShell = 0x4148u, kShellProgress = 0x18000u;
+        // The shell screens that read the locks, and the lock arrays (offset, count) from Shell + 0x18000.
+        constexpr uint32_t kUiLvlSel = 0x001976B0u, kUiCarSel = 0x001963B0u, kUiAiSel = 0x001986A8u, kUiMovies = 0x00190760u;
+        constexpr struct
+        {
+            uint32_t offset, count;
+        } kLocks[] = {{0x218Cu, 16u}, {0x21CCu, 21u}, {0x2220u, 14u}, {0x2258u, 14u}, {0x2290u, 14u}};
 
         // One bit per player (bit 0: player 1).
         std::atomic<uint32_t> g_infiniteHealth{0}, g_infiniteAmmo{0}, g_infiniteEnergy{0};
         std::atomic<bool> g_noAi{false};
+        std::atomic<bool> g_unlockAll{false};
+        std::vector<uint32_t> g_unlocked; // the lock words Unlock everything opened (put back when it goes off)
         std::atomic<float> g_enemyCap{-1.0f};  // weak enemies: every computer vehicle's health held at most this; < 0 off
         std::atomic<float> g_playerCap{-1.0f}; // TMB_PLAYER_HEALTH_CAP (testing)
         std::atomic<uint32_t> g_theGame{0};
@@ -146,6 +162,42 @@ namespace tmb::cheats
             DecrementWeaponCount__7TheGameP7Vehiclei_0x1515a8(rdram, ctx, runtime);
         }
 
+        // Unlock everything: every lock word still 1 opened; off, the ones it opened closed again (the game's own unlocks
+        // since then stay, the card is written only when the player saves).
+        void applyUnlocks(uint8_t *rdram, uint32_t gp)
+        {
+            const uint32_t shell = word(rdram, gp - kGpShell);
+            if (shell == 0u)
+                return;
+            const uint32_t progress = shell + kShellProgress;
+            if (g_unlockAll.load(std::memory_order_relaxed))
+            {
+                for (const auto &locks : kLocks)
+                    for (uint32_t i = 0; i < locks.count; ++i)
+                    {
+                        const uint32_t address = progress + locks.offset + i * 4u;
+                        if (word(rdram, address) == 1u)
+                        {
+                            setWord(rdram, address, 0u);
+                            g_unlocked.push_back(address);
+                        }
+                    }
+            }
+            else if (!g_unlocked.empty())
+            {
+                for (const uint32_t address : g_unlocked)
+                    if (word(rdram, address) == 0u)
+                        setWord(rdram, address, 1u);
+                g_unlocked.clear();
+            }
+        }
+        template <void (*Screen)(uint8_t *, R5900Context *, PS2Runtime *)>
+        void shellScreenOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            applyUnlocks(rdram, getRegU32(ctx, 28));
+            Screen(rdram, ctx, runtime);
+        }
+
 #if defined(PS2X_ENABLE_DEBUG_UI)
         void perPlayer(const char *label, std::atomic<uint32_t> &flags, int players)
         {
@@ -175,6 +227,11 @@ namespace tmb::cheats
             const uint32_t game = g_theGame.load(std::memory_order_relaxed);
             const int players = rdram ? playerCount(rdram, game) : 0;
             ImGui::TextDisabled(players ? "In a match: %d player(s). Changes apply at once." : "They act in a match.", players);
+
+            bool unlock = g_unlockAll.load(std::memory_order_relaxed);
+            if (ImGui::Checkbox("Unlock everything (levels, vehicles, movies)", &unlock))
+                g_unlockAll.store(unlock, std::memory_order_relaxed);
+            ImGui::TextDisabled("Opened in the menus; saving the game while it is on keeps them on the card.");
 
             ImGui::SeparatorText("Players");
             perPlayer("Infinite health", g_infiniteHealth, players);
@@ -310,6 +367,7 @@ namespace tmb::cheats
     void install(PS2Runtime &runtime)
     {
         g_noAi.store(std::getenv("TMB_NO_AI") && *std::getenv("TMB_NO_AI") == '1');
+        g_unlockAll.store(std::getenv("TMB_UNLOCK_ALL") && *std::getenv("TMB_UNLOCK_ALL") == '1');
         g_infiniteHealth.store(envMask("TMB_PLAYER_GOD"));
         g_infiniteAmmo.store(envMask("TMB_INFINITE_AMMO"));
         g_infiniteEnergy.store(envMask("TMB_INFINITE_ENERGY"));
@@ -317,6 +375,10 @@ namespace tmb::cheats
         g_playerCap.store(envFloat("TMB_PLAYER_HEALTH_CAP"));
         runtime.registerFunction(kAiUpdateInputs, &aiUpdateInputsOverride);
         runtime.registerFunction(kDecrementWeaponCount, &decrementWeaponCountOverride);
+        runtime.registerFunction(kUiLvlSel, &shellScreenOverride<&uiLvlSel__Fv_0x1976b0>);
+        runtime.registerFunction(kUiCarSel, &shellScreenOverride<&uiCarSel__Fv_0x1963b0>);
+        runtime.registerFunction(kUiAiSel, &shellScreenOverride<&uiAiSel__Fv_0x1986a8>);
+        runtime.registerFunction(kUiMovies, &shellScreenOverride<&uiMovies__Fv_0x190760>);
 #if defined(PS2X_ENABLE_DEBUG_UI)
         ps2x::debugui::registerTab("Cheats", &drawTab);
 #endif

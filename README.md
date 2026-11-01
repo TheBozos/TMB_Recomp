@@ -230,6 +230,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 
 | Cheat | | Variable |
 |---|---|---|
+| Unlock everything | every level (Freeway, Prison Passage, Skyscrapers, Minion's Stadium...), every vehicle (Yellow Jacket, Axel, Warthog, Manslaughter, Minion...) and every movie, opened in the menus; switched off, put back; saving while it is on keeps them on the card | `TMB_UNLOCK_ALL=1` |
 | Infinite health | per player: the car's health held at its maximum (the game's own, as its health bar shows it) | `TMB_PLAYER_GOD=<players>` |
 | Infinite ammo | per player: pickup weapons and the special are not spent (the HUD's counts stay) | `TMB_INFINITE_AMMO=<players>` |
 | Infinite energy | per player: the energy bar (freeze, mines, shield...) held full | `TMB_INFINITE_ENERGY=<players>` |
@@ -275,7 +276,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `PS2X_VU1_RECORD=<file>` | Record VU1 microprogram runs for `ps2_vu1_replay` / `build/game/tmb_vu1_replay` (with the compiled microcode; the default fast VU1 path differs in cycle counts only, `TMB_VU1_EXACT=1 scripts/recomp.sh` for the exact one) |
 | `PS2X_VU_AOT=0` | Interpret the VU1 microcode instead of running the compiled one |
 | `TMB_VBLANK_HOLD=<ms>` | With `TMB_NATIVE_FRAMES=0`: hold the vblank up to <ms> while a match frame finishes (default 6; 0 off); `TMB_VBLANK_HOLD_AB=1` compares on/off in one run |
-| `TMB_ENEMY_HEALTH_CAP=<x>`, `TMB_NO_AI=1`, `TMB_PLAYER_GOD`, `TMB_INFINITE_AMMO`, `TMB_INFINITE_ENERGY` | The cheats at launch (Cheats above; the F2 tab changes them) |
+| `TMB_UNLOCK_ALL=1`, `TMB_ENEMY_HEALTH_CAP=<x>`, `TMB_NO_AI=1`, `TMB_PLAYER_GOD`, `TMB_INFINITE_AMMO`, `TMB_INFINITE_ENERGY` | The cheats at launch (Cheats above; the F2 tab changes them) |
 | `TMB_CHEATS_LOG=1`, `TMB_CHEATS_TOGGLE=<s>` | Testing: every 250 frames each player's health, energy and weapon counts, and each weapon the players spend (`[tmb:cheats]`); every cheat switched on and off every <s> seconds; `PS2X_SETTINGS_OPEN=Cheats` opens the settings window on that tab (any tab: Controls, Video) |
 | `TMB_KILL_ENEMIES=<s>` | Testing: every <s> seconds every opponent alive takes a killing hit through the game's own damage function (the kill counts; scripted story runs) |
 | `TMB_AB=<hold\|slice\|lag\|holdlimit\|fill>` | In-run A/B of an experiment, on and off every 100 vblanks, real-time fps and game speed per mode |

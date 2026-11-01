@@ -1304,3 +1304,24 @@ The Cheats tab (F2, `runtime/tmb_cheats.cpp`) acts on what the game's own code r
   health stayed 180 for the whole match. 2P split screen (`PS2X_PAD2_SCRIPT`, MULTI-PLAYER with the defaults),
   `TMB_INFINITE_AMMO=2`: at each shot player 1's counts went down (2 -> 1, special 4 -> 1) and player 2's slot 2 stayed
   at 2 for 21 shots; 60 fps.
+
+## Unlock everything: the progress locks (2026-11-01)
+The shell keeps what a save has opened as words in the Shell object (0x40BCC0, its pointer at gp - 0x4148), at
+Shell + 0x18000 + offset, 1 locked and 0 open. `Shell::Shell` (0x15F270, run by the static constructor
+`_GLOBAL__I_commandLinePageCars`) sets a fresh save's; `UiMemCard::loadGlobalData` replaces them from the card's
+`globalFile` and `saveGlobalData` packs them back into it.
+- Vehicles: + 0x218C + 4 * car, 16 (`uiCarSel` and `uiAiSel` play the locked sound, `func_179720(0x1A144, 0xB)`, on a
+  1). A fresh save: cars 9-12, 14 and 15 locked; the car select shows "Locked" for Yellow Jacket, Axel, Warthog,
+  Manslaughter and Minion.
+- Levels: + 0x21CC + 4 * level, 21 (`uiLvlSel`, the same test). A fresh save: 2, 3, 4, 7, 9, 11, 13, 14, 15, 18-20
+  locked; the Challenge level select shows the keyhole on Freeway ("unlock with 10 endurance kills in 'Snowy Roads'"),
+  Prison Passage, Skyscrapers and Minion's Stadium (the earlier note that the cursor skipped Prison Passage was this).
+  `Shell::EvaluateEnduranceStatus` (0x15F860) is the game's own unlock: at the kill count on the right level it stores 0
+  in 2 (Freeway), 15 or 18, sets + 0x2188, shows the message and plays `playUnlockedLevelSound`.
+- Movies: per character, three arrays of 14 at + 0x2220, + 0x2258, + 0x2290 (`uiMovies` reads them; 2 marks a movie
+  the character does not have, left as it is).
+Unlock everything (`runtime/tmb_cheats.cpp`, `TMB_UNLOCK_ALL=1` or the Cheats tab) hooks those four screens: while it is
+on, each sets every lock word still at 1 to 0 before the screen runs; switched off, it puts back to 1 the words it
+opened (those still 0). Nothing is written to the card unless the player saves.
+Checked (scripted Challenge, fresh card): without it, the five vehicles "Locked" and the four keyholes above; with it,
+all 15 vehicles shown with their names and the 10 arenas selectable, Freeway picked with opponents and played.

@@ -56,6 +56,7 @@ namespace tmb::twod
         // The picture loadImage last put in the display buffers (under g_movieMutex): the one shown through the display's
         // circuit 2 (ps2x::native::setDisplayPicture).
         std::shared_ptr<const ps2x::native::TextureCache::Texture> g_menuPicture;
+        std::atomic<bool> g_imageReplaced{false}; // loadImage drew a picture instead of transferring it (this vblank)
 
         constexpr uint32_t kFontBuildPrim = TMB_ADDR(0x001C5B28u);
         // displayDialog (a match's pause, won / lost and results overlays): where its loop flushes the font, and its D2
@@ -926,6 +927,7 @@ namespace tmb::twod
             if (!tmb::native::menusDrawn())
                 ps2x::native::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
                                                            screen.originY + (kFrameHeight - height) * 0.5f, width, height);
+            g_imageReplaced.store(true, std::memory_order_relaxed);
             const uint32_t held = getRegU32(ctx, 28) + static_cast<uint32_t>(kImageHeld);
             if (word(rdram, held) != 0u)
             {
@@ -935,6 +937,26 @@ namespace tmb::twod
                 return;
             }
             ctx->pc = getRegU32(ctx, 31); // jr $ra
+        }
+
+        // vblankHandler: the game's, then what handler_endimage did when the transfer it started ended (the GIF DMA end
+        // interrupt, now never raised): the handler sets the held flag only after loadImage returns, so the picture
+        // loadImage replaced is freed here (voBufDecCount: the buffer's count down by one), else the decoder could wait
+        // for that buffer while the next picture waits for it (an intermittent hang in a movie).
+        constexpr uint32_t kVblankHandler = TMB_ADDR(0x001C2898u);
+        void vblankHandlerOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            g_imageReplaced.store(false, std::memory_order_relaxed);
+            vblankHandler__Fi_0x1c2898(rdram, ctx, runtime);
+            if (!g_imageReplaced.exchange(false, std::memory_order_relaxed))
+                return;
+            const uint32_t held = getRegU32(ctx, 28) + static_cast<uint32_t>(kImageHeld);
+            if (word(rdram, held) == 0u)
+                return;
+            setWord(rdram, held, 0u);
+            const uint32_t count = word(rdram, kVoBuf + 0xcu);
+            if (static_cast<int32_t>(count) > 0)
+                setWord(rdram, kVoBuf + 0xcu, count - 1u);
         }
 
         // updateBarVSyncCallback: each vblank the bar creeps one 1024th (until the next step sets the real progress)
@@ -1041,6 +1063,7 @@ namespace tmb::twod
         runtime.registerFunction(kFinishShellLoop, &finishShellLoopOverride);
         ps2x::setStorePatch(&dialogKick);
         runtime.registerFunction(kLoadImage, &loadImageOverride);
+        runtime.registerFunction(kVblankHandler, &vblankHandlerOverride);
         if (on())
             ps2x::native::setMoviePictureHook(&moviePicture);
         runtime.registerFunction(kOverheat, &overheatOverride);

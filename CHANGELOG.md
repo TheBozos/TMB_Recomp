@@ -7,6 +7,8 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-02
+
 ### Added
 
 - **Smoother picture on high-refresh monitors, experimental** (F2, Video, "Frame rate": "Match the monitor"): on a 120, 144, 165
@@ -15,6 +17,19 @@ under "Unreleased" as they land, then move them under the new version's heading 
   itself still runs at 60, as it always did, and this costs one game frame (about 17 ms) more input lag. Off by
   default: "60 (the game's)" stays exactly as before. Experimental: a few effects (rain, snow, lens flares, some
   trails) still move at 60 against the smoother rest.
+
+### Changed
+
+- **New icon** for the launcher and the game window: The Bozos' clown, with its head on fire.
+- The project moved to The Bozos' GitHub organisation (github.com/TheBozos/TMB_Recomp). The launcher's update check
+  and links follow; the 0.1.0 launcher still finds new releases through GitHub's redirect.
+
+### Known limits
+
+- Story levels 2 to 8 are not checked to the end yet.
+- No widescreen yet.
+- Only the USA disc (SCUS-97101) is supported.
+- The launcher and the game are not signed: Windows SmartScreen asks for "More info", then "Run anyway".
 
 ## [0.1.0] - 2026-11-01
 
@@ -47,5 +62,6 @@ The first release. You build the game on your own PC from your own USA disc; not
 - Technical: built from TMB_Recomp's code and the PS2Recomp fork (`native/renderer`) with the build kit's GCC 16.2,
   FFmpeg 9.0.2 and Python 3.14; the default mode has no GS, VU or SPU2 emulation and no IOP hardware model.
 
-[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.1.0

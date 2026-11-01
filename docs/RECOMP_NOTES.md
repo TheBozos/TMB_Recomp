@@ -1219,3 +1219,63 @@ No hang: boot, then four times main menu -> Challenge -> Junkyard -> pause -> qu
 110`), and a three-cycle run: the sound throughout (silent only at loads and pauses), key ons and uploads rising, the
 same 989SND "still running ... letting the other threads run" lines as the emulated path (its command server polling;
 22 in the 180 s run on either path).
+
+## The IOP without hardware (2026-11-01)
+
+What was left of the PS2 on the IOP side, measured before changing anything: `[iop:hw]` (new, fork) counts every access
+to an IOP hardware address by device (interrupt controller, DMA channels, root counters, SIO2, SIO0, CDVD, SIF, SPU2,
+memory control, USB) and by the code that made it, every instruction the IOP's R3000 interpreter runs, and every
+interrupt a device model raises, as opposed to the callbacks the IOP's API runs on its own (timrman, vblank, cdvdman,
+sifman, the native audio's transfer callbacks). One line every 10 s of IOP clock in every run;
+`PS2X_IOP_REACH_DETAIL=1` adds the code behind each count (module + offset), where the interpreter was entered, and
+the imports answered natively by library.
+- Already API-level, nothing to replace: the IOP kernel (thbase threads, thsemap, thevent, sysmem, loadcore, heaplib,
+  sysclib, stdio), intrman (handlers and enables kept as intrman's own state), timrman (each allocated timer is a
+  callback scheduled on the IOP clock from the module's SetTimerCompare / SetTimerHandler calls, no counter register),
+  vblank, SIF (sifman's sceSifSetDma copies at once and runs its callback, sifcmd and RPC are calls between the EE's
+  libsif HLE and the module's server), cdvdman (reads from the disc image, the callback scheduled), ioman. On the EE
+  side libpad, libmc and the multitap are HLE (`Kernel/Stubs/Pad.cpp`, `MemoryCard.cpp`, `tmb_overrides.cpp`): PADMAN,
+  MCMAN, MCSERV and MTAPMAN are loaded and started but nothing ever calls them.
+- Hardware registers (boot, menus, a Challenge match, quit and a second match, 4P): 1012 accesses, all while the modules
+  start, none afterwards: USBD's probe of the USB host controller (1000 reads of HcCommandStatus waiting for its reset
+  bit, then it gives up: start 1, not resident), LIBSD's bus and DMA setup at start (2 reads, 6 writes: SSBUS delays,
+  DPCR), SIO2MAN's one write. Device interrupts: 0 in every period. SIO2 transfers: 0.
+- The interpreter was not idle: 989SND ran 30 k (menus) to 670 k (a match) interpreted instructions per 10 s, all the
+  way since the IOP modules were recompiled (the README said none). `tools/iop_recomp.py` stopped at a computed jump
+  (`jr v0`, a switch through a jump table: the voice / command dispatch at 0x592a4) and never explored its cases, so the
+  cases and what only they call (0x5abd0, 405 instructions, and the frameless leaves at 0x5ab9c and 0x5abb4) were left
+  to the interpreter, as were leaves without a stack frame taken only as pointers (0x5bcbc through a LUI pair, MCMAN's
+  `return 0` at 0x290a0 through a function table). Each entry into interpreted code was found by the detail mode's
+  "interpreter entered at ... after native ..." lines.
+
+Changes:
+- `tools/iop_recomp.py` (fork, generic: any port's IRX): at a JR on a register other than $ra, every address inside the
+  function that the image holds as a word (its jump table) becomes a label and an entry, explored with the rest; the
+  jump leaves the native code there and the IOP comes straight back in at the case. LUI pairs and data words that point
+  right after another function's JR $ra (and its delay slot, past nop padding) seed functions like prologues do. TMB's
+  modules: 989SND 410 -> 423 functions, PADMAN 130 -> 206, LGDEV 134 -> 159, LIBSD 57 -> 64, MCMAN 143 -> 153,
+  MTAPMAN 33 -> 36, SIO2MAN 47 -> 49, MCSERV 23 -> 24, USBD 106 -> 107; none left to the interpreter. Regenerate with `scripts/iop_recomp.sh` (generated code is not
+  committed). Interpreted instructions after boot: 0 in every run below (2 at boot before the MCMAN fix, 0 after).
+- `PS2X_IOP_HARDWARE=0` (fork, generic, read as the IOP is constructed): no device behind the IOP's registers. Every
+  hardware address is plain storage (a read gives what was last written there, or 0), observed and without effect: the
+  SIO2 and its DualShock 2 are detached, the INTC registers are not intrman's state, a DMA CHCR start bit starts
+  nothing, dmacman's SIO2 transfers do nothing. USBD still gives up (its reset bit reads back as written), LIBSD's bus
+  setup is stored and ignored. TMB sets it with `TMB_NATIVE=1` and native audio (`runtime/tmb_overrides.cpp`);
+  `TMB_IOP_HARDWARE=1` or `TMB_NATIVE_AUDIO=0` keeps the models.
+- Not done, and why: the interpreter itself stays (it is the fallback for an instruction the recompiler leaves out, such
+  as MTC0 or SYSCALL, and runs 0 instructions now); the IOP scheduler still keeps its own cycle clock, run from the EE's
+  cycle accounting on the PC's clock (`PS2X_IOP_WALLCLOCK=1`) and used for timer and vblank callbacks and thread delays
+  (a clock, not a device); pad and memory card stay the EE's HLE, so there was no padman / mcman path to make native.
+
+Proof (US, default mode, every run): `[iop:hw] hardware absent; 10 s: register accesses 0, interpreted instructions 0,
+device interrupts 0, device events 0 (API callbacks N)` in every period after the first, whose 1012 accesses are the
+start code above; the whole-run total stays 1012 to the end.
+- Sound against the main build (same scripted 180 s, `sc.py 1 175 118 130`, two recordings each, `wavcmp.py`): movies
+  and menus (10-100 s) main vs this within -0.1 to +0.2 dB per 10 s, log-spectrum cosine 0.83-0.995, sample-level
+  correlation up to 0.996; main vs main 0.83-0.995 / up to 0.993, this vs this 0.84-0.994 / up to 1.000; the same
+  silent seconds on all four (0-10, 103-104, 130-133); 21 "still running ... letting the other threads run" lines in
+  each of the four runs.
+- Two cycles of menus -> match -> pause -> quit to the menus (330 s): back at the menus both times, 60 fps, sound
+  throughout. 4P split screen (multitap, `main4p.sh`): four views at 60 fps, sound. Memory card: main menu LOAD GAME ->
+  the slot list (1-A to 1-D, 2) -> "TWISTED METAL STORY DATA DOES NOT EXIST" on an empty card (libmc HLE as before).
+  `TMB_IOP_HARDWARE=1`: `[iop:hw] hardware modelled`, the same counts.

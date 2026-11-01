@@ -46,7 +46,7 @@ What it reads:
   before each); the next starts with its pool's S-32 @180. A bone offset is 4 quadwords per bone: bone = offset / 4.
 
 The pack, all little-endian:
-  "TMBMESH4", u32 file count, then per file:
+  "TMBMESH5", u32 file count, then per file:
     u16 name length, name (upper case, no directory, e.g. "JUNKYARD.NGP"), u32 image size (inflated), u32 image CRC32,
     u32 object count, then per object (sorted by offset):
       u32 offset (obj - 0x980000 in the image), u32 kind (0 rigid, 1 pool-less, 2 sprite, 3 ribbon, 4 skinned),
@@ -71,6 +71,9 @@ The pack, all little-endian:
           bit 1 ADC: skip the triangle this vertex closes, never set by TMB's strips, bit 2 a corner the VU program
           expands from its point: corner = the vertex's index in the strip),
           u8 r, g, b, a, s16 s, t (4.12: st = s / 4096 plus the object's UV scroll), u16 pad.
+    then u32 GS context count, per context (sorted by offset): u32 offset (its block in the image: FLUSH, DIRECT n, a
+      GIF tag of A+D writes; hierTraverseAsm's s4 for the objects under a node, which pktAddVu1ObjAsm sends in their
+      header), u32 write count, per write u32 GS register (ALPHA_1, TEST_1, ZBUF_1 only), u64 value.
 """
 import os
 import struct
@@ -538,9 +541,43 @@ def convert_file(path):
     return image, meshes, problems, stats
 
 
+GS_CONTEXT_REGISTERS = {0x42, 0x47, 0x4e}  # ALPHA_1, TEST_1, ZBUF_1: what the hier objects' draws depend on
+
+
+def find_contexts(image):
+    """The GS context blocks in an image: FLUSH, DIRECT / DIRECTHL n in a quadword's upper words (its lower two 0), then a
+    PACKED GIF tag (NREG 1, A+D) of NLOOP <= n - 1 writes to GS registers. hierTraverseAsm keeps one per subtree (s4)
+    and pktAddVu1ObjAsm copies it into an object's header when it changed. Returns [(offset, [(address, value)])],
+    the writes those of GS_CONTEXT_REGISTERS."""
+    found = []
+    at = image.find(b'\x00\x00\x00\x11')
+    while at >= 0:
+        o = at - 8
+        if o >= 0 and o % 16 == 0 and o + 32 <= len(image):
+            w0, w1, _, code = struct.unpack_from('<4I', image, o)
+            tag, regs = struct.unpack_from('<QQ', image, o + 16)
+            nloop, flg, nreg = tag & 0x7fff, (tag >> 58) & 3, (tag >> 60) & 0xf
+            n = code & 0xffff
+            if (w0 == 0 and w1 == 0 and (code >> 24) & 0x7e == 0x50 and flg == 0 and nreg == 1 and regs & 0xf == 0xe
+                    and 0 < nloop and nloop + 1 <= n and o + 32 + nloop * 16 <= len(image)):
+                writes = []
+                ok = True
+                for q in range(nloop):
+                    value, address = struct.unpack_from('<QQ', image, o + 32 + q * 16)
+                    if address > 0x63:
+                        ok = False
+                        break
+                    if address in GS_CONTEXT_REGISTERS:
+                        writes.append((address, value))
+                if ok:
+                    found.append((o, writes))
+        at = image.find(b'\x00\x00\x00\x11', at + 1)
+    return found
+
+
 def write_pack(out_path, files):
     with open(out_path, 'wb') as out:
-        out.write(b'TMBMESH4')
+        out.write(b'TMBMESH5')
         out.write(struct.pack('<I', len(files)))
         for name, image, meshes in files:
             encoded = name.encode()
@@ -564,6 +601,11 @@ def write_pack(out_path, files):
                     out.write(struct.pack('<HHIiI', prim, gif_flags, w3, slot, len(vertices)))
                     out.write(b''.join(struct.pack('<H4B4B2hH', v[0], v[1], v[2], v[3], v[4], *v[5], v[6], v[7], 0)
                                        for v in vertices))
+            contexts = find_contexts(image)
+            out.write(struct.pack('<I', len(contexts)))
+            for offset, writes in contexts:
+                out.write(struct.pack('<II', offset, len(writes)))
+                out.write(b''.join(struct.pack('<IQ', a, v) for a, v in writes))
 
 
 def ngp_files(game):

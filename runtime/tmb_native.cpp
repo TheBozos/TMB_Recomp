@@ -12,6 +12,10 @@
 // checks them against VU1); the frame is published at the end of TMB's real-time processing.
 //
 // TMB_NATIVE=1 turns it on (the GS still draws its own frame under it; PS2X_NATIVE_VIEW=only shows the native one).
+//
+// Since the game's own order is known at its hooks (runtime/tmb_meshes.cpp, runtime/tmb_particles.cpp), the stream
+// reading above only runs with TMB_NATIVE_VIF=1 (a comparison mode): by default no VIF1 observer is registered, the
+// VU1 gate skips every program (skipEveryProgram) and the DIRECT packets go to the headless GS front end.
 
 #include "ps2_runtime.h"
 #include "runtime/native/native_renderer.h"
@@ -226,6 +230,14 @@ namespace tmb::native
             g_decisions.push_back({pc, skipped, direct});
             if (g_decisions.size() > 65536u) // nobody takes them (no gate)
                 g_decisions.pop_front();
+        }
+
+        // Without the VIF observer (the default): every program is drawn natively from the game's own data at its hook
+        // (the hier objects, tmb_meshes.cpp; the particles and lens flares, tmb_particles.cpp) or by nothing, so VU1 runs
+        // none, whatever the stream holds.
+        bool skipEveryProgram(const uint8_t *, uint32_t)
+        {
+            return true;
         }
 
         bool drawnNatively(const uint8_t *vu1Code, uint32_t startPc)
@@ -2199,6 +2211,24 @@ namespace tmb::native
                                  static_cast<unsigned long long>(s_objects), static_cast<unsigned long long>(s_differing), list.c_str());
                 }
             }
+            if (tmb::meshes::hookOrder())
+            {
+                // The comparison (TMB_NATIVE_MESHES_CHECK=1): drawn at its view's kick in the game's order; here the
+                // stream's GS state at the object (its context's DIRECT read before), then its register blocks followed.
+                tmb::meshes::streamReached(drawn.mark, s.alpha, s.test, s.depthMasked);
+                for (const tmb::meshes::Batch &batch : drawn.batches)
+                {
+                    if (batch.setsAlpha)
+                        s.alpha = batch.alpha;
+                    if (batch.setsTest)
+                        s.test = batch.test;
+                    if (batch.setsZbuf)
+                        s.depthMasked = batch.depthMasked;
+                    if (batch.setsTex0)
+                        s.lastTex0 = batch.tex0;
+                }
+                return;
+            }
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
             renderer.setKey(drawn.screenSpace ? 0u : drawn.key); // sprites: screen space, not interpolated
             static const float kScreenSpace[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
@@ -2890,7 +2920,15 @@ namespace tmb::native
                                 // here, in this group, instead of the strips' translation (the setup's state is kept
                                 // for a resume after it).
                                 tmb::meshes::Drawn drawn;
-                                if (mark != 0u && tmb::meshes::take(mark, drawn) && drawn.setupPc == pc)
+                                const bool taken = mark != 0u && tmb::meshes::take(mark, drawn);
+                                if (taken && drawn.setupPc != pc)
+                                {
+                                    static uint32_t s_logged = 0;
+                                    if (s_logged++ < 20u)
+                                        std::fprintf(stderr, "[tmb:mesh] object %#x: setup %#x at the hook, %#x in the stream: translated here\n", drawn.object,
+                                                     drawn.setupPc, pc);
+                                }
+                                if (taken && drawn.setupPc == pc)
                                 {
                                     submitDrawn(s, drawn);
                                     s.suppress = true;
@@ -3078,27 +3116,61 @@ namespace tmb::native
 
     }
 
+    // TMB_NATIVE_VIF=1: the adapter reads every VIF1 transfer (onVif1, the fork's VIF1 observer) and places the hier
+    // objects at their marks in it, with the GS state its DIRECT packets set, as before the game's own order was known
+    // (a comparison mode: with TMB_NATIVE_MESHES_CHECK=1 the objects are drawn in the hook order and the two compared).
+    // Off by default: nothing reads the VIF1 stream. TMB_NATIVE_FRAME=0 (draws placed in the GS front end's frame by
+    // their groups) needs it.
+    bool vifObserved()
+    {
+        static const bool s_on = []
+        {
+            const char *value = std::getenv("TMB_NATIVE_VIF");
+            const char *own = std::getenv("TMB_NATIVE_FRAME");
+            return (value && *value == '1') || (own && *own == '0');
+        }();
+        return s_on;
+    }
+
+    // The draws that follow clipped to the view the game draws now (tmb_meshes.cpp, at a view's kick).
+    void applyViewClip()
+    {
+        viewClip();
+    }
+
+    // The fog colour the GS fogs with (fogUpdate's FOGCOL), for the draws made outside the stream (0 until known).
+    uint32_t fogColour()
+    {
+        return gameFogColour(0u);
+    }
+
     void install()
     {
         if (!enabled())
             return;
         ps2x::native::Renderer::instance().setEnabled(true);
         ps2x::native::Renderer::instance().beginFrame(screen());
-        ps2x::native::setVif1Observer(&onVif1);
+        if (vifObserved())
+            ps2x::native::setVif1Observer(&onVif1);
         // TMB_NATIVE_VU1=1 keeps VU1 running them too (to compare with the GS frame).
         if (const char *keep = std::getenv("TMB_NATIVE_VU1"); !(keep && *keep == '1'))
         {
-            state().direct = std::make_unique<ps2x::native::GifToNative>();
-            if (checkLimit() > 0)
+            if (vifObserved())
             {
-                State &st = state();
-                st.check = std::make_unique<ps2x::native::Vu1Sandbox>();
-                st.check->gif().setCapture(&st.checkVertices, &st.checkMaterials);
-                st.checkEffects = std::make_unique<ps2x::native::Vu1Sandbox>();
-                st.checkEffects->gif().setCapture(&st.checkVertices, &st.checkMaterials);
+                state().direct = std::make_unique<ps2x::native::GifToNative>();
+                if (checkLimit() > 0)
+                {
+                    State &st = state();
+                    st.check = std::make_unique<ps2x::native::Vu1Sandbox>();
+                    st.check->gif().setCapture(&st.checkVertices, &st.checkMaterials);
+                    st.checkEffects = std::make_unique<ps2x::native::Vu1Sandbox>();
+                    st.checkEffects->gif().setCapture(&st.checkVertices, &st.checkMaterials);
+                }
+                ps2x::native::setVu1Gate(&drawnNatively);
+                ps2x::native::setDirectGate(&directDrawnNatively);
             }
-            ps2x::native::setVu1Gate(&drawnNatively);
-            ps2x::native::setDirectGate(&directDrawnNatively);
+            else
+                ps2x::native::setVu1Gate(&skipEveryProgram); // the GS front end gets the DIRECT packets (headless: drawn by nothing)
             // In the GS stream where VU1's output would have been (with PS2X_GS_RENDERER=native: particles, the 2D
             // and the other GS draws sort with the 3D); with other GS renderers present() draws over the GS frame.
             // The native renderer's own frame (its targets, presented by it), the GS front end left out of it;
@@ -3140,6 +3212,7 @@ namespace tmb::native
                              s.matrix[12], s.matrix[13], s.matrix[14], s.matrix[15]);
                 g_stats = Stats{};
             }
+            tmb::meshes::flushUnsent(); // a view whose chain hier__Fi did not kick itself (the menus): its objects now
             tmb::twod::publish(); // the 2D the game's rewritten builders drew (runtime/tmb_2d.cpp), on this frame's screen
             renderer.endFrame();
             renderer.beginFrame(screen());

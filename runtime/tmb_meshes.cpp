@@ -31,15 +31,23 @@
 // - Textures by the object's texture numbers (obj+0x50[slot], tmb::textures::lookupId), with the TEX0 the game wrote
 //   in the object's register block (obj+0x70 + 0x30 * slot) for the size and palette.
 //
-// The draws wait for the object's place in the frame: the hook marks the header's last qword (its VIF NOP, which
-// carries no data: the mark sits in the NOP's unused immediate) and the adapter (runtime/tmb_native.cpp), as it
-// reaches that object's setup in the stream it already follows for the other draws, submits these instead of its
-// own translation, in the same group of the GS stream. Left to the adapter's path: resumes after an alpha object or
-// after a setup other than the rigid strips' (the morph setups among them: no pool-less object follows a morphing
-// one), and hierObjectNode's C path (pktAddVu1Obj).
+// The draws are submitted in the order the game sends the objects, which its own calls give (no packet is read):
+// a view's opaque objects in traversal order, then its alpha ones by the depth-sorted list pktLinkAlphaObjAsm builds
+// (129 buckets of depth / 8, the farthest first, each bucket's newest first), when the view's chain is complete:
+// hier__Fi's at its hierCheckVifComplete (right before its kick), hier2p's (a split screen's second view of a pair) at
+// hier2pFlushDma, a view hier__Fi does not kick itself (the shell's menus) at the frame's end. Under the view's clip,
+// before the particles drawn after it (particleDraw). The GS state of each draw (ALPHA_1, TEST_1, ZBUF_1.ZMSK) follows
+// the objects in that order: the traversal's GS context block when the header brings one (a node's: its writes from the
+// pack, recorded offline from the NGP files; the game's default one, ctxGetDefaultGSCtx: from EE memory), then the
+// strips' register blocks. Not drawn: hierObjectNode's C path (pktAddVu1Obj: not called in the arenas and menus seen),
+// skinned objects without bones, resumes the pack path does not follow, and the skid marks (SkidMarks::draw builds
+// their object in skidBuffer each frame: no pack entry); their context blocks still count for the state.
 //
-// TMB_NATIVE_MESHES_CHECK=1: the adapter compares each object's VU 0-21 and matrix as built here with the stream's,
-// and its strips (rigid: their vertices; the others: their triangles) with its own translation.
+// TMB_NATIVE_VIF=1 (runtime/tmb_native.cpp): the adapter follows the VIF1 stream again; the hook marks the header's
+// last qword (its VIF NOP's unused immediate) and the adapter submits the draws at that object's setup in the stream,
+// with the stream's GS state (the comparison mode). With TMB_NATIVE_MESHES_CHECK=1 too, the draws stay in the game's
+// order and the adapter reports, per object, the stream's order and GS state against them ([tmb:order]), besides its
+// VU 0-21, matrix and strips against its own translation.
 
 #include "game_overrides.h"
 #include "ps2_runtime.h"
@@ -79,6 +87,9 @@ namespace tmb::textures
 namespace tmb::native
 {
     bool enabled();
+    bool vifObserved();
+    void applyViewClip();
+    uint32_t fogColour();
 }
 
 namespace tmb::meshes
@@ -133,6 +144,15 @@ namespace tmb::meshes
             std::string name;
             uint32_t size = 0, crc = 0;
             std::vector<PackObject> objects; // by offset
+            // The GS context blocks of the image (by offset): the A+D writes the hier objects' draws depend on.
+            struct Context
+            {
+                uint32_t offset = 0;
+                bool setsAlpha = false, setsTest = false, setsZbuf = false;
+                uint64_t alpha = 0, test = 0;
+                bool depthMasked = false;
+            };
+            std::vector<Context> contexts;
         };
         struct Pack
         {
@@ -169,9 +189,9 @@ namespace tmb::meshes
             in.seekg(0);
             in.read(reinterpret_cast<char *>(s_pack.blob.data()), static_cast<std::streamsize>(s_pack.blob.size()));
             const uint8_t *p = s_pack.blob.data(), *end = p + s_pack.blob.size();
-            if (s_pack.blob.size() < 12u || std::memcmp(p, "TMBMESH4", 8) != 0)
+            if (s_pack.blob.size() < 12u || std::memcmp(p, "TMBMESH5", 8) != 0)
             {
-                std::fprintf(stderr, "[tmb:mesh] %s: not a mesh pack of this version (TMBMESH4: run tools/tmb_mesh_pack.py again)\n", path);
+                std::fprintf(stderr, "[tmb:mesh] %s: not a mesh pack of this version (TMBMESH5: run tools/tmb_mesh_pack.py again)\n", path);
                 s_pack.blob.clear();
                 return s_pack;
             }
@@ -216,6 +236,24 @@ namespace tmb::meshes
                     }
                 }
                 objects += count;
+                const uint32_t contexts = rd<uint32_t>(p);
+                file.contexts.resize(contexts);
+                for (PackFile::Context &c : file.contexts)
+                {
+                    c.offset = rd<uint32_t>(p);
+                    const uint32_t writes = rd<uint32_t>(p);
+                    for (uint32_t w = 0; w < writes; ++w)
+                    {
+                        const uint32_t address = rd<uint32_t>(p);
+                        const uint64_t value = rd<uint64_t>(p);
+                        if (address == 0x42u)
+                            c.setsAlpha = true, c.alpha = value;
+                        else if (address == 0x47u)
+                            c.setsTest = true, c.test = value;
+                        else if (address == 0x4eu)
+                            c.setsZbuf = true, c.depthMasked = ((value >> 32) & 1u) != 0u;
+                    }
+                }
                 s_pack.files.push_back(std::move(file));
             }
             std::fprintf(stderr, "[tmb:mesh] mesh pack %s: %zu files, %zu objects\n", path, s_pack.files.size(), objects);
@@ -363,10 +401,253 @@ namespace tmb::meshes
         {
             uint64_t calls = 0, cCalls = 0, drawn = 0, taken = 0, unclaimed = 0, noFile = 0, noObject = 0, kindOther = 0,
                      program = 0, extra = 0, unmarked = 0, triangles = 0, idMismatch = 0, resumed = 0, resumeOther = 0, sprites = 0, ribbons = 0,
-                     skinned = 0, reflective = 0, morphed = 0;
+                     skinned = 0, reflective = 0, morphed = 0, contextsPack = 0, contextsDefault = 0, contextsMissing = 0,
+                     contextsDiffering = 0;
         } g_stats;
 
         void vf(const R5900Context *ctx, int reg, float out[4]) { _mm_storeu_ps(out, ctx->vu0_vf[reg]); }
+
+        // ---- the game's order ----
+        //
+        // hier__Fi (and hier2p, the split screen's second view of a pair) builds a view's chain: the opaque objects in
+        // traversal order (pktAddVu1ObjAsm), each alpha one linked into a depth-sorted list of 129 buckets
+        // (pktInitReverseAlphaOT, pktLinkAlphaObjAsm: bucket depth / 8 + 1, 1 up to 8, clamped at 1016; a bucket's newest
+        // first), which pktAttachAlphaOT hangs after them, farthest bucket first. hier__Fi kicks its chain before it
+        // returns (hierFlushObjQ), hier2p's waits for hier2pFlushDma (the next view's turn in rtMain). The draws are
+        // submitted there, in that order, under the view's clip: what reached VU1 in that order. The particles,
+        // drawn after the view (particleDraw), come after them.
+
+        constexpr uint32_t kHierCheckVifComplete = TMB_ADDR(0x001D59D8u);
+        constexpr uint32_t kHierKickReturn = TMB_ADDR(0x001D4610u); // hier__Fi's call of hierCheckVifComplete, before its kick
+        constexpr uint32_t kHier2pFlushDma = TMB_ADDR(0x001D3B00u);
+        constexpr uint32_t kPktLinkAlphaObjAsm = TMB_ADDR(0x001EC194u);
+
+        bool g_inHier2pFlush = false;
+        uint64_t g_unsentFlushes = 0; // views submitted at the frame's end (not kicked by hier__Fi)
+        uint64_t g_listDrops = 0, g_submitted[2] = {}, g_built[2] = {}, g_kicks[2] = {};
+        struct ViewList
+        {
+            std::vector<Drawn> opaque;
+            std::vector<std::vector<Drawn>> buckets = std::vector<std::vector<Drawn>>(129);
+            bool pending = false; // an alpha object drawn at the hook, waiting for its pktLinkAlphaObjAsm
+            Drawn pendingAlpha;
+            uint32_t frame = 0;
+            bool empty() const
+            {
+                if (!opaque.empty())
+                    return false;
+                for (const std::vector<Drawn> &b : buckets)
+                    if (!b.empty())
+                        return false;
+                return true;
+            }
+            void clear()
+            {
+                opaque.clear();
+                for (std::vector<Drawn> &b : buckets)
+                    b.clear();
+                pending = false;
+            }
+        };
+        // The view being built (the hook's objects): hier__Fi's until its kick, hier2p's until hier2pFlushDma.
+        ViewList g_lists[1];
+        constexpr int g_building = 0;
+
+        // The GS registers the hier objects' draws depend on, as their context and register blocks leave them in the
+        // order the objects are sent (they persist from one object to the next, as in the GS).
+        struct GsState
+        {
+            uint64_t alpha = 0x44, test = 0;
+            bool depthMasked = false;
+        } g_gs;
+
+        void apply(GsState &gs, const Batch &writes)
+        {
+            if (writes.setsAlpha)
+                gs.alpha = writes.alpha;
+            if (writes.setsTest)
+                gs.test = writes.test;
+            if (writes.setsZbuf)
+                gs.depthMasked = writes.depthMasked;
+        }
+
+        ps2x::native::Material::Blend blendFor(uint64_t alpha)
+        {
+            const uint32_t b = (alpha >> 2) & 3u, d = (alpha >> 6) & 3u;
+            if (b == 2u && d == 1u)
+                return ps2x::native::Material::Blend::Additive; // (A - 0) * C + Cd
+            return ps2x::native::Material::Blend::Alpha;
+        }
+
+        // A batch's material as the GS state has it (TMB_NATIVE_MESHES_CHECK compares it with the stream's).
+        struct Mat
+        {
+            uint64_t alpha = 0; // ALPHA_1 when blended, else 0
+            uint64_t test = 0;
+            bool depthMasked = false;
+            bool operator==(const Mat &o) const { return alpha == o.alpha && test == o.test && depthMasked == o.depthMasked; }
+        };
+        Mat matFor(const GsState &gs, const Batch &batch)
+        {
+            return Mat{batch.blended ? gs.alpha : 0u, gs.test, gs.depthMasked};
+        }
+
+        // TMB_NATIVE_VIF=1 with TMB_NATIVE_MESHES_CHECK=1: per mark, the hook's order and materials and the stream's.
+        struct CheckRecord
+        {
+            uint32_t frame = 0;
+            uint64_t hookOrder = ~0ull, streamOrder = ~0ull;
+            std::vector<Mat> hook;
+            std::vector<Batch> sets; // the batches' register writes (no vertices), the context's first
+            bool hasContext = false;
+            GsState stream;
+            bool streamSeen = false;
+            uint32_t object = 0, index = 0, frameOfKick = 0;
+            bool alphaList = false;
+        };
+        std::unordered_map<uint32_t, CheckRecord> g_checks;
+        uint64_t g_hookSeq = 0, g_streamSeq = 0;
+        uint32_t g_submitIndex = 0; // the object's place in its view's chain
+
+        bool checking()
+        {
+            static const bool s_on = std::getenv("TMB_NATIVE_MESHES_CHECK") != nullptr;
+            return s_on;
+        }
+
+        void submit(const Drawn &drawn)
+        {
+            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            renderer.setKey(drawn.screenSpace ? 0u : drawn.key); // sprites: screen space, not interpolated
+            static const float kScreenSpace[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+            if (drawn.hasContext)
+                apply(g_gs, drawn.context);
+            CheckRecord *record = nullptr;
+            if (checking() && drawn.mark != 0u)
+            {
+                record = &g_checks[drawn.mark];
+                record->frame = drawn.frame;
+                record->hookOrder = g_hookSeq++;
+                record->hasContext = drawn.hasContext;
+                record->object = drawn.object, record->alphaList = drawn.alphaList, record->index = g_submitIndex++;
+                if (drawn.hasContext)
+                    record->sets.push_back(drawn.context);
+            }
+            const uint32_t fog = tmb::native::fogColour();
+            for (const Batch &batch : drawn.batches)
+            {
+                apply(g_gs, batch);
+                if (record)
+                {
+                    Batch sets;
+                    sets.setsAlpha = batch.setsAlpha, sets.alpha = batch.alpha, sets.setsTest = batch.setsTest, sets.test = batch.test;
+                    sets.setsZbuf = batch.setsZbuf, sets.depthMasked = batch.depthMasked, sets.blended = batch.blended;
+                    sets.textured = !batch.vertices.empty(); // (whether it draws)
+                    record->sets.push_back(sets);
+                    if (!batch.vertices.empty())
+                        record->hook.push_back(matFor(g_gs, batch));
+                }
+                if (batch.vertices.empty())
+                    continue;
+                ps2x::native::Material material;
+                material.textured = batch.textured && batch.texture != nullptr;
+                material.tex0 = batch.tex0;
+                material.blend = batch.blended ? blendFor(g_gs.alpha) : ps2x::native::Material::Blend::Opaque;
+                material.depthWrite = !g_gs.depthMasked;
+                const uint32_t atst = (g_gs.test >> 1) & 7u, aref = (g_gs.test >> 4) & 0xffu;
+                if ((g_gs.test & 1u) && (atst == 5u || atst == 6u))
+                {
+                    material.alphaTest = atst == 6u || aref > 0u;
+                    material.alphaRef = static_cast<uint8_t>(atst == 6u ? aref : aref - 1u);
+                }
+                material.fog = batch.fogged;
+                material.fogColour = fog;
+                renderer.draw(material, drawn.screenSpace ? kScreenSpace : drawn.matrix, batch.vertices.data(),
+                              static_cast<uint32_t>(batch.vertices.size()), material.textured ? batch.texture : nullptr);
+            }
+        }
+
+        // A GS context block as the traversal keeps it (s4: the default one, ctxGetDefaultGSCtx, or a node's): its first
+        // quadword's VIF codes FLUSH, DIRECT n, then a PACKED GIF tag of n - 1 A+D writes. The writes this path follows.
+        bool readContext(const Ee &ee, uint32_t at, Batch &out)
+        {
+            const uint32_t code = ee.u32(at + 12u);
+            if (((code >> 24) & 0x7eu) != 0x50u)
+                return false;
+            const uint64_t tag = ee.u64(at + 16u), regs = ee.u64(at + 24u);
+            const uint32_t nloop = tag & 0x7fffu, flg = (tag >> 58) & 3u, nreg = (tag >> 60) & 0xfu;
+            if (flg != 0u || nreg != 1u || (regs & 0xfu) != 0xeu || nloop + 1u > (code & 0xffffu))
+                return false;
+            for (uint32_t q = 0; q < nloop; ++q)
+            {
+                const uint64_t value = ee.u64(at + 32u + q * 16u);
+                const uint32_t address = ee.u32(at + 40u + q * 16u) & 0xffu;
+                if (address == 0x42u)
+                    out.setsAlpha = true, out.alpha = value;
+                else if (address == 0x47u)
+                    out.setsTest = true, out.test = value;
+                else if (address == 0x4eu)
+                    out.setsZbuf = true, out.depthMasked = ((value >> 32) & 1u) != 0u;
+            }
+            return true;
+        }
+
+        // The context block at `at`: from the pack when it is in a loaded NGP file, else the game's default context
+        // (the executable's data, as defaultContextInit / ctxGetDefaultGSCtx leave it in EE memory).
+        bool contextAt(const Ee &ee, uint32_t at, Batch &out)
+        {
+            const PackFile *file = nullptr;
+            uint32_t base = 0;
+            {
+                std::lock_guard<std::mutex> lock(g_mutex);
+                for (const Loaded &l : g_loaded)
+                    if (at >= l.base && at < l.base + l.size)
+                    {
+                        file = l.file;
+                        base = l.base;
+                        if (!file)
+                            break;
+                    }
+            }
+            if (!file)
+            {
+                if (at >= 0x00980000u && (at & 0x1ffffffu) < 0x02000000u && base != 0u)
+                {
+                    ++g_stats.contextsMissing; // in a loaded file the pack does not have
+                    return false;
+                }
+                ++g_stats.contextsDefault;
+                return readContext(ee, at, out);
+            }
+            const auto it = std::lower_bound(file->contexts.begin(), file->contexts.end(), at - base,
+                                             [](const PackFile::Context &c, uint32_t v) { return c.offset < v; });
+            if (it == file->contexts.end() || it->offset != at - base)
+            {
+                ++g_stats.contextsMissing;
+                static uint32_t s_logged = 0;
+                if (s_logged++ < 20u)
+                    std::fprintf(stderr, "[tmb:mesh] GS context at %#x (%s + %#x): not in the pack\n", at, file->name.c_str(), at - base);
+                return false;
+            }
+            ++g_stats.contextsPack;
+            out.setsAlpha = it->setsAlpha, out.alpha = it->alpha;
+            out.setsTest = it->setsTest, out.test = it->test;
+            out.setsZbuf = it->setsZbuf, out.depthMasked = it->depthMasked;
+            if (checking()) // the pack's against the block as the game has it now
+            {
+                Batch now;
+                if (!readContext(ee, at, now) || now.setsAlpha != out.setsAlpha || now.alpha != out.alpha || now.setsTest != out.setsTest ||
+                    now.test != out.test || now.setsZbuf != out.setsZbuf || now.depthMasked != out.depthMasked)
+                {
+                    ++g_stats.contextsDiffering;
+                    static uint32_t s_logged = 0;
+                    if (s_logged++ < 20u)
+                        std::fprintf(stderr, "[tmb:mesh] GS context at %#x (%s + %#x): the pack's differs from EE memory's\n", at, file->name.c_str(),
+                                     at - base);
+                }
+            }
+            return true;
+        }
 
         void readConstants(const Ee &ee, uint32_t from, uint32_t firstQw, uint32_t count)
         {
@@ -769,6 +1050,29 @@ namespace tmb::meshes
                 g_stats.triangles += b.vertices.size() / 3u;
         }
 
+        // An object this path does not draw: its GS context still changes the GS state for those after it (in the
+        // chain's order): kept in the view's list without draws.
+        void stateOnly(const Ee &ee, uint32_t extra, bool opaque)
+        {
+            if (extra == 0u || !hookOrder())
+                return;
+            Drawn drawn;
+            drawn.frame = g_frame;
+            drawn.alphaList = !opaque;
+            drawn.hasContext = contextAt(ee, extra, drawn.context);
+            if (!drawn.hasContext)
+                return;
+            ViewList &list = g_lists[0];
+            list.frame = g_frame;
+            if (opaque)
+                list.opaque.push_back(std::move(drawn));
+            else
+            {
+                list.pendingAlpha = std::move(drawn);
+                list.pending = true;
+            }
+        }
+
         void pktAddVu1ObjAsmOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             // Its arguments as the caller set them (it walks s4 through the extra qwords it copies).
@@ -799,6 +1103,8 @@ namespace tmb::meshes
                 }
             }
             const bool opaque = getRegU32(ctx, 31) == kOpaqueReturn;
+            if (!opaque)
+                g_lists[g_building].pending = false; // until this one is drawn here
 
             // VU 0-3: the object-to-camera matrix (hierMulEoForObjAsm: vf1-3 the rotation, vf6 the translation),
             // sent when it changed; VU1 keeps the last opaque object's otherwise.
@@ -912,6 +1218,7 @@ namespace tmb::meshes
             if (pc == 0u)
             {
                 ++g_stats.program;
+                stateOnly(ee, extra, opaque);
                 return;
             }
             // The resume: the setup before it goes on (in the chain's order, which only the opaque objects keep), with
@@ -922,6 +1229,7 @@ namespace tmb::meshes
             if (resume && (!opaque || !previous.valid || !rigidBefore))
             {
                 ++g_stats.program;
+                stateOnly(ee, extra, opaque);
                 return;
             }
             if (extra != 0u)
@@ -960,6 +1268,14 @@ namespace tmb::meshes
             if (!file || !file->file)
             {
                 ++g_stats.noFile;
+                static std::unordered_map<uint32_t, bool> s_seen;
+                if (!s_seen[obj] && s_seen.size() < 40u)
+                {
+                    s_seen[obj] = true;
+                    std::fprintf(stderr, "[tmb:mesh] object %#x (setup %#x, flags %#x, inst %#x, %s): outside the loaded NGP files (file %s)\n", obj, pc, fp,
+                                 inst, opaque ? "opaque" : "alpha", tmb::textures::nameAt(obj).c_str());
+                }
+                stateOnly(ee, extra, opaque);
                 return;
             }
             const uint32_t offset = obj - file->base;
@@ -968,6 +1284,7 @@ namespace tmb::meshes
             if (it == objects.end() || it->offset != offset)
             {
                 ++g_stats.noObject;
+                stateOnly(ee, extra, opaque);
                 return;
             }
             // The pack's kind as the flags pick the program: rigid or pool-less for the strip setups, sprite, ribbon.
@@ -975,6 +1292,7 @@ namespace tmb::meshes
             if (kindFor == 1u ? it->kind > 1u : it->kind != kindFor)
             {
                 ++g_stats.kindOther;
+                stateOnly(ee, extra, opaque);
                 return;
             }
             // A resume draws a pool-less object with the pool (and setup) the object before it left: that object must be
@@ -983,6 +1301,7 @@ namespace tmb::meshes
                            (it->poolFrom != previous.offset && it->poolFrom != previous.poolFrom)))
             {
                 ++g_stats.resumeOther;
+                stateOnly(ee, extra, opaque);
                 return;
             }
             const uint32_t drawPc = resume ? previous.pc : pc;
@@ -990,24 +1309,37 @@ namespace tmb::meshes
                 for (uint32_t q = 0; q < 11u; ++q)
                     g_vu.setQw(165u + q, previous.pointLights[q]);
 
-            // The header's last qword: NOP, BASE, OFFSET, MSCAL (pktAddVu1ObjAsm leaves the END tag after it, at the
-            // packet's write pointer). The mark goes in the NOP's immediate.
-            const uint32_t writePointer = ee.u32(getRegU32(ctx, 4) + 8u);
-            uint8_t *last = ee.at(writePointer - 0x10u);
-            uint32_t words[4];
-            std::memcpy(words, last, 16);
-            // pktCacheForAsm's setup codes are MSCALF (0x15).
-            if (words[0] != 0u || (words[3] & ~0x01000000u) != (0x14000000u | (pc >> 3)))
+            // TMB_NATIVE_VIF=1 (the adapter follows the stream): the header's last qword, NOP, BASE, OFFSET, MSCAL
+            // (pktAddVu1ObjAsm leaves the END tag after it, at the packet's write pointer), gets the mark in the NOP's
+            // immediate. In the game's order (the default) nothing of the packet is read or written.
+            bool marking = tmb::native::vifObserved();
+            uint8_t *last = nullptr;
+            uint32_t words[4] = {};
+            if (marking)
             {
-                ++g_stats.unmarked;
-                static uint32_t s_logged = 0;
-                if (s_logged++ < 10u)
-                    std::fprintf(stderr, "[tmb:mesh] object %#x: header end %08x %08x %08x %08x, expected NOP .. MSCAL %#x: left to the stream\n", obj,
-                                 words[0], words[1], words[2], words[3], pc);
-                return;
+                const uint32_t writePointer = ee.u32(getRegU32(ctx, 4) + 8u);
+                last = ee.at(writePointer - 0x10u);
+                std::memcpy(words, last, 16);
+                // pktCacheForAsm's setup codes are MSCALF (0x15).
+                if (words[0] != 0u || (words[3] & ~0x01000000u) != (0x14000000u | (pc >> 3)))
+                {
+                    ++g_stats.unmarked;
+                    static uint32_t s_logged = 0;
+                    if (s_logged++ < 10u)
+                        std::fprintf(stderr, "[tmb:mesh] object %#x: header end %08x %08x %08x %08x, expected NOP .. MSCAL %#x: left to the stream\n", obj,
+                                     words[0], words[1], words[2], words[3], pc);
+                    if (!hookOrder())
+                        return;
+                    marking = false; // the comparison: drawn in the hook order all the same, not compared
+                }
             }
 
             Drawn drawn;
+            drawn.alphaList = !opaque;
+            // The traversal's GS context (s4), when this header brings it: a node's, in an NGP file (its writes from the
+            // pack, recorded offline), or the game's default one (ctxGetDefaultGSCtx: the executable's, in EE memory).
+            if (extra != 0u)
+                drawn.hasContext = contextAt(ee, extra, drawn.context);
             drawn.setupPc = pc;
             drawn.resumes = resume ? drawPc : 0u;
             drawn.frame = g_frame;
@@ -1041,19 +1373,39 @@ namespace tmb::meshes
             for (int k = 0; k < 4; ++k)
                 drawn.check[22][k] = g_vu.w(31, k); // a morphing object's weight
 
-            const uint32_t mark = g_nextMark;
-            g_nextMark = (g_nextMark + 1u) & 0xffffffu;
-            if (g_nextMark == 0u)
-                g_nextMark = 1u;
-            // A VIF NOP (cmd 0, no interrupt) whatever its immediate and NUM. The resume's last qword is three NOPs and
-            // the MSCAL: each carries the mark (the adapter keeps the last NOP's before the MSCAL).
-            for (int k = 0; k < 3; ++k)
-                if (k == 0 || words[k] == 0u)
-                    words[k] = mark;
+            if (marking)
+            {
+                const uint32_t mark = g_nextMark;
+                g_nextMark = (g_nextMark + 1u) & 0xffffffu;
+                if (g_nextMark == 0u)
+                    g_nextMark = 1u;
+                // A VIF NOP (cmd 0, no interrupt) whatever its immediate and NUM. The resume's last qword is three NOPs
+                // and the MSCAL: each carries the mark (the adapter keeps the last NOP's before the MSCAL).
+                for (int k = 0; k < 3; ++k)
+                    if (k == 0 || words[k] == 0u)
+                        words[k] = mark;
+                    else
+                        break;
+                std::memcpy(last, words, 12);
+                drawn.mark = mark;
+            }
+            if (hookOrder())
+            {
+                ViewList &list = g_lists[g_building];
+                ++g_built[g_building];
+                list.frame = g_frame;
+                if (marking) // the comparison: the adapter takes a copy at the mark (checked, not drawn)
+                    g_drawn[drawn.mark] = drawn;
+                if (opaque)
+                    list.opaque.push_back(std::move(drawn));
                 else
-                    break;
-            std::memcpy(last, words, 12);
-            g_drawn[mark] = std::move(drawn);
+                {
+                    list.pendingAlpha = std::move(drawn);
+                    list.pending = true;
+                }
+            }
+            else
+                g_drawn[drawn.mark] = std::move(drawn);
             ++g_stats.drawn;
             g_stats.resumed += resume ? 1u : 0u;
             g_stats.sprites += pc == 0x3000u ? 1u : 0u;
@@ -1087,6 +1439,73 @@ namespace tmb::meshes
             pktAddVu1Obj__FP9Vu1DmaPktP6QwDataP11_hierobjecti_0x1eadd0(rdram, ctx, runtime);
         }
 
+        // pktLinkAlphaObjAsm links the alpha object pktAddVu1ObjAsm just built into the view's depth-sorted list, by the
+        // depth in VU0 vf30.x: its bucket as it computes it.
+        void pktLinkAlphaObjAsmOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (active() && hookOrder())
+            {
+                ViewList &list = g_lists[g_building];
+                if (list.pending)
+                {
+                    float depth[4];
+                    vf(ctx, 30, depth);
+                    int32_t bucket = 1;
+                    if (depth[0] > 8.0f)
+                        bucket = FPU_CVT_W_S((depth[0] > 1024.0f ? 1016.0f : depth[0]) * 0.125f) + 1;
+                    bucket = std::clamp(bucket, 0, 128);
+                    list.buckets[static_cast<size_t>(bucket)].push_back(std::move(list.pendingAlpha));
+                    list.pending = false;
+                }
+            }
+            pktLinkAlphaObjAsm_0x1ec194(rdram, ctx, runtime);
+        }
+
+        // The draws of a view's chain in the order the chain sends them: the opaque objects, then the alpha list's
+        // buckets from the farthest, each bucket's newest first.
+        void submitList(ViewList &list)
+        {
+            if (list.empty())
+            {
+                list.clear();
+                return;
+            }
+            tmb::native::applyViewClip();
+            g_submitIndex = 0;
+            const int which = g_inHier2pFlush ? 1 : 0; // hier__Fi's, hier2p's
+            ++g_kicks[which];
+            g_submitted[which] += list.opaque.size();
+            for (const std::vector<Drawn> &b : list.buckets)
+                g_submitted[which] += b.size();
+            for (const Drawn &drawn : list.opaque)
+                submit(drawn);
+            for (size_t b = list.buckets.size(); b-- > 0;)
+                for (size_t i = list.buckets[b].size(); i-- > 0;)
+                    submit(list.buckets[b][i]);
+            list.clear();
+        }
+
+        // hier__Fi, its chain built (the alpha list attached when it has objects) and queued, asks hierCheckVifComplete
+        // whether VIF1 is free: kicked now (hierFlushObjQ) or by hierDmaHandler when the transfer before it ends, but in
+        // this order either way. Its view's draws are submitted there. (Not at hier__Fi's return: a recompiled function
+        // can return to the dispatcher before its end. Not at hierFlushObjQ: the DMA handler calls it too.) A view with
+        // no object kicks nothing.
+        void hierCheckVifCompleteOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (active() && hookOrder() && getRegU32(ctx, 31) == kHierKickReturn)
+                submitList(g_lists[0]);
+            hierCheckVifComplete__Fv_0x1d59d8(rdram, ctx, runtime);
+        }
+
+        void hier2pFlushDmaOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            g_inHier2pFlush = true;
+            if (active() && hookOrder())
+                submitList(g_lists[0]); // what hier2p built, at its view's turn (nothing is built in between)
+            g_inHier2pFlush = false;
+            hier2pFlushDma__Fv_0x1d3b00(rdram, ctx, runtime);
+        }
+
         // At each view hier__Fi sends the constants block (VU 5-8 among it: the light directions until a car sends
         // its own), then calls hierCacheForAsm.
         void hierCacheForAsmOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1098,10 +1517,110 @@ namespace tmb::meshes
             for (uint32_t q = 0; q < 3u; ++q)
                 std::memcpy(g_lastLights[q], ee.at(kConstVu5 + 16u + q * 16u), 16);
             g_previous.valid = false;
+            // A view before it whose chain hier__Fi did not kick (the menus send theirs with the frame): its objects first.
+            if (!g_lists[0].empty() && hookOrder())
+            {
+                ++g_unsentFlushes;
+                submitList(g_lists[0]);
+            }
         }
     }
 
     bool enabled() { return active(); }
+
+    // The game's order unless the adapter follows the stream (TMB_NATIVE_VIF=1), where TMB_NATIVE_MESHES_CHECK=1 keeps
+    // it to compare the two.
+    bool hookOrder()
+    {
+        return !tmb::native::vifObserved() || checking();
+    }
+
+    void streamReached(uint32_t mark, uint64_t alpha, uint64_t test, bool depthMasked)
+    {
+        CheckRecord &record = g_checks[mark];
+        record.streamOrder = g_streamSeq++;
+        record.stream = GsState{alpha, test, depthMasked};
+        record.streamSeen = true;
+        if (record.frame == 0u)
+            record.frame = g_frame;
+    }
+
+    namespace
+    {
+        // TMB_NATIVE_VIF=1 with TMB_NATIVE_MESHES_CHECK=1, at a frame's end: the objects of the frame before, the hook's
+        // order and materials against the stream's.
+        void compareOrders()
+        {
+            static uint64_t s_objects = 0, s_unreached = 0, s_unsubmitted = 0, s_orderDiffs = 0, s_matDiffs = 0, s_batches = 0;
+            std::vector<std::pair<uint64_t, uint32_t>> hook, stream;
+            std::vector<uint32_t> done;
+            for (auto &[mark, record] : g_checks)
+            {
+                if (g_frame - record.frame < 2u)
+                    continue;
+                done.push_back(mark);
+                if (record.hookOrder == ~0ull)
+                {
+                    ++s_unsubmitted;
+                    continue;
+                }
+                ++s_objects;
+                if (!record.streamSeen)
+                {
+                    ++s_unreached;
+                    continue;
+                }
+                hook.push_back({record.hookOrder, mark});
+                stream.push_back({record.streamOrder, mark});
+                // The stream's materials: its state at the mark, then the object's writes.
+                GsState gs = record.stream;
+                size_t k = 0;
+                bool differs = false;
+                for (size_t i = 0; i < record.sets.size(); ++i)
+                {
+                    const Batch &sets = record.sets[i];
+                    apply(gs, sets);
+                    if (i == 0u && record.hasContext)
+                        continue;
+                    if (!sets.textured) // draws nothing
+                        continue;
+                    ++s_batches;
+                    const Mat m = matFor(gs, sets);
+                    if (k < record.hook.size() && !(record.hook[k] == m))
+                    {
+                        differs = true;
+                        static uint32_t s_logged = 0;
+                        if (s_logged++ < 40u)
+                            std::fprintf(stderr, "[tmb:order] mark %u batch %zu: hook alpha %#llx test %#llx zmsk %d, stream alpha %#llx test %#llx zmsk %d (context %d; object %#x, %s, #%u in its view)\n",
+                                         mark, k, static_cast<unsigned long long>(record.hook[k].alpha), static_cast<unsigned long long>(record.hook[k].test),
+                                         record.hook[k].depthMasked ? 1 : 0, static_cast<unsigned long long>(m.alpha), static_cast<unsigned long long>(m.test),
+                                         m.depthMasked ? 1 : 0, record.hasContext ? 1 : 0, record.object, record.alphaList ? "alpha" : "opaque",
+                                         record.index);
+                    }
+                    ++k;
+                }
+                s_matDiffs += differs ? 1u : 0u;
+            }
+            for (uint32_t mark : done)
+                g_checks.erase(mark);
+            std::sort(hook.begin(), hook.end());
+            std::sort(stream.begin(), stream.end());
+            for (size_t i = 0; i < hook.size(); ++i)
+                if (hook[i].second != stream[i].second)
+                {
+                    ++s_orderDiffs;
+                    static uint32_t s_logged = 0;
+                    if (s_logged++ < 20u)
+                        std::fprintf(stderr, "[tmb:order] position %zu of %zu: hook mark %u, stream mark %u\n", i, hook.size(), hook[i].second, stream[i].second);
+                }
+            static uint32_t s_frames = 0;
+            if (++s_frames % 250u == 0u)
+                std::fprintf(stderr, "[tmb:order] %llu objects submitted at the hook: %llu not reached in the stream, %llu out of the stream's order, %llu with a "
+                                     "material differing (%llu batches); %llu marked, never submitted\n",
+                             static_cast<unsigned long long>(s_objects), static_cast<unsigned long long>(s_unreached), static_cast<unsigned long long>(s_orderDiffs),
+                             static_cast<unsigned long long>(s_matDiffs), static_cast<unsigned long long>(s_batches), static_cast<unsigned long long>(s_unsubmitted));
+        }
+    }
 
     // The adapter, at the setup MSCAL a marked header ends with: the object's draws (false: not one of ours).
     bool take(uint32_t mark, Drawn &out)
@@ -1117,12 +1636,29 @@ namespace tmb::meshes
 
     // The end of a published frame: objects never reached in the stream are dropped (VU1 drew them, or their chain
     // was not sent), and every 250 frames the counts.
+    void flushUnsent()
+    {
+        if (!active() || !hookOrder() || g_lists[0].empty())
+            return;
+        ++g_unsentFlushes;
+        submitList(g_lists[0]);
+    }
+
     void endFrame()
     {
         if (!active())
             return;
         ++g_frame;
         g_keysThisFrame.clear();
+        if (checking() && tmb::native::vifObserved())
+            compareOrders();
+        // A view built and never kicked (its chain not sent): dropped.
+        for (ViewList &list : g_lists)
+            if (!list.empty() && g_frame - list.frame > 2u)
+            {
+                ++g_stats.unclaimed;
+                list.clear();
+            }
         for (auto it = g_drawn.begin(); it != g_drawn.end();)
             if (g_frame - it->second.frame > 2u)
             {
@@ -1155,12 +1691,20 @@ namespace tmb::meshes
         }
         if (g_frame % 250u == 0u)
         {
+            if (hookOrder())
+                std::fprintf(stderr, "[tmb:mesh] per 250 frames, the game's order: %llu objects built; views kicked by hier__Fi %llu (%llu objects), by "
+                                     "hier2pFlushDma %llu (%llu objects), sent unkicked %llu; %llu dropped\n",
+                             static_cast<unsigned long long>(g_built[0]), static_cast<unsigned long long>(g_kicks[0]),
+                             static_cast<unsigned long long>(g_submitted[0]), static_cast<unsigned long long>(g_kicks[1]),
+                             static_cast<unsigned long long>(g_submitted[1]), static_cast<unsigned long long>(g_unsentFlushes),
+                             static_cast<unsigned long long>(g_listDrops));
+            g_listDrops = g_built[0] = g_built[1] = g_kicks[0] = g_kicks[1] = g_submitted[0] = g_submitted[1] = g_unsentFlushes = 0;
             std::fprintf(stderr,
                          "[tmb:mesh] per 250 frames: %llu objects at the hook (%llu by the C path), %llu drawn from the pack (%llu triangles), "
                          "%llu taken in the stream, %llu unclaimed; left to the stream: %llu by program (%llu drawn with a group GS-state block), %llu outside "
                          "the loaded files, %llu not in the pack, %llu of another kind in the pack, %llu unmarked; %llu texture number mismatches; "
                          "%llu resumes drawn, %llu resumes not after their pool's object; %llu sprites, %llu ribbons, %llu skinned, %llu environment-mapped, "
-                         "%llu morphing drawn\n",
+                         "%llu morphing drawn; GS contexts: %llu from the pack, %llu the game's default, %llu not in the pack, %llu differing from EE memory\n",
                          static_cast<unsigned long long>(g_stats.calls), static_cast<unsigned long long>(g_stats.cCalls),
                          static_cast<unsigned long long>(g_stats.drawn), static_cast<unsigned long long>(g_stats.triangles),
                          static_cast<unsigned long long>(g_stats.taken), static_cast<unsigned long long>(g_stats.unclaimed),
@@ -1170,7 +1714,9 @@ namespace tmb::meshes
                          static_cast<unsigned long long>(g_stats.idMismatch), static_cast<unsigned long long>(g_stats.resumed),
                          static_cast<unsigned long long>(g_stats.resumeOther), static_cast<unsigned long long>(g_stats.sprites),
                          static_cast<unsigned long long>(g_stats.ribbons), static_cast<unsigned long long>(g_stats.skinned),
-                         static_cast<unsigned long long>(g_stats.reflective), static_cast<unsigned long long>(g_stats.morphed));
+                         static_cast<unsigned long long>(g_stats.reflective), static_cast<unsigned long long>(g_stats.morphed),
+                         static_cast<unsigned long long>(g_stats.contextsPack), static_cast<unsigned long long>(g_stats.contextsDefault),
+                         static_cast<unsigned long long>(g_stats.contextsMissing), static_cast<unsigned long long>(g_stats.contextsDiffering));
             g_stats = Stats{};
         }
     }
@@ -1185,6 +1731,9 @@ namespace tmb::meshes
         runtime.registerFunction(kHierCacheForAsm, &hierCacheForAsmOverride);
         runtime.registerFunction(kPktAddVu1ObjAsm, &pktAddVu1ObjAsmOverride);
         runtime.registerFunction(kPktAddVu1Obj, &pktAddVu1ObjOverride);
+        runtime.registerFunction(kPktLinkAlphaObjAsm, &pktLinkAlphaObjAsmOverride);
+        runtime.registerFunction(kHierCheckVifComplete, &hierCheckVifCompleteOverride);
+        runtime.registerFunction(kHier2pFlushDma, &hier2pFlushDmaOverride);
         std::fprintf(stderr, "[tmb:mesh] TMB_NATIVE_MESHES=1: hier objects drawn from the mesh pack at pktAddVu1ObjAsm\n");
     }
 }

@@ -38,6 +38,8 @@ A player's build (the default with the kit, --debug-info no): the runner without
 RelWithDebInfo (its -O2 flags without -g; GCC's -g never changes the code), stripped again when staged: 45 MB instead
 of 613. --game <dir> stages the game somewhere else than <out>/TMB (the launcher: <release>/game). --check only checks
 the disc (no work folder): OK <message>, or ERROR verify <message> and exit code 1.
+Every successful run writes <game>/built_from.ini: the release stamp (<TMB_Recomp>/release.ini, from
+tools/make_release.py) of the code the game was built from; the launcher offers Rebuild when the source's differs.
 
 Output for a launcher, one line each on stdout (everything else goes to <out>/logs/<step>.log):
   PROGRESS <step> <i>/<n> <message>     a step starts
@@ -704,6 +706,27 @@ class Build:
                        'env': dict(LAUNCH_ENV)}, f, indent=1)
         emit('INFO', 'stage', '%d DLLs staged' % (len(staged) - 1))
 
+    def write_built_from(self):
+        """<game>/built_from.ini: the release stamp (<TMB_Recomp>/release.ini, written by tools/make_release.py) of the
+        code this game folder was built from, after every successful run, even one where every step was skipped (a
+        release that changed nothing the build reads). The launcher compares it with the source's to offer Rebuild
+        after an update. Without a stamp (a git checkout) the commit is git's when git is there, else empty."""
+        stamp = os.path.join(ROOT, 'release.ini')
+        if os.path.isfile(stamp):
+            with open(stamp, encoding='utf-8') as f:
+                text = f.read()
+        else:
+            commit = ''
+            try:
+                commit = subprocess.run(['git', '-C', ROOT, 'rev-parse', 'HEAD'], stdout=subprocess.PIPE,
+                                        stderr=subprocess.DEVNULL, universal_newlines=True).stdout.strip()
+            except OSError:
+                pass
+            text = 'version = dev\ncommit = %s\n' % commit
+        with open(os.path.join(self.game, 'built_from.ini'), 'w', encoding='utf-8', newline='\n') as f:
+            f.write('# The TMB_Recomp code this game folder was built from (tools/tmb_build.py writes this file).\n')
+            f.write('\n'.join(l for l in text.splitlines() if l and not l.startswith('#')) + '\n')
+
     # -- driver
 
     def main(self):
@@ -747,6 +770,7 @@ class Build:
                     traceback.print_exc(file=log)
                 emit('ERROR', step, '%s: %s (details in %s)' % (type(e).__name__, e, self.log_path()))
                 return 1
+        self.write_built_from()
         launcher = os.path.join(self.game, 'Play TMB.cmd' if os.name == 'nt' else 'play_tmb.sh')
         emit('INFO', 'total', '%.1f s' % (time.time() - total_start))
         emit('RESULT', self.game, launcher)

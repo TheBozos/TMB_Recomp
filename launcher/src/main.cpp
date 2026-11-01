@@ -30,8 +30,10 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -41,7 +43,18 @@ using ui::S;
 #define TEAM_NAME "The Bozos"
 #define TEAM_CREDITS "by boubou666 & Arzaroth"
 static const char *kSiteUrl = "https://boubou666.github.io/RecompWatcher/";
-static const char *kVersion = "1.0";
+// The release's version and source commit (CMake's LAUNCHER_VERSION / LAUNCHER_COMMIT, from tools/make_release.py).
+#ifndef TMB_VERSION
+#define TMB_VERSION "dev"
+#endif
+#ifndef TMB_COMMIT
+#define TMB_COMMIT ""
+#endif
+static const char *kVersion = TMB_VERSION;
+static const char *kCommit = TMB_COMMIT;
+// The update check: GitHub's latest release of the main repository (drafts and pre-releases are never "latest").
+static const char *kLatestReleaseApi = "https://api.github.com/repos/boubou666/TMB_Recomp/releases/latest";
+static const char *kReleasePagePrefix = "https://github.com/boubou666/TMB_Recomp/releases/tag/";
 
 // ---- language ----
 
@@ -93,6 +106,151 @@ static bool exists(const std::string &path)
     return fs::exists(plat::path(path), ec);
 }
 
+// ---- versions and the update check ----
+
+// "v1.2.3-rc.1" -> {1, 2, 3} and "rc.1"; false when it does not start with three numbers.
+static bool parseVersion(std::string v, int (&num)[3], std::string &pre)
+{
+    if (!v.empty() && (v[0] == 'v' || v[0] == 'V'))
+        v.erase(0, 1);
+    const size_t plus = v.find('+'); // build metadata: ignored
+    if (plus != std::string::npos)
+        v.resize(plus);
+    const size_t dash = v.find('-');
+    pre = dash == std::string::npos ? "" : v.substr(dash + 1);
+    const std::string core = v.substr(0, dash);
+    return std::sscanf(core.c_str(), "%d.%d.%d", &num[0], &num[1], &num[2]) == 3;
+}
+
+// True when `remote` is a newer version than `local` (semantic versioning: 1.0.0-rc < 1.0.0).
+static bool newerVersion(const std::string &remote, const std::string &local)
+{
+    int r[3], l[3];
+    std::string rp, lp;
+    if (!parseVersion(remote, r, rp))
+        return false;
+    if (!parseVersion(local, l, lp))
+        return true; // a "dev" launcher: anything released is newer
+    for (int i = 0; i < 3; ++i)
+        if (r[i] != l[i])
+            return r[i] > l[i];
+    if (rp.empty() != lp.empty())
+        return rp.empty();
+    return rp > lp;
+}
+
+// The value of "key": "..." in a JSON text (the first one; GitHub's release object has tag_name at the top level).
+static std::string jsonString(const std::string &json, const char *key)
+{
+    const std::string needle = std::string("\"") + key + "\"";
+    size_t at = json.find(needle);
+    if (at == std::string::npos)
+        return {};
+    at = json.find(':', at + needle.size());
+    if (at == std::string::npos)
+        return {};
+    at = json.find_first_not_of(" \t\r\n", at + 1);
+    if (at == std::string::npos || json[at] != '"')
+        return {};
+    const size_t end = json.find('"', at + 1);
+    return end == std::string::npos ? std::string() : json.substr(at + 1, end - at - 1);
+}
+
+// Runs in a thread; the UI polls the result. Offline, a proxy refusing, GitHub's rate limit, no release yet (404):
+// all "could not tell", said only when the player pressed the button.
+struct UpdateCheck
+{
+    enum class State
+    {
+        Idle,
+        Running,
+        Latest,    // this is the newest release
+        Available, // a newer one: version, page
+        Failed     // could not tell
+    };
+    std::mutex mutex;
+    State state = State::Idle;
+    std::string version, page, error;
+    bool manual = false; // the button: say the outcome, even "you have the latest"
+    std::thread worker;
+
+    void start(const std::string &url, bool byHand)
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            if (state == State::Running)
+                return;
+            state = State::Running;
+            manual = byHand;
+        }
+        if (worker.joinable())
+            worker.join();
+        worker = std::thread([this, url]
+                             {
+            std::string body, err;
+            long status = 0;
+            const bool ok = plat::httpGet(url, std::string("TMB-Launcher/") + kVersion, body, status, err);
+            const std::string tag = ok && status == 200 ? jsonString(body, "tag_name") : std::string();
+            // Only a plain tag goes into the page's address (the link is ours, never one read from the response).
+            const bool plain = !tag.empty() && tag.size() < 64 &&
+                               tag.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-+") == std::string::npos;
+            std::lock_guard<std::mutex> lock(mutex);
+            if (!plain)
+            {
+                state = State::Failed;
+                error = !ok ? err : status == 404 ? "no release published yet" : "HTTP " + std::to_string(status);
+                return;
+            }
+            version = tag[0] == 'v' || tag[0] == 'V' ? tag.substr(1) : tag;
+            page = kReleasePagePrefix + tag;
+            state = newerVersion(tag, kVersion) ? State::Available : State::Latest; });
+    }
+
+    State get(std::string *v = nullptr, std::string *p = nullptr, std::string *e = nullptr, bool *byHand = nullptr)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (v)
+            *v = version;
+        if (p)
+            *p = page;
+        if (e)
+            *e = error;
+        if (byHand)
+            *byHand = manual;
+        return state;
+    }
+
+    ~UpdateCheck()
+    {
+        if (worker.joinable())
+            worker.detach(); // a check still waiting on the network does not hold the launcher's exit
+    }
+};
+
+// name = value lines (source\release.ini from tools/make_release.py, game\built_from.ini from tmb_build).
+static std::string iniValue(const std::string &file, const char *name)
+{
+    std::ifstream in(plat::path(file));
+    std::string line;
+    const std::string key = name;
+    while (std::getline(in, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos || line[0] == '#')
+            continue;
+        std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+        while (!k.empty() && (k.back() == ' ' || k.back() == '\t'))
+            k.pop_back();
+        const size_t first = v.find_first_not_of(" \t");
+        v = first == std::string::npos ? "" : v.substr(first);
+        if (k == key)
+            return v;
+    }
+    return {};
+}
+
 // ---- the launcher ----
 
 enum class Tab
@@ -114,6 +272,7 @@ enum class Phase
 struct Paths
 {
     std::string release, source, kit, python, script, buildOut, buildLogs, game, gameExe, elf;
+    std::string releaseIni, builtFrom; // the source's release stamp, and the one of the code the game was built from
     std::string user, launcherIni, videoIni, logs, crashes;
 };
 
@@ -147,6 +306,12 @@ struct App
     bool gameProblem = false;
     std::string launchError;
 
+    // The update check, and the code the game was built from (an update unzipped over the release: Rebuild).
+    UpdateCheck updates;
+    std::string updateUrl = kLatestReleaseApi;
+    std::string sourceCommit, sourceVersion, builtCommit;
+    bool runCounted = false; // this build run's time is already in cfg.pendingSeconds
+
     bool wantQuit = false, quit = false;
     double time = 0;
     std::string pendingShot; // the selftest's screenshot of this frame
@@ -166,6 +331,8 @@ struct App
         p.game = plat::str(r / L"game");
         p.gameExe = plat::str(r / L"game" / L"ps2EntryRunner.exe");
         p.elf = plat::str(r / L"game" / L"disc" / L"SCUS_971.01");
+        p.releaseIni = plat::str(r / L"source" / L"release.ini");
+        p.builtFrom = plat::str(r / L"game" / L"built_from.ini");
         p.user = plat::userDirectory();
         const fs::path u = plat::path(p.user);
         p.launcherIni = plat::str(u / L"launcher.ini");
@@ -182,7 +349,22 @@ struct App
         else if (!exists(p.python) || !exists(plat::str(r / L"kit" / L"kit_manifest.json")))
             missingPart = "kit\\";
         phase = !missingPart.empty() ? Phase::Incomplete : cfg.disc.empty() ? Phase::Welcome : Phase::Ready;
+        readStamps();
     }
+
+    // The source's commit (source\release.ini, else the launcher's own) and the one the game was built from.
+    void readStamps()
+    {
+        sourceCommit = iniValue(p.releaseIni, "commit");
+        sourceVersion = iniValue(p.releaseIni, "version");
+        if (sourceCommit.empty())
+            sourceCommit = kCommit;
+        builtCommit = iniValue(p.builtFrom, "commit");
+    }
+
+    // The code changed since the game was built (a new release unzipped over this one): offer Rebuild. A game built
+    // before the stamp existed counts as changed when the source has one.
+    bool codeChanged() const { return built() && !sourceCommit.empty() && builtCommit != sourceCommit; }
 
     bool built() const { return exists(p.gameExe) && exists(p.elf); }
     void saveConfig() { cfg.save(p.launcherIni); }
@@ -271,6 +453,9 @@ struct App
         model.reset(plat::now());
         std::string error;
         cancelled = false;
+        runCounted = false;
+        if (!cfg.buildPending)
+            cfg.pendingSeconds = 0; // a new build, not a resumed one
         notice.clear();
         if (!builder.start(p.python, args, p.source, true, error))
         {
@@ -292,6 +477,17 @@ struct App
             return;
         cancelled = true;
         builder.kill();
+        countRun(plat::now()); // quitting during a build: pollBuild will not see the end
+    }
+
+    // This run's time into the unfinished build's total, once.
+    void countRun(double now)
+    {
+        if (runCounted)
+            return;
+        runCounted = true;
+        cfg.pendingSeconds += now - model.startedAt;
+        saveConfig();
     }
 
     void pollBuild()
@@ -308,12 +504,16 @@ struct App
             model.feed(line, t);
         building = false;
         const long code = builder.exitCode();
+        countRun(t);
         if (model.finished && code == 0)
         {
+            // Every run of this build, a stop and a resume included.
             cfg.built = true;
             cfg.buildPending = false;
-            cfg.lastBuildSeconds = t - model.startedAt;
+            cfg.lastBuildSeconds = cfg.pendingSeconds;
+            cfg.pendingSeconds = 0;
             saveConfig();
+            readStamps();
             phase = Phase::Ready;
             notice = std::string(L("The game is ready. Prepared in ", "Le jeu est prêt. Préparé en ")) + fmtDuration(cfg.lastBuildSeconds) + ".";
             noticeColor = ui::color::good;
@@ -345,7 +545,8 @@ struct App
 
     std::string details() const
     {
-        std::string out = std::string("TMB Launcher ") + kVersion + "\n";
+        std::string out = std::string("TMB Launcher ") + kVersion + (*kCommit ? std::string(" (") + kCommit + ")" : "") + "\n";
+        out += "Source: " + sourceVersion + " " + sourceCommit + ", game built from: " + builtCommit + "\n";
         out += "Step: " + model.errorStep + "\nMessage: " + model.errorMessage + "\n";
         out += "Disc: " + cfg.disc + "\nRelease folder: " + p.release + "\n\n--- tmb_build output ---\n";
         const size_t from = model.details.size() > 60 ? model.details.size() - 60 : 0;
@@ -709,6 +910,34 @@ static void drawReady(App &app, float inner)
         gap(10);
         ui::text(app.notice.c_str(), 18, app.noticeColor);
     }
+    if (built && !app.cfg.buildPending && app.codeChanged() && !app.building)
+    {
+        // A new release unzipped over this one: the game is still the old code until it is built again.
+        gap(12);
+        std::string what = app.sourceVersion.empty() ? std::string(L("New code is installed.", "Un nouveau code est installé."))
+                                                     : std::string(L("Version ", "La version ")) + app.sourceVersion +
+                                                           L(" is installed.", " est installée.");
+        noteBox(what.c_str(),
+                L("Rebuild the game to play it: only what changed is built again. Your saves and settings are kept.",
+                  "Reconstruisez le jeu pour y jouer : seul ce qui a changé est refait. Vos sauvegardes et réglages sont conservés."),
+                ui::color::wip, inner);
+        gap(6);
+        if (ui::button(L("Rebuild now", "Reconstruire maintenant"), ImVec2(0, S(48)), ui::Kind::Primary, !app.gameRunning))
+            app.startBuild();
+    }
+    std::string newVersion, page;
+    if (app.updates.get(&newVersion, &page) == UpdateCheck::State::Available && newVersion != app.sourceVersion)
+    {
+        gap(12);
+        std::string what = std::string(L("Version ", "La version ")) + newVersion + L(" is available.", " est disponible.");
+        noteBox(what.c_str(),
+                L("Download it from the release page, unzip it over this folder, then Rebuild.",
+                  "Téléchargez-la depuis la page de la version, décompressez-la sur ce dossier, puis Reconstruire."),
+                ui::color::cross, inner);
+        gap(6);
+        if (ui::button(L("Open the release page", "Ouvrir la page de la version"), ImVec2(0, S(48))))
+            plat::open(page);
+    }
     if (!app.crashReport.empty() || app.gameProblem || !app.launchError.empty())
     {
         gap(10);
@@ -830,6 +1059,17 @@ static void drawSettings(App &app, float inner)
         app.cfg.motion = !app.cfg.motion;
         app.saveConfig();
     }
+    gap(6);
+    std::snprintf(id, sizeof(id), "%s##updates", app.cfg.updateCheck ? L("Check for updates at start: on", "Vérifier les mises à jour au démarrage : oui")
+                                                                     : L("Check for updates at start: off", "Vérifier les mises à jour au démarrage : non"));
+    if (ui::pill(id, app.cfg.updateCheck, 18))
+    {
+        app.cfg.updateCheck = !app.cfg.updateCheck;
+        app.saveConfig();
+    }
+    ui::text(L("It only asks GitHub for the latest version number; nothing is downloaded or sent.",
+               "Il demande seulement à GitHub le numéro de la dernière version ; rien n'est téléchargé ni envoyé."),
+             15, ui::color::inkFaint);
     (void)inner;
 }
 
@@ -840,14 +1080,18 @@ static void drawMaintenance(App &app, float inner)
     const float bw = S(270);
     auto row = [&](const char *label, const char *what, bool enabled, ui::Kind kind = ui::Kind::Normal)
     {
-        const bool pressed = ui::button(label, ImVec2(bw, S(46)), kind, enabled, 18);
+        // Fixed rows (the button's height and a small gap, more only when the text wraps): six rows fit the card at
+        // the window's smallest size.
+        const float y0 = ImGui::GetCursorPosY();
+        const bool pressed = ui::button(label, ImVec2(bw, S(42)), kind, enabled, 18);
         ImGui::SameLine(0, S(18));
-        const float y = ImGui::GetCursorPosY();
-        ImGui::SetCursorPosY(y + S(11));
+        ImGui::SetCursorPosY(y0 + S(9));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + inner - bw - S(20));
         ui::textWrapped(what, 17, ui::color::inkDim);
         ImGui::PopTextWrapPos();
-        gap(2);
+        const float textBottom = ImGui::GetCursorPosY();
+        ImGui::SetCursorPosY(std::max(y0 + S(42), textBottom - ImGui::GetStyle().ItemSpacing.y));
+        ImGui::Dummy(ImVec2(1, 0));
         return pressed;
     };
     const bool idle = !app.building && !app.gameRunning && !app.cfg.disc.empty();
@@ -867,6 +1111,20 @@ static void drawMaintenance(App &app, float inner)
     if (row(L("Open build logs", "Journaux de préparation"), L("One file per step of preparing the game.", "Un fichier par étape de la préparation."),
             exists(app.p.buildLogs)))
         plat::open(app.p.buildLogs);
+    std::string version, page, error;
+    bool byHand = false;
+    const UpdateCheck::State st = app.updates.get(&version, &page, &error, &byHand);
+    std::string status = std::string(L("This is version ", "Version installée : ")) + kVersion + ".";
+    if (st == UpdateCheck::State::Running)
+        status += L(" Checking\xE2\x80\xA6", " Vérification\xE2\x80\xA6");
+    else if (st == UpdateCheck::State::Available)
+        status += std::string(L(" Version ", " La version ")) + version + L(" is available (Play tab).", " est disponible (onglet Jouer).");
+    else if (st == UpdateCheck::State::Latest)
+        status += L(" It is the latest.", " C'est la plus récente.");
+    else if (st == UpdateCheck::State::Failed && byHand)
+        status += std::string(L(" Could not check: ", " Vérification impossible : ")) + error + ".";
+    if (row(L("Check for updates", "Vérifier les mises à jour"), status.c_str(), st != UpdateCheck::State::Running))
+        app.updates.start(app.updateUrl, true);
 }
 
 static void drawIncomplete(App &app)
@@ -926,7 +1184,11 @@ static void drawFrame(App &app)
         plat::open(kSiteUrl);
     ImGui::SameLine(0, S(16));
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + S(2));
-    std::string ver = std::string("TMB_Recomp  \xC2\xB7  ") + L("launcher ", "lanceur ") + kVersion;
+    std::string ver = std::string("TMB_Recomp ") + kVersion;
+    if (*kCommit)
+        ver += std::string("  \xC2\xB7  ") + std::string(kCommit).substr(0, 10);
+    if (app.updates.get() == UpdateCheck::State::Available)
+        ver += L("  \xC2\xB7  update available", "  \xC2\xB7  mise à jour disponible");
     ui::text(ver.c_str(), 15, ui::color::inkFaint);
     if (app.building && app.tab != Tab::Play)
     {
@@ -973,7 +1235,7 @@ static void drawFrame(App &app)
 struct Selftest
 {
     std::string iso, shots, wrong;
-    bool errorDemo = false, cancel = false;
+    bool errorDemo = false, cancel = false, screensOnly = false;
     double playSeconds = 40, crashSeconds = 0;
     std::FILE *log = nullptr;
 
@@ -1018,8 +1280,39 @@ struct Selftest
                 }};
     }
 
+    // --screens: the three tabs as they are now (a layout check at a --ui-scale, the update notice), then quit.
+    void buildScreens()
+    {
+        steps.push_back({"wait for the update check", [](App &app, double t)
+                         { return t > 6.0 || (app.updates.get() != UpdateCheck::State::Running && t > 0.5); }});
+        steps.push_back(shot("s1-play", 0.5));
+        steps.push_back({"settings", [](App &app, double) { app.tab = Tab::Settings; return true; }});
+        steps.push_back(shot("s2-settings"));
+        steps.push_back({"maintenance", [](App &app, double) { app.tab = Tab::Maintenance; return true; }});
+        steps.push_back(shot("s3-maintenance"));
+        steps.push_back({"french", [](App &app, double) { g_fr = true; app.tab = Tab::Play; return true; }});
+        steps.push_back(shot("s4-play-fr"));
+        steps.push_back({"french maintenance", [](App &app, double) { app.tab = Tab::Maintenance; return true; }});
+        steps.push_back(shot("s5-maintenance-fr"));
+        steps.push_back({"quit", [this](App &app, double)
+                         {
+                             std::string v, page, error;
+                             const auto st = app.updates.get(&v, &page, &error);
+                             say("update check: state %s, %s", std::to_string(static_cast<int>(st)), v + " " + page + " " + error);
+                             say("source %s, built from %s", app.sourceCommit, app.builtCommit);
+                             say("screens done");
+                             app.quit = true;
+                             return true;
+                         }});
+    }
+
     void build()
     {
+        if (screensOnly)
+        {
+            buildScreens();
+            return;
+        }
         steps.push_back(shot("01-welcome", 1.5));
         steps.push_back({"french welcome", [](App &app, double) { g_fr = true; (void)app; return true; }});
         steps.push_back(shot("02-welcome-fr"));
@@ -1123,6 +1416,7 @@ struct Selftest
                                  say("  %s", s.id + " " + (s.state == BuildStep::State::Skipped ? std::string("skipped") : std::to_string(s.seconds) + " s"));
                              say("build ended after %s s: %s", std::to_string(plat::now() - buildStart),
                                  app.phase == Phase::Ready ? "ready" : "failed: " + app.model.errorMessage);
+                             say("notice: %s (launcher.ini last_build_seconds %s)", app.notice, std::to_string(app.cfg.lastBuildSeconds));
                              return true;
                          }});
         steps.push_back(shot("09-built", 1.0));
@@ -1237,8 +1531,10 @@ struct Selftest
 int main(int argc, char **argv)
 {
     std::string release, selftestIso, shots, wrong;
-    bool errorDemo = false, cancel = false;
+    bool errorDemo = false, cancel = false, screensOnly = false;
     double playSeconds = 40, crashSeconds = 0;
+    float uiScale = 0;
+    std::string updateUrl;
     (void)argc;
     (void)argv;
     const std::vector<std::string> args = plat::arguments(); // UTF-8, from the wide command line
@@ -1262,6 +1558,12 @@ int main(int argc, char **argv)
             playSeconds = std::atof(next().c_str());
         else if (a == "--crash-seconds")
             crashSeconds = std::atof(next().c_str());
+        else if (a == "--screens")
+            screensOnly = true;
+        else if (a == "--ui-scale") // a test: the layout at another DPI scale (1.5 = Windows' 150 %)
+            uiScale = static_cast<float>(std::atof(next().c_str()));
+        else if (a == "--update-url") // a test: another address answering as GitHub's latest-release API
+            updateUrl = next();
     }
     if (release.empty())
         release = plat::exeDirectory();
@@ -1274,11 +1576,16 @@ int main(int argc, char **argv)
     InitWindow(1120, 760, "TMB Launcher");
     {
         const Vector2 dpi = GetWindowScaleDPI();
-        ui::scale = std::clamp(dpi.x, 1.0f, 3.0f);
+        ui::scale = std::clamp(uiScale > 0 ? uiScale : dpi.x, 1.0f, 3.0f);
         if (ui::scale > 1.0f)
         {
-            const int w = static_cast<int>(1120 * ui::scale), h = static_cast<int>(760 * ui::scale);
+            // The layout is made for 1120 x 760 at 1x: at Windows' 150 % on a 1920 x 1080 screen (1680 x 1140) it would
+            // not fit, so the scale is lowered until the window does (1.32 there; text still half as large again).
             const int m = GetCurrentMonitor();
+            const float fit = std::min((GetMonitorWidth(m) - 40) / 1120.0f, (GetMonitorHeight(m) - 80) / 760.0f);
+            if (fit > 0.5f)
+                ui::scale = std::max(1.0f, std::min(ui::scale, fit));
+            const int w = static_cast<int>(1120 * ui::scale), h = static_cast<int>(760 * ui::scale);
             SetWindowSize(std::min(w, GetMonitorWidth(m) - 40), std::min(h, GetMonitorHeight(m) - 80));
             SetWindowPosition((GetMonitorWidth(m) - GetScreenWidth()) / 2, (GetMonitorHeight(m) - GetScreenHeight()) / 2);
         }
@@ -1290,6 +1597,12 @@ int main(int argc, char **argv)
     ImGui::StyleColorsDark();
     ui::setup();
     rlImGuiEndInitImGui();
+
+    // The update check at start (setting "update_check"): not for a development launcher, unless pointed somewhere.
+    if (!updateUrl.empty())
+        app.updateUrl = updateUrl;
+    if (app.cfg.updateCheck && (std::strcmp(kVersion, "dev") != 0 || !updateUrl.empty()))
+        app.updates.start(app.updateUrl, false);
 
     Selftest test;
     if (!selftestIso.empty())
@@ -1303,6 +1616,7 @@ int main(int argc, char **argv)
         test.cancel = cancel;
         test.playSeconds = playSeconds;
         test.crashSeconds = crashSeconds;
+        test.screensOnly = screensOnly;
         test.log = _wfopen((plat::path(test.shots) / L"selftest.log").c_str(), L"w");
         test.t0 = plat::now();
         test.say("release %s, user folder %s", app.p.release, app.p.user);

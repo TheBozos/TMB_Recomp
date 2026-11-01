@@ -76,6 +76,19 @@ set(_icon "${CMAKE_BINARY_DIR}/launcher.ico")
 add_custom_command(OUTPUT "${_icon}" COMMAND launcher_make_icon "${_icon}" DEPENDS launcher_make_icon VERBATIM)
 add_custom_target(launcher_icon DEPENDS "${_icon}")
 
+# The release's version and source commit (tools/make_release.py passes them): shown in the footer, compared with
+# GitHub's latest release by the update check, in the exe's version information. "dev" builds skip the check at start.
+set(LAUNCHER_VERSION "dev" CACHE STRING "The release version (tools/make_release.py: the tag or --version)")
+set(LAUNCHER_COMMIT "" CACHE STRING "The TMB_Recomp commit the release is made from")
+if(NOT LAUNCHER_VERSION MATCHES "^[A-Za-z0-9._+-]+$" OR NOT LAUNCHER_COMMIT MATCHES "^[0-9a-f]*$")
+    message(FATAL_ERROR "LAUNCHER_VERSION / LAUNCHER_COMMIT: unexpected characters")
+endif()
+set(LAUNCHER_VERSION_NUMBERS 0 0 0)
+if(LAUNCHER_VERSION MATCHES "^v?([0-9]+)[.]([0-9]+)[.]([0-9]+)")
+    set(LAUNCHER_VERSION_NUMBERS ${CMAKE_MATCH_1} ${CMAKE_MATCH_2} ${CMAKE_MATCH_3})
+endif()
+list(JOIN LAUNCHER_VERSION_NUMBERS "," LAUNCHER_FILEVERSION)
+
 set(LAUNCHER_ICON "${_icon}")
 set(LAUNCHER_EXO2 "${_font_dir}/exo2.ttf")
 set(LAUNCHER_OFL "${_font_dir}/OFL.txt")
@@ -88,7 +101,8 @@ add_executable(tmb_launcher WIN32
     "${CMAKE_BINARY_DIR}/launcher.rc")
 add_dependencies(tmb_launcher launcher_icon)
 set_target_properties(tmb_launcher PROPERTIES OUTPUT_NAME "TMB Launcher")
-target_link_libraries(tmb_launcher PRIVATE launcher_imgui raylib comdlg32 shell32 ole32)
+target_link_libraries(tmb_launcher PRIVATE launcher_imgui raylib comdlg32 shell32 ole32 winhttp)
+target_compile_definitions(tmb_launcher PRIVATE TMB_VERSION="${LAUNCHER_VERSION}" TMB_COMMIT="${LAUNCHER_COMMIT}")
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # No DLL besides Windows' own: libstdc++, libgcc and winpthread linked in; no debug information.
     target_link_options(tmb_launcher PRIVATE -static -s)

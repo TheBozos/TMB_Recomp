@@ -7,8 +7,8 @@ EXO2 RCDATA "@LAUNCHER_EXO2@"
 OFL RCDATA "@LAUNCHER_OFL@"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION @LAUNCHER_FILEVERSION@,0
+PRODUCTVERSION @LAUNCHER_FILEVERSION@,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -21,8 +21,8 @@ BEGIN
             VALUE "ProductName", "Twisted Metal: Black PC port (TMB_Recomp), by boubou666 & Arzaroth"
             VALUE "InternalName", "TMB Launcher"
             VALUE "OriginalFilename", "TMB Launcher.exe"
-            VALUE "FileVersion", "1.0.0.0"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "FileVersion", "@LAUNCHER_VERSION@"
+            VALUE "ProductVersion", "@LAUNCHER_VERSION@ (@LAUNCHER_COMMIT@)"
         END
     END
     BLOCK "VarFileInfo"

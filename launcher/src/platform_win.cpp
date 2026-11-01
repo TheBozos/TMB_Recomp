@@ -10,6 +10,7 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <winhttp.h>
 
 #include <atomic>
 #include <chrono>
@@ -420,5 +421,97 @@ namespace plat
                 return TRUE;
             },
             reinterpret_cast<LPARAM>(&ctx));
+    }
+
+    bool httpGet(const std::string &url, const std::string &userAgent, std::string &body, long &status,
+                 std::string &error, size_t maxBytes)
+    {
+        body.clear();
+        status = 0;
+        std::wstring wurl = widen(url);
+        URL_COMPONENTS parts{};
+        parts.dwStructSize = sizeof(parts);
+        wchar_t host[256] = {}, pathBuf[2048] = {};
+        parts.lpszHostName = host;
+        parts.dwHostNameLength = 256;
+        parts.lpszUrlPath = pathBuf;
+        parts.dwUrlPathLength = 2048;
+        if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &parts) ||
+            (parts.nScheme != INTERNET_SCHEME_HTTPS && parts.nScheme != INTERNET_SCHEME_HTTP))
+        {
+            error = "bad URL";
+            return false;
+        }
+        struct Handle
+        {
+            HINTERNET h = nullptr;
+            ~Handle()
+            {
+                if (h)
+                    WinHttpCloseHandle(h);
+            }
+        } session, connection, request;
+        // WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY (Windows 8.1+): the proxy Windows itself uses.
+        session.h = WinHttpOpen(widen(userAgent).c_str(), 4 /* WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY */,
+                                WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session.h)
+            session.h = WinHttpOpen(widen(userAgent).c_str(), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME,
+                                    WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session.h)
+        {
+            error = lastError();
+            return false;
+        }
+        WinHttpSetTimeouts(session.h, 5000, 5000, 5000, 8000);
+        connection.h = WinHttpConnect(session.h, host, parts.nPort, 0);
+        if (!connection.h)
+        {
+            error = lastError();
+            return false;
+        }
+        request.h = WinHttpOpenRequest(connection.h, L"GET", pathBuf, nullptr, WINHTTP_NO_REFERER,
+                                       WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                       parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0);
+        if (!request.h)
+        {
+            error = lastError();
+            return false;
+        }
+        const wchar_t *headers = L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28\r\n";
+        if (!WinHttpSendRequest(request.h, headers, static_cast<DWORD>(-1L), WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+            !WinHttpReceiveResponse(request.h, nullptr))
+        {
+            error = lastError();
+            return false;
+        }
+        DWORD code = 0, size = sizeof(code);
+        WinHttpQueryHeaders(request.h, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
+                            &code, &size, WINHTTP_NO_HEADER_INDEX);
+        status = static_cast<long>(code);
+        for (;;)
+        {
+            DWORD available = 0;
+            if (!WinHttpQueryDataAvailable(request.h, &available))
+            {
+                error = lastError();
+                return false;
+            }
+            if (available == 0)
+                break;
+            std::string chunk(available, '\0');
+            DWORD read = 0;
+            if (!WinHttpReadData(request.h, chunk.data(), available, &read))
+            {
+                error = lastError();
+                return false;
+            }
+            body.append(chunk.data(), read);
+            if (body.size() > maxBytes)
+            {
+                error = "response too large";
+                return false;
+            }
+        }
+        return true;
     }
 }

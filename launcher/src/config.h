@@ -14,7 +14,9 @@ struct LauncherConfig
     bool motion = true;        // the background's animation
     bool buildPending = false; // a build started and did not finish (resumes)
     bool built = false;        // the last build finished
-    double lastBuildSeconds = 0;
+    double lastBuildSeconds = 0;  // the last finished build, all its runs (a stop and a resume: both)
+    double pendingSeconds = 0;    // the runs of the unfinished build so far (stopped, failed)
+    bool updateCheck = true;      // ask GitHub for a newer release at start
 
     bool load(const std::string &file);
     bool save(const std::string &file) const;

@@ -65,6 +65,8 @@ bool LauncherConfig::load(const std::string &file)
     buildPending = v["build_pending"] == "1";
     built = v["built"] == "1";
     lastBuildSeconds = std::atof(v["last_build_seconds"].c_str());
+    pendingSeconds = std::atof(v["pending_build_seconds"].c_str());
+    updateCheck = v.count("update_check") ? v["update_check"] != "0" : true;
     return true;
 }
 
@@ -79,6 +81,9 @@ bool LauncherConfig::save(const std::string &file) const
     text += std::string("build_pending = ") + (buildPending ? "1" : "0") + "\n";
     text += std::string("built = ") + (built ? "1" : "0") + "\n";
     text += std::string("last_build_seconds = ") + seconds + "\n";
+    std::snprintf(seconds, sizeof(seconds), "%.0f", pendingSeconds);
+    text += std::string("pending_build_seconds = ") + seconds + "\n";
+    text += std::string("update_check = ") + (updateCheck ? "1" : "0") + "\n";
     return writeAtomically(file, text);
 }
 

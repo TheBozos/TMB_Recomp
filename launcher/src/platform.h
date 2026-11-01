@@ -74,4 +74,10 @@ namespace plat
     // The files of a folder with their write times (UTC 100 ns ticks): crash reports appearing.
     std::vector<std::pair<std::string, uint64_t>> listFiles(const std::string &folder, const std::string &suffix);
     uint64_t freeBytes(const std::string &folder);
+
+    // An HTTP(S) GET through WinHTTP (the system's proxy settings and certificate store; nothing else linked): the
+    // body (at most maxBytes) and the status code. False with error set when the server could not be reached.
+    // Blocking, with short timeouts: call it from a thread.
+    bool httpGet(const std::string &url, const std::string &userAgent, std::string &body, long &status,
+                 std::string &error, size_t maxBytes = 1 << 20);
 }

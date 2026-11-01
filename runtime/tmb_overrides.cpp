@@ -1613,8 +1613,11 @@ namespace
 
     // With the native renderer (TMB_NATIVE=1), the GS stream (menus, HUD, 2D, movies, effects) goes to the fork's GS
     // native back end too, not to paraLLEl-GS: set before the window opens, where the runtime picks the GS renderer.
-    // PS2X_GS_RENDERER=parallel or cpu keeps that one. Drawn at twice the PS2's resolution each way (PS2X_GS_SCALE,
-    // 1 is the PS2's own: the 3D and HUD of a 640 x 224 NTSC field look soft on a PC screen); no cost in frame rate.
+    // PS2X_GS_RENDERER=parallel or cpu keeps that one. No PS2X_GS_SCALE default here (it was 2): the variable is an
+    // override of video.ini's gs_scale (ps2_video::loadAtStartup reads the environment over the file), so a default
+    // set here made the runner ignore the player's setting and log "GS scale 2" with gs_scale = 1 in video.ini. The GS
+    // back end draws nothing in the native port (no GS front end); a diagnostic that brings it back sets the scale in
+    // video.ini or PS2X_GS_SCALE.
     // The rest of the native port too: the IOP modules recompiled by scripts/iop_recomp.sh run as native code (the
     // others interpreted), the SPU2 mixed and the IOP run on the PC's clock. Each can be set to 0.
     // The native port is the default (a double-click starts it, scripts/run_native.sh no longer needed for it):
@@ -1625,7 +1628,6 @@ namespace
         if (tmb::native::enabled())
         {
             tmb::host::setEnvDefault("PS2X_GS_RENDERER", "native");
-            tmb::host::setEnvDefault("PS2X_GS_SCALE", "2");
             tmb::host::setEnvDefault("PS2X_IOP_NATIVE", "1");
             tmb::host::setEnvDefault("PS2X_SPU2_WALLCLOCK", "1");
             tmb::host::setEnvDefault("PS2X_IOP_WALLCLOCK", "1");

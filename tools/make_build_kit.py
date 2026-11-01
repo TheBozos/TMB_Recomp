@@ -76,8 +76,12 @@ DEPS = [
 ]
 
 # What the build never reads in those sources (raylib's examples are only added with BUILD_EXAMPLES; rlImGui and imgui
-# are compiled from their top-level files; rlImGui's premake binaries are executables nothing runs).
+# are compiled from their top-level files; rlImGui's premake binaries are executables nothing runs; ELFIO's examples and
+# tests are only added when it is the top-level project, libdwarf's test/ with DO_TESTING: their sample ELF files would
+# also be the only ELF files in a release, which tools/make_release.py refuses).
 DEP_PRUNE = {
+    'elfio': ['tests', 'examples', 'doc'],
+    'libdwarf': ['test'],
     'raylib': ['examples', 'projects'],
     'imgui': ['examples', 'docs'],
     'rlimgui': ['examples', 'resources', 'premake5', 'premake5.exe', 'premake5.osx', 'premake5.lua',
@@ -138,6 +142,20 @@ def prune(pkg, rel):
 
 class KitError(Exception):
     pass
+
+
+def release_stamp():
+    """<ROOT>/release.ini (tools/make_release.py writes it in a release's source folder, which has no .git): the commits
+    the kit's tools and manifest are made from."""
+    out = {}
+    path = os.path.join(ROOT, 'release.ini')
+    if os.path.isfile(path):
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.split('=', 1)
+                    out[k.strip()] = v.strip()
+    return out
 
 
 def log(*a):
@@ -531,7 +549,8 @@ class Kit:
                 raise KitError('%s still loads %s' % (t, ', '.join(local)))
             info[t] = {'bytes': os.path.getsize(exe), 'sha256': sha256_file(exe), 'imports': sorted(imports)}
             log('  %s: %.1f MB, imports %s' % (t, info[t]['bytes'] / 1e6, ', '.join(sorted(imports))))
-        info['fork_commit'] = run([self.git(), '-C', os.path.join(ROOT, 'PS2Recomp'), 'rev-parse', 'HEAD']).strip()
+        info['fork_commit'] = release_stamp().get('fork_commit') or \
+            run([self.git(), '-C', os.path.join(ROOT, 'PS2Recomp'), 'rev-parse', 'HEAD']).strip()
         self.part('tools', info)
 
     # -- manifest
@@ -578,6 +597,8 @@ class Kit:
                                      ', '.join('%s %.1f' % (k, v / 1e6) for k, v in sizes.items())))
 
     def tmb_commit(self):
+        if release_stamp().get('commit'):
+            return release_stamp()['commit']
         try:
             return run([self.git(), '-C', ROOT, 'rev-parse', 'HEAD']).strip()
         except KitError:

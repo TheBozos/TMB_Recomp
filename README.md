@@ -30,7 +30,7 @@ display mode) comes from native code on the PC's clock.
 
 You build the game yourself, on your PC, from **your own disc**: nothing of the game is in the download.
 
-1. Download the release zip from the [Releases](https://github.com/boubou666/TMB_Recomp/releases) page. Each release
+1. Download the release zip from the [Releases](https://github.com/TheBozos/TMB_Recomp/releases) page. Each release
    publishes the zip's SHA-256: check it before running anything
    (`Get-FileHash .\TMB_Recomp-<version>.zip` in PowerShell, or `certutil -hashfile <zip> SHA256`).
 2. Unzip it anywhere with about 10 GB free (into `D:\Games`, say: the zip holds a `TMB_Recomp` folder), but not in
@@ -177,7 +177,7 @@ disc files (game_us/) ──► ps2_analyzer ──► recomp/tmb_scus97101.toml
   texture cache, GIF translation; `docs/native.md`), shared with the other ports.
 - `runtime/tmb_overrides.cpp` holds the other game-specific bindings.
 
-The PS2Recomp fork lives in `PS2Recomp/` (git submodule, [boubou666/PS2Recomp](https://github.com/boubou666/PS2Recomp)),
+The PS2Recomp fork lives in `PS2Recomp/` (git submodule, [TheBozos/PS2Recomp](https://github.com/TheBozos/PS2Recomp)),
 shared with the other recompilations built on it (*Valkyrie Profile 2*, *Drakengard*, *The Lord of the Rings: The Third
 Age*, *Jade Cocoon 2*, *Soulcalibur III* and others). Fixes made for this port land there.
 
@@ -286,7 +286,7 @@ rem                        -DLAUNCHER_FONT_DIR=<folder with Exo2[wght].ttf and O
   off), glass cards, Exo 2 (SIL OFL 1.1, google/fonts at a pinned commit, embedded with its licence; downloaded at
   configure time, never committed). The icon is drawn at build time by `launcher/tools/make_icon.cpp`. No game art.
 - Updates: at start (Settings: "Check for updates at start") and from Maintenance's "Check for updates", one HTTPS
-  GET of `api.github.com/repos/boubou666/TMB_Recomp/releases/latest` through WinHTTP; a newer `tag_name` shows
+  GET of `api.github.com/repos/TheBozos/TMB_Recomp/releases/latest` through WinHTTP; a newer `tag_name` shows
   "Version X is available" with a link to its release page (built from the tag). Offline or no release: silent. When
   `source\release.ini`'s commit differs from the one in `game\built_from.ini` (written by tmb_build), the Play tab
   offers "Rebuild now".
@@ -360,7 +360,7 @@ python tools\make_release.py --version 0.1.0 --kit D:\tmb_kit\kit --out D:\tmb_r
 ### Step by step (development)
 
 ```bash
-git clone --recurse-submodules https://github.com/boubou666/TMB_Recomp.git
+git clone --recurse-submodules https://github.com/TheBozos/TMB_Recomp.git
 cd TMB_Recomp
 scripts/extract_iso.sh "/path/to/Twisted Metal - Black (USA).iso"      # disc files -> game_us/
 scripts/build_tools.sh                                                  # ps2_recomp, ps2_analyzer, ps2_vu_aot -> build/tools
@@ -378,7 +378,7 @@ The same scripts run in an MSYS2 **UCRT64** shell, with MSYS2's GCC (MSVC is not
 
 ```bash
 pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,python} git rsync
-git clone --recurse-submodules https://github.com/boubou666/TMB_Recomp.git
+git clone --recurse-submodules https://github.com/TheBozos/TMB_Recomp.git
 ```
 
 Then follow the steps above. `scripts/stage_dlls.sh` copies the DLLs the runner needs next to

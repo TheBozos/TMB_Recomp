@@ -54,8 +54,8 @@ static const char *kSiteUrl = "https://boubou666.github.io/RecompWatcher/";
 static const char *kVersion = TMB_VERSION;
 static const char *kCommit = TMB_COMMIT;
 // The update check: GitHub's latest release of the main repository (drafts and pre-releases are never "latest").
-static const char *kLatestReleaseApi = "https://api.github.com/repos/boubou666/TMB_Recomp/releases/latest";
-static const char *kReleasePagePrefix = "https://github.com/boubou666/TMB_Recomp/releases/tag/";
+static const char *kLatestReleaseApi = "https://api.github.com/repos/TheBozos/TMB_Recomp/releases/latest";
+static const char *kReleasePagePrefix = "https://github.com/TheBozos/TMB_Recomp/releases/tag/";
 
 // ---- language ----
 

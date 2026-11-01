@@ -3,7 +3,7 @@
 ## Layout
 - `game/` – full disc contents (ELF `SCES_503.60`, `MOD/*.IRX`, `IOPRP213.IMG`, data folders). The runtime uses the
   ELF's folder as `cdrom0:`.
-- `PS2Recomp/` – submodule, fork https://github.com/boubou666/PS2Recomp branch `main`, shared with VP2S and Drakengard.
+- `PS2Recomp/` – submodule, fork https://github.com/TheBozos/PS2Recomp branch `main`, shared with VP2S and Drakengard.
 - `recomp/tmb_sces50360.toml` – **current config**: `ps2_analyzer` output (352 SDK stubs bound by address, 326
   entry points, 1 jump table at `0x4ee6a0`), output redirected to `generated/`.
 - `runtime/tmb_overrides.cpp` – game override module, matched on ELF name `SCES_503.60` + entry `0x100008`.
@@ -1696,7 +1696,7 @@ clean PC).
   must be pushed first and the owner publishes the draft.
 - **Launcher: version and updates.** The footer shows `TMB_Recomp <version> · <commit>`; the exe's version resource
   too. At start (launcher.ini `update_check`, a Settings toggle; not in a "dev" build) and from Maintenance's "Check for
-  updates": one GET of `https://api.github.com/repos/boubou666/TMB_Recomp/releases/latest` through WinHTTP (the
+  updates": one GET of `https://api.github.com/repos/TheBozos/TMB_Recomp/releases/latest` through WinHTTP (the
   system's proxy and certificates, 5 s timeouts) in a thread. A newer `tag_name` (semantic versions, 1.0.0-rc <
   1.0.0) shows "Version X is available" on the Play tab with "Open the release page"; the link is built from the tag
   (only `[A-Za-z0-9._+-]`), never taken from the response; nothing is downloaded. Offline, no release yet (404), a

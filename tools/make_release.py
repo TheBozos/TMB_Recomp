@@ -55,8 +55,8 @@ import urllib.request
 import zipfile
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-REPO = 'boubou666/TMB_Recomp'
-FORK_REPO = 'boubou666/PS2Recomp'
+REPO = 'TheBozos/TMB_Recomp'
+FORK_REPO = 'TheBozos/PS2Recomp'
 NAME = 'TMB_Recomp'
 VERSION_RE = re.compile(r'^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$')
 MSYS2_SOURCES = 'https://repo.msys2.org/mingw/sources/'

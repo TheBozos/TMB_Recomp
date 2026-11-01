@@ -19,8 +19,8 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
 1. Install the requirements in the README (CMake, Ninja, GCC 13+, FFmpeg dev libs, X11/Wayland + OpenGL headers,
    bsdtar, an AVX2 CPU). The native port draws with OpenGL 3.3. A Vulkan driver is only needed for the PS2 path's
    paraLLEl-GS (`scripts/run.sh`), fetched by CMake with its shaders precompiled.
-2. `git clone --recurse-submodules https://github.com/boubou666/TMB_Recomp.git`. `PS2Recomp` is the fork
-   `boubou666/PS2Recomp`; TMB pins a commit of its `native/renderer` branch (the native work, merged into `main` as it
+2. `git clone --recurse-submodules https://github.com/TheBozos/TMB_Recomp.git`. `PS2Recomp` is the fork
+   `TheBozos/PS2Recomp`; TMB pins a commit of its `native/renderer` branch (the native work, merged into `main` as it
    settles).
 3. The game data is not in the repository (never commit it). Put your own ISO at the repo root, then follow "Build and
    run" in the README: `extract_iso.sh`, `build_tools.sh`, `recomp.sh`, `build_runtime.sh`, optionally
@@ -79,7 +79,7 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
 
 - Commit as `Thomas Martin <304581853+boubou666@users.noreply.github.com>`, never a personal e-mail. End commits with
   the `Co-Authored-By` line used in the history.
-- Fixes to the runtime, IOP or recompiler go into the fork `boubou666/PS2Recomp`, not into workarounds here. Push the
+- Fixes to the runtime, IOP or recompiler go into the fork `TheBozos/PS2Recomp`, not into workarounds here. Push the
   fork first, then bump the submodule here.
 - Run the fork tests before pushing (`ps2x_tests`, 610+ cases), and a TMB check run on the USA release.
 - Push with Git for Windows (`/c/Program Files/Git/cmd/git.exe`): MSYS2's git hangs without credentials.

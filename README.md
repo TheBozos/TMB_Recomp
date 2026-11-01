@@ -2,7 +2,7 @@
 
 # TMB_Recomp
 
-**A native Linux and Windows port of *Twisted Metal: Black* (USA `SCUS-97101` and PAL `SCES-50360`): the whole game recompiled to C++ and run on the PC itself.**<br>
+**A native Linux and Windows port of *Twisted Metal: Black* (USA `SCUS-97101`): the whole game recompiled to C++ and run on the PC itself.**<br>
 Not an emulator, and getting rid of what is left of one. The game's MIPS code (EE) and its sound driver (IOP) run as
 native code; its 3D is drawn by a PC renderer from the game's own meshes, matrices and textures; its frames are paced and
 its sound mixed on the PC's clock. Every VU1 program the game runs is native C++ (no VU1 interpreter, no sandbox).
@@ -19,33 +19,30 @@ display mode) comes from native code on the PC's clock.
 
 > [!IMPORTANT]
 > No game files are included: no ELF, IRX modules, data archives, or code generated from them.
-> You need **your own copy** of the game: the USA release, PS2 ID **`SCUS-97101`** (the default, the more complete one: the
-> characters' story cinematics after choosing a character; the European disc's are about a tenth of their size), or the European one, **`SCES-50360`**. The port is built against their executables:
+> You need **your own copy** of the game: the USA release, PS2 ID **`SCUS-97101`**. The port is built against its
+> executable. The build also reads the European executable's code (the hooks in `runtime/` were written against its
+> addresses; `tools/tmb_region_map.py` maps them to the USA one), so for now it needs `SCES_503.60` from the European
+> disc in `game/` as well; the European release itself is not supported.
 >
-> | Release | File | SHA-1 |
-> |---|---|---|
-> | USA | `SCUS_971.01` | `3ff17f4897552e355d0bb8c3abfa5125fe3ff2ef` |
-> | Europe | `SCES_503.60` | `d097dd85167b6a188bf5ec17ecfc53a1f275a581` |
+> | File | SHA-1 |
+> |---|---|
+> | `SCUS_971.01` (USA) | `3ff17f4897552e355d0bb8c3abfa5125fe3ff2ef` |
+> | `SCES_503.60` (European, its executable only, for the build) | `d097dd85167b6a188bf5ec17ecfc53a1f275a581` |
 
 ## Status
 
-> [!NOTE]
-> Since 2026-10-31 only the USA release is built and tested; what follows about the European one was true when it was
-> last checked and is not maintained.
-
 Picking the work up elsewhere: [`docs/HANDOFF.md`](docs/HANDOFF.md) (state, how to measure, next steps).
 
-**Playable, at full speed, as a native port: the USA release at NTSC's 60 frames per second, the European one at PAL's
-50.** The game boots, runs its own IOP modules, shows the PAL language selection (Europe), plays the movies with their
-sound, goes through the menus and level loading, and plays matches
+**Playable, at full speed, as a native port, at NTSC's 60 frames per second.** The game boots, runs its own IOP modules,
+plays the movies with their sound, goes through the menus and level loading, and plays matches
 and story levels: driving, weapons, bots, HUD, music and effects, deaths, respawns, saving and loading. With the native
-path (`scripts/run_native.sh`, at twice the PS2's resolution) a match runs at 58.9 fps on average on the USA release
-(10th percentile 58.5) and 49.4 on the European one (10th percentile 49.3), on a Ryzen 7 7800X3D with an RTX 5070 Ti. Still being checked: every arena and story level to the endings, and some effects against the PS2 picture
+path (`scripts/run_native.sh`, at twice the PS2's resolution) a match holds 57.7 to 60.4 fps (4 players split screen:
+55.8 to 60.4) on a Ryzen 7 7800X3D with an RTX 5070 Ti. Still being checked: every arena and story level to the endings, and some effects against the PS2 picture
 (issues found while playing are fixed as they come: [docs/RECOMP_NOTES.md](docs/RECOMP_NOTES.md)).
 
 <p align="center">
-  <img src="docs/screenshots/match_headlights.jpg" width="49%" alt="A match at night: the player's truck with its headlights on, bots ahead">
-  <img src="docs/screenshots/match_rain.jpg" width="49%" alt="The player's car in the rain, the HUD at twice the PS2's resolution">
+  <img src="docs/screenshots/match_explosion.jpg" width="49%" alt="An explosion in front of the player's truck in Junkyard, its sparks drawn natively">
+  <img src="docs/screenshots/match_night.jpg" width="49%" alt="The player's truck at night in the rain, its weapon glowing, the HUD at twice the PS2's resolution">
   <img src="docs/screenshots/intro_movie.jpg" width="49%" alt="The intro movie">
   <img src="docs/screenshots/story_menu.jpg" width="49%" alt="The game-mode menu">
 </p>
@@ -57,8 +54,7 @@ path (`scripts/run_native.sh`, at twice the PS2's resolution) a match runs at 58
 | Map and recompile the main ELF (3,572 functions, symbols intact) | ✅ |
 | Link the generated code with the PS2Recomp runtime on Linux and Windows | ✅ |
 | Boot: EE kernel, the game's own IOP modules, CD reads from the disc files | ✅ |
-| USA release (SCUS-97101, NTSC 60 Hz) alongside the European one (SCES-50360), one runtime for both | ✅ |
-| Language selection screen (PAL) | ✅ |
+| USA release (SCUS-97101, NTSC 60 Hz) | ✅ |
 | Controller input; every button and stick direction rebindable to keys, controllers and the mouse (F2, `input.ini`) | ✅ |
 | Movies (PSS, MPEG-2 decoded with FFmpeg) | ✅ |
 | Title screen and main menu | ✅ |
@@ -67,7 +63,7 @@ path (`scripts/run_native.sh`, at twice the PS2's resolution) a match runs at 58
 | Menus, level select, level loading | ✅ |
 | First match: HUD, cars, textured 3D, bots | ✅ |
 | Deaths, respawns, game over and replay | ✅ |
-| Full speed (60 fps USA, 50 fps Europe): native renderer, VU1 microcode as native code | ✅ |
+| Full speed (60 fps): native renderer, VU1 microcode as native code | ✅ |
 | Frames paced on the PC's clock, not on the PS2's vblanks | ✅ |
 | Sound and music (989SND, movie audio) | ✅ |
 | Every IOP module recompiled (sound driver, pad, memory card...), sound mixed on the PC's clock (not tied to the frame rate) | ✅ |
@@ -141,9 +137,8 @@ disc files (game_us/, game/) ──► ps2_analyzer ──► recomp/tmb_scus971
    what is left of the PS2: EE kernel HLE · DMAC (kicks to the GIF / VIF complete unread) · IPU · IOP kernel layer
 ```
 
-- **Both regions, one runtime.** `TMB_REGION=us` (the default) or `pal` picks the disc folder (`game_us/`, `game/`), the
-  recompiler config, the generated code (`generated_us/`, `generated/`) and the build (`build/game_us`, `build/game`).
-  Everything hand-written is shared: `runtime/` is written against the PAL executable and marks the addresses it uses
+- **The European executable as the hooks' reference.** The USA release is built (`game_us/`, `generated_us/`,
+  `build/game_us`); `runtime/` is written against the European executable and marks the addresses it uses
   (`TMB_ADDR`, `TMB_GP`); `tools/tmb_region_map.py` maps them to the region's executable by symbol (a file's statics
   through the code that uses them) into `tmb_region.h`, and `recomp/tmb_manual.toml` holds the recompiler's hand-written
   settings by symbol name. The two executables differ little (the US one is five months older); NTSC draws a 640 x 224
@@ -170,14 +165,14 @@ Age*, *Jade Cocoon 2*, *Soulcalibur III* and others). Fixes made for this port l
 - X11/Wayland and OpenGL development headers (raylib is fetched and built by the fork)
 - `bsdtar` (libarchive) to extract the disc
 - A CPU with AVX2 (the runtime is built for `x86-64-v3`)
-- Your own copy of `SCUS-97101` or `SCES-50360` (check the hash above)
+- Your own copy of `SCUS-97101`, and the European disc's executable `SCES_503.60` in `game/` for the build (check the hashes above)
 
 ## Build and run
 
 ```bash
 git clone --recurse-submodules https://github.com/boubou666/TMB_Recomp.git
 cd TMB_Recomp
-scripts/extract_iso.sh "/path/to/Twisted Metal - Black (USA).iso"      # disc files -> game_us/ (TMB_REGION=pal: the European disc -> game/)
+scripts/extract_iso.sh "/path/to/Twisted Metal - Black (USA).iso"      # disc files -> game_us/
 scripts/build_tools.sh                                                  # ps2_recomp, ps2_analyzer, ps2_vu_aot -> build/tools
 scripts/recomp.sh                                                       # ELF + recomp/tmb_scus97101.toml -> generated_us/ (VU1 microcode -> generated_us/vu1/)
 scripts/build_runtime.sh                                                # runtime + generated code -> build/game_us
@@ -301,8 +296,8 @@ key positions):
 
 | | |
 |---|---|
-| Boot ELF | `SCUS_971.01` (USA, May 2001) / `SCES_503.60` (Europe, October 2001), entry `0x100008`, `.text` at `0x100000` (1.2 MB), not stripped |
-| Video mode | NTSC (USA), PAL (Europe) |
+| Boot ELF | `SCUS_971.01` (USA, May 2001), entry `0x100008`, `.text` at `0x100000` (1.2 MB), not stripped |
+| Video mode | NTSC |
 | IOP modules | `MOD/*.IRX`: 989SND, LGDEV, LIBSD, MCMAN, MCSERV, MTAPMAN, PADMAN, SIO2MAN, SNDBGET, USBD, USBKEYBD, USBMLOAD |
 | IOP image | `IOPRP213.IMG` |
 | Data | `LVL/`, `PCAR/`, `ACAR/`, `PTS/`, `RST/`, `SND/`, `VAG/`, `SHELL/` (per-language UI), `MOV/*.PSS` |

@@ -4,14 +4,13 @@ Where the work stands and how to pick it up on another machine. Details and hist
 
 ## Goal
 
-The game smooth (its own 60 fps on the USA release) and fully playable as a true PC program: no PS2 hardware simulated
-where the PC can do the job itself. Only the USA release is built and tested since 2026-10-31 (the European figures
-below are from before). Locked runs on 2026-11-01: a 1P match 57.7-60.4 fps, 4P split screen 55.8-60.4. Earlier:
+The game smooth (its own 60 fps, the USA release only: the European one is dropped) and fully playable as a true PC
+program: no PS2 hardware simulated where the PC can do the job itself. Locked runs on 2026-11-01: a 1P match
+57.7-60.4 fps, 4P split screen 55.8-60.4. Earlier:
 
 | Release | Path | fps mean | slowest tenth |
 |---|---|---|---|
 | USA (`SCUS-97101`, NTSC) | native (`scripts/run_native.sh`, 2x resolution) | 58.9 | 58.5 |
-| Europe (`SCES-50360`, PAL) | native, 2x resolution | 49.4 | 49.3 |
 
 Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the first arena (`tools/play_script.py`).
 
@@ -25,8 +24,8 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
    settles).
 3. The game data is not in the repository (never commit it). Put your own ISO at the repo root, then follow "Build and
    run" in the README: `extract_iso.sh`, `build_tools.sh`, `recomp.sh`, `build_runtime.sh`, optionally
-   `iop_recomp.sh`. `TMB_REGION=pal` builds the European release (`game/`, `generated/`, `build/game`) instead of the
-   USA one (`game_us/`, `generated_us/`, `build/game_us`).
+   `iop_recomp.sh` (the USA release: `game_us/`, `generated_us/`, `build/game_us`; the European disc's executable
+   `SCES_503.60` in `game/` too, for the region map the hooks' addresses go through).
 4. On Windows: MSYS2 UCRT64 with its GCC, as in the README's Windows section; `scripts/stage_dlls.sh` after a build
    to start the runner outside the MSYS2 shell. No `perf`: use the fork's sampling profiler (`PS2X_PROFILE=<s>`).
 5. The first build compiles about 3500 generated files. A change to `ps2_runtime.h`, `ps2_memory.h` or
@@ -55,7 +54,7 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
 
 - **Check runs.** A pad script reaching the match about 150 s in: `PS2X_PAD_SCRIPT="$(tools/play_script.py 230)"`,
   with `TMB_TRACE_FRAMES=1` (frame split and CPU per host thread every 100 frames; under native frames also the game's
-  fields per real second, 50.00 on PAL when it runs at its own speed). `PS2X_CAPTURE_DIR` saves the presented picture
+  fields per real second, 60 when it runs at its own speed). `PS2X_CAPTURE_DIR` saves the presented picture
   every few seconds, `PS2X_CAPTURE_WINDOW_DIR` the window as shown, `PS2X_WINDOW_SIZE=1280x960` a bigger window.
 - **Timeline.** `TMB_TRACE_TIMELINE=<file>`, then `tools/timeline.py <file> [frame] [count]`.
 - **What is still read or emulated.** `TMB_TRACE_PACKETS=1`: per 250 frames, packets read, chains walked, VU0

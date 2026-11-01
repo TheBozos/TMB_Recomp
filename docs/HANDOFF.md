@@ -1,11 +1,12 @@
-# Handoff (2026-10-29)
+# Handoff (2026-11-01)
 
 Where the work stands and how to pick it up on another machine. Details and history are in `RECOMP_NOTES.md`.
 
 ## Goal
 
-The game smooth (its own 60 fps on the USA release, 50 on the European one) and fully playable as a true PC program:
-no PS2 hardware simulated where the PC can do the job itself. Reached for the matches played so far:
+The game smooth (its own 60 fps on the USA release) and fully playable as a true PC program: no PS2 hardware simulated
+where the PC can do the job itself. Only the USA release is built and tested since 2026-10-31 (the European figures
+below are from before). Locked runs on 2026-11-01: a 1P match 57.7-60.4 fps, 4P split screen 55.8-60.4. Earlier:
 
 | Release | Path | fps mean | slowest tenth |
 |---|---|---|---|
@@ -35,13 +36,17 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
 
 - **Playable.** Boot, movies (the USA release's story cinematics too), menus, loading, matches (driving, weapons, AI,
   sound, HUD, split screen), deaths, respawns, game over, saving and loading. Story mode: level 1 of 8 checked.
-- **The native path** (`TMB_NATIVE=1`, `scripts/run_native.sh`), every layer of the PS2 replaced:
+- **The native path** (`TMB_NATIVE=1`, `scripts/run_native.sh`):
   - frames on the PC's clock (`timer1HandlerNative`, the fork's `FramePacer`; `TMB_NATIVE_FRAMES=0` for the vblanks);
-  - the 3D and every VU1 effect from the game's own data (`runtime/tmb_native.cpp`), no VU1 interpreter;
-  - the rest of the GS stream (menus, HUD, fonts, movies) translated into OpenGL by the fork's GS native back end,
-    the 3D drawn into the same targets at its markers; presentation on the GPU; internal resolution 2x
-    (`PS2X_GS_SCALE`); no paraLLEl-GS;
-  - the sound driver (989snd, libsd) recompiled, the SPU2 and IOP on the PC's clock.
+  - 3D from an offline mesh pack at the game's per-object hook, in the game's order, clipped to its own clip volume
+    (`runtime/tmb_meshes.cpp`); effects from the particle lists (`runtime/tmb_particles.cpp`); 2D builders rewritten
+    (`runtime/tmb_2d.cpp`); textures from an offline pack (`runtime/tmb_textures.cpp`); VU0 programs in C++
+    (`runtime/tmb_vu0.cpp`); no VU1 or VU0 interpreter;
+  - no GS front end: no GS object, memory or thread; the DMA kicks to GIF / VIF0 / VIF1 complete unread; the native
+    renderer presents the frame at 2x (`PS2X_GS_SCALE`);
+  - sound: the recompiled 989snd's libsd calls on the fork's native mixer, the SPU2 absent (`TMB_NATIVE_AUDIO=0`
+    brings it back);
+  - still the fork's model: the IOP kernel layer (interrupts, timers, SIF) under the recompiled IOP modules.
 - **Controls.** Rebindable to keys, controllers and the mouse: F2 in the game, saved to `input.ini`.
 - **Known gaps.** Not checked yet: every arena and story level to the endings. Widescreen and frame rates above the
   PS2's are not started (the game's update steps in whole fields).
@@ -53,16 +58,19 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
   fields per real second, 50.00 on PAL when it runs at its own speed). `PS2X_CAPTURE_DIR` saves the presented picture
   every few seconds, `PS2X_CAPTURE_WINDOW_DIR` the window as shown, `PS2X_WINDOW_SIZE=1280x960` a bigger window.
 - **Timeline.** `TMB_TRACE_TIMELINE=<file>`, then `tools/timeline.py <file> [frame] [count]`.
-- **GS native back end.** `PS2X_NATIVE_GS_LOG=1` / `PS2X_NATIVE_GS_STATS=1` (the native draws at their markers),
-  `PS2X_NATIVE_GS_DEBUG=1` (native fragments magenta), `PS2X_GS_NATIVE_LOG=1` (targets, transfers, presents).
-- **Shared machine.** Every build and timed run goes through the fork's bench lock (`tools/bench_lock.sh`), builds and
-  timed runs alone; discard the first run after a build on Windows (Defender scans the new files).
+- **What is still read or emulated.** `TMB_TRACE_PACKETS=1`: per 250 frames, packets read, chains walked, VU0
+  interpreter runs (all 0 by default); `[audio] native mixer` lines every 10 s with the SPU2 counters (all 0).
+- **Live diagnosis.** `TMB_LIVE_TOGGLES=<file>` (words read every 60 frames: nodepth, nofog, flat, noguard, dump...)
+  and F9 bursts of window captures: let the owner drive to a spot scripts can't reach.
+- **Comparison modes.** `TMB_NATIVE_VIF=1` (+ `TMB_NATIVE_MESHES_CHECK=1`), `TMB_NATIVE_MESHES=0 TMB_NATIVE_CHECK=<n>`
+  (VU1's own output beside the translation), `PS2X_VU0_HLE_CHECK=1`, `PS2X_AUDIO_RECORD=<wav>` on either sound path.
+- **Shared machine.** Only timed runs go through the bench lock (`tools/bench_lock.sh`); builds and visual checks run
+  freely. Discard the first run after a build on Windows (Defender scans the new files).
 
 ## Next steps
 
-1. Every arena and story level to the endings, fixing what shows up (the owner's reports first).
-2. VP2S is rewriting the GS native back end's target coherence (targets sharing GS memory); check TMB at 2x on their
-   branch when it lands.
+1. The IOP kernel layer (interrupts, timers, SIF DMA) under the recompiled IOP modules: native mechanisms at their API.
+2. Every arena and story level to the endings, fixing what shows up (the owner's reports first).
 3. Widescreen; frame rates above the PS2's (interpolating between game updates).
 
 ## Working conventions
@@ -71,5 +79,6 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
   the `Co-Authored-By` line used in the history.
 - Fixes to the runtime, IOP or recompiler go into the fork `boubou666/PS2Recomp`, not into workarounds here. Push the
   fork first, then bump the submodule here.
-- Run the fork tests before pushing (`ps2x_tests`, 610+ cases), and a TMB check run on both releases.
+- Run the fork tests before pushing (`ps2x_tests`, 610+ cases), and a TMB check run on the USA release.
+- Push with Git for Windows (`/c/Program Files/Git/cmd/git.exe`): MSYS2's git hangs without credentials.
 - Never edit a script a running or queued job will execute; clear a stale bench lock entry if a job dies holding it.

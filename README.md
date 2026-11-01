@@ -29,6 +29,10 @@ display mode) comes from native code on the PC's clock.
 
 ## Status
 
+> [!NOTE]
+> Since 2026-10-31 only the USA release is built and tested; what follows about the European one was true when it was
+> last checked and is not maintained.
+
 Picking the work up elsewhere: [`docs/HANDOFF.md`](docs/HANDOFF.md) (state, how to measure, next steps).
 
 **Playable, at full speed, as a native port: the USA release at NTSC's 60 frames per second, the European one at PAL's
@@ -90,8 +94,9 @@ state machine and no copy of GS memory in between.
 | Every VU0 program translated to C++ (the scene traversal's, bit-exact with VU0, and the 2D engine's), no VIF0 packet read, no VU0 interpreter (`runtime/tmb_vu0.cpp`) | ✅ |
 | Textures from an offline native pack, looked up by the game's own texture ids | ✅ |
 | Font, HUD, loading bar, overlays' darkening and movies drawn natively from the game's variables (no GIF packet built or read) | ✅ |
-| 3D meshes from an offline native pack (`tools/tmb_mesh_pack.py`) drawn at the game's per-object hook from its own state; today still read from the VIF stream the game sends | 🔧 |
-| Effects (particles, flares, rain...) drawn from the game's particle lists; today read from the VIF stream | ⏳ |
+| 3D meshes from an offline native pack (`tools/tmb_mesh_pack.py`) drawn at the game's per-object hook from its own state, in the game's own order, clipped to its microprograms' clip volume; no VIF stream read | ✅ |
+| Effects (particles, lens flares, rain...) drawn from the game's particle lists (`runtime/tmb_particles.cpp`); no VIF stream read | ✅ |
+| IOP kernel layer (interrupts, timers, SIF) under the recompiled IOP modules: still the fork's model | 🔧 |
 | No GS front end, no copy of GS memory, no VIF stream read: the native renderer draws and presents the whole frame (`TMB_GS_FRONTEND=1` and the diagnostic switches bring the GS front end back, headless) | ✅ |
 
 ✅ works · 🔧 in progress · ⏳ not reached yet
@@ -115,9 +120,9 @@ program piece by piece. Each piece below replaces a part of the PS2 that was sim
 | Game code (EE, MIPS R5900) | the EE CPU | 3,572 functions recompiled to C++ (`generated/`), with the ELF's own symbols |
 | IOP modules (989SND, LIBSD, PADMAN, SIO2MAN, MTAPMAN, MCMAN, MCSERV, USBD, LGDEV) | R3000A code on the IOP | all recompiled to C++ by the fork's `tools/iop_recomp.py` (`scripts/iop_recomp.sh`); none left interpreted |
 | Sound mixing (SPU2) | the SPU2 chip, at the IOP's pace | no SPU2: libsd's exports (the recompiled 989SND's calls: voices, banks, effects, the movie stream) taken over by the fork's native mixer (`ps2xIOP/src/native_audio`, `PS2X_NATIVE_AUDIO=1`, TMB's default): 48 voices playing the game's ADPCM banks from a native sound memory, ADSR, reverb and the looping sound data input (movie audio), mixed at 48 kHz when the PC's audio device asks; the SPU2 emulation is absent (no sound RAM, no registers, no DMA, never scheduled; `TMB_NATIVE_AUDIO=0` brings it back) |
-| 3D (hier renderer: terrain, buildings, cars, characters) | VU1 microprograms, then the GS | every object kind (rigid, pool-less, sprites, ribbons, skinned, environment-mapped and morphing objects) drawn from a native mesh pack the NGP files' prebuilt packets are converted into offline (`tools/tmb_mesh_pack.py`), at the game's per-object hook (`pktAddVu1ObjAsm`) from its own state (`runtime/tmb_meshes.cpp`, `TMB_NATIVE_MESHES=0` to turn off); their place in the frame still found in the VIF stream. What that path leaves (some resumes, hierObjectNode's C path) is read from the VIF stream and drawn with the translated programs (`runtime/tmb_native.cpp`); VU1 runs none of them |
+| 3D (hier renderer: terrain, buildings, cars, characters) | VU1 microprograms, then the GS | every object kind (rigid, pool-less, sprites, ribbons, skinned, environment-mapped and morphing objects) drawn from a native mesh pack the NGP files' prebuilt packets are converted into offline (`tools/tmb_mesh_pack.py`), at the game's per-object hook (`pktAddVu1ObjAsm`) from its own state (`runtime/tmb_meshes.cpp`), submitted in the game's own order (opaque in traversal order, alpha by `pktLinkAlphaObjAsm`'s depth buckets) at each view's kick, each triangle clipped to the strip programs' own clip volume (VU 13-16 x VU 0-3, as their CLIP test does); no VIF stream is read and VU1 runs nothing (`TMB_NATIVE_VIF=1`: the old stream reading, for comparison) |
 | Skinned characters, sprites, rain, fog, blending | VU1, GS | translated into the native renderer's terms (bones, fog factor, blend modes) |
-| Effects VU1 programs (beams, chrome and water, particles, flares, streaks, trails, heat haze, lightning) | VU1 | one native function per program, each derived from VU1 recordings and checked against VU1's own output (`TMB_NATIVE_CHECK`); a program not translated is not run at all (reported once) |
+| Effects (particles, lens flares, streaks, trails, heat haze, lightning, beams, chrome and water) | VU1 | drawn from the game's own particle lists and flare list (`runtime/tmb_particles.cpp`), the effects programs' work done natively; the per-program translations of the stream (`runtime/tmb_native.cpp`, checked against VU1's own output with `TMB_NATIVE_CHECK`) remain for the comparison modes |
 | Textures | GS memory | converted once, offline, from the disc's `.TEX` / `.RTX` files into a native pack in the build tree (`tools/tmb_texture_pack.py`, run by `scripts/recomp.sh`); at runtime looked up by the game's own keys, caught in its texture code (each texture's id as `texmSetupTexture` sets it up, each palette's VRAM block as `texmLoadResTexture` loads it): nothing read from texture records, GS packets or GS memory while the game runs (`runtime/tmb_textures.cpp`) |
 | Font, HUD, loading bar, overlays, movies | GS, IPU | drawn natively from the game's variables: each packet builder rewritten in C++ (`runtime/tmb_2d.cpp`), nothing built or read as a GS packet; movies decoded with FFmpeg and shown as the native renderer's backdrop |
 | Everything else sent to the GS | GS | nothing: no GS front end is constructed (`ps2x::native::setGsFrontEndAbsent`), no GS memory allocated; the DMA kicks to the GIF, VIF1 and VIF0 complete unread, the libgraph calls send nothing, the game's display registers writes are dropped and its reads of CSR get the field from the native display (`runtime/native/native_display.h`: vblanks on the frame pacer's clock); the native renderer presents its own frame (circuit-2 picture, movie backdrop, 3D, 2D) |
@@ -131,9 +136,9 @@ disc files (game_us/, game/) ──► ps2_analyzer ──► recomp/tmb_scus971
                                            │
                  CMakeLists.txt ──► PS2Recomp runtime + generated code + runtime/ (TMB's overrides, native adapter)
                                            │
-   native renderer · texture cache · SPU2 mixer on the PC clock ──────────────┼─► ps2EntryRunner
+   native renderer · texture cache · native sound mixer on the PC clock ──────┼─► ps2EntryRunner
    native display (field, mode) · window presentation on the GPU, at 2x (no GS front end; diagnostics: the GS native back end)
-   what is left of the PS2: EE kernel HLE · DMAC · GIF / VIF packet handling · IPU · IOP kernel and other modules
+   what is left of the PS2: EE kernel HLE · DMAC (kicks to the GIF / VIF complete unread) · IPU · IOP kernel layer
 ```
 
 - **Both regions, one runtime.** `TMB_REGION=us` (the default) or `pal` picks the disc folder (`game_us/`, `game/`), the
@@ -146,8 +151,10 @@ disc files (game_us/, game/) ──► ps2_analyzer ──► recomp/tmb_scus971
 - Both executables ship their full symbol table (3,572 named functions, `.mdebug`), so no Ghidra pass is needed:
   `ps2_analyzer` reads the symbols, recognises the Sony SDK functions that have runtime handlers and writes the config.
 - PS2Recomp turns every function into C++ and emits the address-indexed function table.
-- `runtime/tmb_native.cpp` is TMB's native adapter: it reads every VIF1 stream the game sends and draws it natively,
-  and tells VU1 which programs to skip. The generic parts live in the fork (`ps2xRuntime/src/lib/native/`: renderer,
+- `runtime/tmb_meshes.cpp` (3D at the game's hooks), `runtime/tmb_particles.cpp` (effects from the particle lists),
+  `runtime/tmb_2d.cpp` (2D builders), `runtime/tmb_textures.cpp`, `runtime/tmb_vu0.cpp` draw the game natively;
+  `runtime/tmb_native.cpp` sets the native switches, publishes the frame, and keeps the old VIF1-stream adapter for the
+  comparison modes (`TMB_NATIVE_VIF=1`). The generic parts live in the fork (`ps2xRuntime/src/lib/native/`: renderer,
   texture cache, GIF translation; `docs/native.md`), shared with the other ports.
 - `runtime/tmb_overrides.cpp` holds the other game-specific bindings.
 
@@ -229,7 +236,7 @@ key positions):
 
 | Variable | Effect |
 |---|---|
-| `TMB_NATIVE=1` | The native port: the native renderer, the GS native back end at 2x, the recompiled IOP modules, the SPU2 and IOP on the PC's clock (`scripts/run_native.sh` sets it; each part has its own switch below) |
+| `TMB_NATIVE=1` | The native port: the native renderer at 2x, no GS front end, the recompiled IOP modules, the native sound mixer, the IOP on the PC's clock (`scripts/run_native.sh` sets it; each part has its own switch below) |
 | `TMB_GS_FRONTEND=1` | The GS front end exists again (constructed, its GS memory, its thread, the GS native back end), headless: it receives nothing and draws nothing, as before the GS front end was removed; `[tmb:gs]` (with `TMB_TRACE_PACKETS=1`) then lists what reaches it. By default (`ps2x::native::setGsFrontEndAbsent`, decided before the runtime starts) there is no GS object, no GS memory, no GS thread and no raster backend; the guest's CSR reads get FIELD from the native display, its writes to the display registers are dropped, the libgraph calls reach no GS. Every switch below that needs the GS front end (`TMB_GS_HEADLESS=0`, `TMB_GS_PACKETS=1`, `TMB_NATIVE_VIF=1`, `TMB_NATIVE_FRAME=0`, `TMB_NATIVE_VU1=1`, `TMB_VIF0_PACKETS=1`, `TMB_VU0_NATIVE=0`, `PS2X_VU0_HLE_CHECK=1`, a `PS2X_GS_RENDERER` other than native) brings it back too |
 | `TMB_GS_HEADLESS=0` | The GS front end back (as `TMB_GS_FRONTEND=1`), drawing its (unseen) frame from the game's packets; by default there is no GS front end |
 | `TMB_GS_PACKETS=1` | The fork reads the game's VIF1 and GIF DMA chains again (its VIF1 interpreter, the GIF tags, the headless GS front end looking for SIGNAL / FINISH / LABEL), for an A/B. By default a DMA kick to VIF1 or the GIF completes unread (`ps2x::native::setGsDmaSkipped`): no DMA tag, VIFcode or GIF tag is read, the libgraph image transfers and drawing environment send nothing, and the channel's end (STR, D_STAT, its DMAC handlers) comes at the kick |
@@ -247,6 +254,8 @@ key positions):
 | `TMB_NATIVE_VU1=1` | VU1 runs the translated programs too (the GS frame then has everything, to compare) |
 | `TMB_NATIVE_VU1_PCS=<pc,...>` | Diagnostic: leave those setups on VU1 (a `PS2X_VU1_RECORD` reference for a translation) |
 | `TMB_NATIVE_CHECK=<n>` | Diagnostic: run VU1's own program beside each translation (an interpreter, off in play) and log where they differ |
+| `TMB_LIVE_TOGGLES=<file>` | Diagnostic: words read from the file every 60 frames while the game runs, for the 3D at the hooks: `nodepth`, `nofog`, `noclip`, `flat` (each object in a colour of its own), `opaque`, `noatest`, `notex`, `noguard` (no clip volume), `dump` (one frame's objects, materials and triangles to the log) |
+| F9 (with `PS2X_CAPTURE_WINDOW_DIR`) | Start / stop a burst of window captures, ten a second (`burst_<ms>.png`) |
 | `PS2X_NATIVE_VIEW=only` | Show the native frame alone, without the GS one under it |
 | `PS2X_NATIVE_INTERPOLATE=1`, `PS2X_PRESENT_FPS=<n>` | Draw frames between the game's 50 (objects interpolated), presented at up to n per second |
 | `PS2X_IOP_NATIVE=1` | Run the recompiled sound driver (`scripts/iop_recomp.sh` generates it) |

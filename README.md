@@ -227,6 +227,7 @@ key positions):
 |---|---|
 | `TMB_NATIVE=1` | The native port: the native renderer, the GS native back end at 2x, the recompiled IOP modules, the SPU2 and IOP on the PC's clock (`scripts/run_native.sh` sets it; each part has its own switch below) |
 | `TMB_GS_HEADLESS=0` | The GS front end still draws its (unseen) frame from the game's packets; by default, with the native frame, it only raises the events the game waits on (SIGNAL, FINISH, LABEL) |
+| `TMB_NATIVE_VIF=1` | Reads the VIF1 stream again (the old adapter) to place the hier objects at their marks; with `TMB_NATIVE_MESHES_CHECK=1` the objects stay in the game's order from its hooks and `[tmb:order]` compares the two. By default nothing reads the VIF1 stream and VU1 runs no program |
 | `TMB_NATIVE_FRAME=0` | The native draws go into the GS front end's frame, which presents it, instead of the native renderer presenting its own frame |
 | `TMB_NATIVE_MESHES=0` | The rigid 3D objects back on the VIF stream's translation instead of the mesh pack (`TMB_NATIVE_MESHES_CHECK=1`: compare the two) |
 | `TMB_NATIVE_PARTICLES=0` | The particles back on the game's own packets (`TMB_NATIVE_PARTICLE_TYPES=1,2,3`: which types are native; `TMB_NATIVE_PARTICLES_TOGGLE=<s>`: alternate, for an A/B) |

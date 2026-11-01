@@ -370,7 +370,23 @@ namespace tmb::particles
             TexturePtr texture;
             std::vector<Vertex> triangles;
             bool open = false;
+            // Interpolation (Renderer::drawTracked): the particle the next quads are (particleId; 0: none), and an id per
+            // triangle so far (0 for the triangles of no particle).
+            uint64_t id = 0;
+            std::vector<uint64_t> ids;
         };
+
+        // The view particleDraw draws (a split screen's), for the particles' ids.
+        uint32_t g_view = 0;
+
+        // A particle's identity from one frame to the next, for frames drawn between the game's: its view, its system and
+        // its place in the system's arrays (0 when the window is not interpolating: nothing kept).
+        uint64_t particleId(uint32_t ps, uint32_t index)
+        {
+            if (!ps2x::native::Renderer::instance().interpolating())
+                return 0u;
+            return ((static_cast<uint64_t>(g_view) + 1u) << 52) ^ (static_cast<uint64_t>(ps) << 16) ^ (index + 1u);
+        }
 
         std::vector<Vertex> *g_capture = nullptr; // TMB_NATIVE_PARTICLES_CHECK: the draws go here instead
 
@@ -378,10 +394,17 @@ namespace tmb::particles
         {
             if (g_capture)
                 g_capture->insert(g_capture->end(), batch.triangles.begin(), batch.triangles.end());
+            else if (batch.open && !batch.triangles.empty() && !batch.ids.empty())
+            {
+                batch.ids.resize(batch.triangles.size() / 3u, 0u);
+                ps2x::native::Renderer::instance().drawTracked(batch.material, batch.triangles.data(),
+                                                               static_cast<uint32_t>(batch.triangles.size()), batch.texture, batch.ids.data());
+            }
             else if (batch.open && !batch.triangles.empty())
                 ps2x::native::Renderer::instance().draw(batch.material, kScreenSpace, batch.triangles.data(),
                                                         static_cast<uint32_t>(batch.triangles.size()), batch.texture);
             batch.triangles.clear();
+            batch.ids.clear();
             batch.open = false;
         }
 
@@ -404,6 +427,13 @@ namespace tmb::particles
 
         void pushQuad(Batch &batch, const Vertex corner[4])
         {
+            if (batch.id != 0u) // its two triangles' ids (the triangles before it without: 0)
+            {
+                batch.ids.resize(batch.triangles.size() / 3u, 0u);
+                const uint64_t h = batch.id * 0x9e3779b97f4a7c15ull;
+                batch.ids.push_back(h | 1u);
+                batch.ids.push_back((h ^ 0x5555555555555554ull) | 1u);
+            }
             const int order[6] = {0, 1, 2, 1, 2, 3}; // as the adapter splits a sprite
             for (int i : order)
                 batch.triangles.push_back(corner[i]);
@@ -547,6 +577,7 @@ namespace tmb::particles
                     corner[i].rgba = rgba;
                     corner[i].fog = std::floor(fog) / 255.0f;
                 }
+                batch.id = particleId(ps, index);
                 pushQuad(batch, corner);
                 ++g_stats.nativeSprites;
             }
@@ -619,6 +650,7 @@ namespace tmb::particles
                     corner[i].rgba = rgba;
                     corner[i].fog = std::floor(std::max(fog, 0.0f)) / 255.0f;
                 }
+                batch.id = particleId(ps, index);
                 pushQuad(batch, corner);
                 ++g_stats.nativeSprites;
             }
@@ -700,6 +732,7 @@ namespace tmb::particles
                     corner[i].z = (i < 2 ? a[2] * qa : b[2] * qb) * 16.0f;
                     corner[i].rgba = i < 2 ? nearColour : farColour;
                 }
+                batch.id = particleId(ps, k);
                 pushQuad(batch, corner);
                 ++g_stats.nativeSprites;
             }
@@ -2360,6 +2393,7 @@ namespace tmb::particles
         void particleDrawOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t view = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
+            g_view = view;
             const bool toggledAll = toggledOff() && !settings().toggleFlares;
             if (!settings().on || !tmb::native::effectsInStream() || u32(rdram, gp + static_cast<uint32_t>(kGpColours)) == 0u || toggledAll)
             {

@@ -96,7 +96,7 @@ at twice the PS2's resolution) a match holds 57.7 to 60.4 fps (4 players split s
 | Multi-player split screen, 2 to 4 players (a multitap on port 0: players 1-4 on their own controllers; `PS2X_PAD2_SCRIPT` to `PS2X_PAD4_SCRIPT` for scripted players) | ✅ |
 | Every Challenge arena played (all of them; the ones a fresh save keeps locked through the Cheats tab's Unlock everything) | ✅ |
 | Settings window (F2): controls, video (resolution, windowed / fullscreen / borderless, render scale, frame rate) and cheats, all switched while playing | ✅ |
-| Frame rates above 60 for high-refresh monitors (the Video tab's frame rate: the frames between the game's 60 drawn interpolated, one game frame of latency) | ✅ |
+| Frame rates above 60 for high-refresh monitors (the Video tab's frame rate: the frames between the game's 60 drawn interpolated, one game frame of latency; experimental: rain, snow, lens flares and some trails still move at 60) | 🧪 |
 | Every story level to the endings (level 1 of 8 checked) | 🔧 |
 | Higher internal resolution (2x by default; the Video tab's render scale, `PS2X_RENDER_SCALE`) | ✅ |
 | Widescreen, frame rates above the PS2's | ⏳ |

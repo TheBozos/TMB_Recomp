@@ -9,11 +9,12 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ### Added
 
-- **Smoother picture on high-refresh monitors** (F2, Video, "Frame rate": "Match the monitor"): on a 120, 144, 165
+- **Smoother picture on high-refresh monitors, experimental** (F2, Video, "Frame rate": "Match the monitor"): on a 120, 144, 165
   or 240 Hz monitor the window shows that many frames a second, the ones between the game's 60 drawn in between (the
   cars, the camera, the scenery and the smoke and sparks move smoothly; the HUD stays as the game draws it). The game
   itself still runs at 60, as it always did, and this costs one game frame (about 17 ms) more input lag. Off by
-  default: "60 (the game's)" stays exactly as before.
+  default: "60 (the game's)" stays exactly as before. Experimental: a few effects (rain, snow, lens flares, some
+  trails) still move at 60 against the smoother rest.
 
 ## [0.1.0] - 2026-11-01
 

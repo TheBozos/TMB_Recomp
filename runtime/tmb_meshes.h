@@ -36,7 +36,7 @@ namespace tmb::meshes
         bool screenSpace = false; // sprites and ribbons: their vertices in screen space (matrix: the setup's, unscaled)
         uint64_t key = 0;      // Renderer::setKey
         std::vector<Batch> batches;
-        uint32_t check[24][4] = {}; // VU 0-21 as the hook built them (TMB_NATIVE_MESHES_CHECK: the adapter compares)
+        uint32_t check[24][4] = {}; // VU 0-21, then VU 31, as the hook built them (TMB_NATIVE_MESHES_CHECK: the adapter compares)
         uint32_t frame = 0;
         uint32_t object = 0, file = 0, offset = 0;
         // TMB_NATIVE_MESHES_CHECK: each strip's vertices before triangles (sprites and ribbons: its triangles; the

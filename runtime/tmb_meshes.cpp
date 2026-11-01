@@ -2,8 +2,16 @@
 // generated_us/tmb_meshes.pack) and the EE state the game computes per object, at its per-object hook: no VIF or GIF
 // packet is read for them. On with TMB_NATIVE=1; TMB_NATIVE_MESHES=0 turns it off. The kinds: rigid strips
 // (setups 0xcc8, 0xd08, 0xce8, 0x1700), pool-less objects (the resume, 0xc78: the setup and pool of the object before
-// them go on), sprites (0x3000), ribbons (0x3270), environment-mapped strips (0x1db8) and skinned meshes (0x70, 0x90,
-// 0xb0: their bones' matrices where skeletonTraverse wrote them, (*(inst + 0x14))[obj + 0x68]).
+// them go on), sprites (0x3000), ribbons (0x3270), environment-mapped strips (0x1db8), skinned meshes (0x70, 0x90,
+// 0xb0: their bones' matrices where skeletonTraverse wrote them, (*(inst + 0x14))[obj + 0x68]) and morphing objects
+// (flag 42: setups 0xd28, 0xd48, 0xd68; three in the game, in CITY, MINICITY and FREEWAY).
+//
+// The morphing objects: their setups are the rigid ones' code (0xd28 = 0xcc8 unlit, 0xd48 = 0xce8 directional, 0xd68
+// = 0xd08 scaled: the same BAL to 0x1c08 and the same strip loop in vi13). What differs is their pool's vertex pass,
+// MSCAL 2 (0x10 -> 0xd88) instead of MSCAL 0, which moves each position by its delta (the V3-32 @373 block, which the
+// pack keeps) times VU 31 before the strips read it (it writes the moved position back at 181 + i). VU 31 is the
+// morph weight pktAddVu1ObjAsm sends for flag 42 (UNPACK S-32 @31: in every lane the instance's float table entry
+// obj+0x3c, (*(inst + 4))[*(s16 *)(obj + 0x3c)]; without an instance it sends none and VU 31 keeps the last one).
 //
 // - Which NGP file an object is in: fileOnlyNgpFile / fileAddNgpFile (address, size) after fileReadf / zipInflateAll
 //   read a file there (its name, tmb::textures::nameAt); the pack's file of that name, its size and CRC checked
@@ -26,9 +34,9 @@
 // The draws wait for the object's place in the frame: the hook marks the header's last qword (its VIF NOP, which
 // carries no data: the mark sits in the NOP's unused immediate) and the adapter (runtime/tmb_native.cpp), as it
 // reaches that object's setup in the stream it already follows for the other draws, submits these instead of its
-// own translation, in the same group of the GS stream. Left to the adapter's path: the morphing objects (flag 42:
-// 0xd28 / 0xd48 / 0xd68, three in the game, which the adapter does not translate either), resumes after an alpha
-// object or after a setup other than the rigid strips', and hierObjectNode's C path (pktAddVu1Obj).
+// own translation, in the same group of the GS stream. Left to the adapter's path: resumes after an alpha object or
+// after a setup other than the rigid strips' (the morph setups among them: no pool-less object follows a morphing
+// one), and hierObjectNode's C path (pktAddVu1Obj).
 //
 // TMB_NATIVE_MESHES_CHECK=1: the adapter compares each object's VU 0-21 and matrix as built here with the stream's,
 // and its strips (rigid: their vertices; the others: their triangles) with its own translation.
@@ -161,9 +169,9 @@ namespace tmb::meshes
             in.seekg(0);
             in.read(reinterpret_cast<char *>(s_pack.blob.data()), static_cast<std::streamsize>(s_pack.blob.size()));
             const uint8_t *p = s_pack.blob.data(), *end = p + s_pack.blob.size();
-            if (s_pack.blob.size() < 12u || std::memcmp(p, "TMBMESH3", 8) != 0)
+            if (s_pack.blob.size() < 12u || std::memcmp(p, "TMBMESH4", 8) != 0)
             {
-                std::fprintf(stderr, "[tmb:mesh] %s: not a mesh pack (TMBMESH3: tools/tmb_mesh_pack.py)\n", path);
+                std::fprintf(stderr, "[tmb:mesh] %s: not a mesh pack of this version (TMBMESH4: run tools/tmb_mesh_pack.py again)\n", path);
                 s_pack.blob.clear();
                 return s_pack;
             }
@@ -194,7 +202,7 @@ namespace tmb::meshes
                     const uint32_t positions = rd<uint32_t>(p), aux = rd<uint32_t>(p);
                     p += static_cast<size_t>(positions) * 16u * (aux ? 2u : 1u);
                     const uint32_t sources = rd<uint32_t>(p);
-                    p += static_cast<size_t>(sources) * 12u;
+                    p += static_cast<size_t>(sources) * 20u;
                     const uint32_t params = rd<uint32_t>(p);
                     p += static_cast<size_t>(params) * 20u;
                     const uint32_t skin = rd<uint32_t>(p);
@@ -355,7 +363,7 @@ namespace tmb::meshes
         {
             uint64_t calls = 0, cCalls = 0, drawn = 0, taken = 0, unclaimed = 0, noFile = 0, noObject = 0, kindOther = 0,
                      program = 0, extra = 0, unmarked = 0, triangles = 0, idMismatch = 0, resumed = 0, resumeOther = 0, sprites = 0, ribbons = 0,
-                     skinned = 0, reflective = 0;
+                     skinned = 0, reflective = 0, morphed = 0;
         } g_stats;
 
         void vf(const R5900Context *ctx, int reg, float out[4]) { _mm_storeu_ps(out, ctx->vu0_vf[reg]); }
@@ -366,8 +374,8 @@ namespace tmb::meshes
                 g_vu.setQw(firstQw + q, ee.at(from + q * 16u));
         }
 
-        // The rigid setup pktAddVu1ObjAsm picks for these flags (its upper half, fp) and clip state (s6), or 0 for
-        // the programs this path leaves to the stream (environment map, ribbon, sprite, morph, 2P resume).
+        // The setup pktAddVu1ObjAsm picks for these flags (its upper half, fp), clip state (s6), point lights and
+        // skeleton, in its order.
         uint32_t setupFor(uint32_t fp, uint32_t s6, bool pointLights, bool skinned)
         {
             if (fp & 0x1000u)
@@ -382,7 +390,7 @@ namespace tmb::meshes
             if (sprite == 2u)
                 return 0x3000u; // sprite
             if ((fp >> 10) & 1u)
-                return 0; // bit 42: 0xd48 / 0xd68 / 0xd28 (morph)
+                return (fp & 0x100u) ? 0x0d48u : s6 == 1u ? 0x0d68u : 0x0d28u; // bit 42: morph (directional, scaled, unlit)
             if (pointLights)
                 return 0x1700u;
             if (fp & 0x100u)
@@ -396,7 +404,7 @@ namespace tmb::meshes
         void buildStrips(const Ee &ee, uint32_t obj, uint32_t fileBase, const PackObject &object, uint32_t pc, Drawn &out,
                          const float *screen = nullptr, uint32_t bones = 0u)
         {
-            const tmb::vu1::Shading mode = pc == 0x0ce8u ? tmb::vu1::Shading::Directional
+            const tmb::vu1::Shading mode = pc == 0x0ce8u || pc == 0x0d48u ? tmb::vu1::Shading::Directional
                                          : pc == 0x1700u ? tmb::vu1::Shading::Point
                                                          : tmb::vu1::Shading::Unlit;
             // Sprites and ribbons: screen-space vertices, from the setup's matrix without the depth factor (their
@@ -421,16 +429,40 @@ namespace tmb::meshes
             // its packet: a few meshes have their vertices moved by the game, a car's headlight beams among them).
             static thread_local std::vector<float> s_positions;
             s_positions.assign(reinterpret_cast<const float *>(p), reinterpret_cast<const float *>(p) + static_cast<size_t>(positionCount) * 4u);
+            // The morph deltas (the pools' @373 blocks), per position.
+            const float *deltas = aux ? reinterpret_cast<const float *>(p + static_cast<size_t>(positionCount) * 16u) : nullptr;
             p += static_cast<size_t>(positionCount) * 16u * (aux ? 2u : 1u);
             const uint32_t sources = rd<uint32_t>(p);
             for (uint32_t i = 0; i < sources; ++i)
             {
                 const uint32_t offset = rd<uint32_t>(p), first = rd<uint32_t>(p), count = rd<uint32_t>(p);
-                if (offset == 0xffffffffu || first + count > positionCount)
+                const uint32_t pass = rd<uint32_t>(p), deltaOffset = rd<uint32_t>(p);
+                if (first + count > positionCount)
                     continue;
-                const uint8_t *from = ee.at(fileBase + offset);
-                for (uint32_t v = 0; v < count; ++v)
-                    std::memcpy(&s_positions[static_cast<size_t>(first + v) * 4u], from + v * 12u, 12);
+                if (offset != 0xffffffffu)
+                {
+                    const uint8_t *from = ee.at(fileBase + offset);
+                    for (uint32_t v = 0; v < count; ++v)
+                        std::memcpy(&s_positions[static_cast<size_t>(first + v) * 4u], from + v * 12u, 12);
+                }
+                // The morph pass (0x10 -> 0xd88): each position plus its delta times VU 31 (MULAw.xyz ACC, vf5, vf0w;
+                // MADD.xyz vf10, vf7, vf6), the deltas read where the game keeps them in the loaded file (else the pack's).
+                if (pass == 0x10u && (deltas || deltaOffset != 0xffffffffu))
+                {
+                    const uint8_t *from = deltaOffset != 0xffffffffu ? ee.at(fileBase + deltaOffset) : nullptr;
+                    for (uint32_t v = 0; v < count; ++v)
+                    {
+                        float delta[3];
+                        if (from)
+                            std::memcpy(delta, from + v * 12u, 12);
+                        else
+                            std::memcpy(delta, deltas + static_cast<size_t>(first + v) * 4u, 12);
+                        float *pos = &s_positions[static_cast<size_t>(first + v) * 4u];
+                        for (int k = 0; k < 3; ++k)
+                            pos[k] += delta[k] * g_vu.f(31, k);
+                    }
+                    ++g_stats.morphed;
+                }
             }
             const float *positions = s_positions.data();
             // The parameter batches (environment map: the alpha terms of the strips after them).
@@ -831,6 +863,15 @@ namespace tmb::meshes
                 for (int k = 0; k < 3; ++k)
                     vu5[k] *= ee.f32(car + 0x80u + 4u * static_cast<uint32_t>(k));
             g_vu.setQw(5, vu5);
+            // VU 31: a morphing object's weight (flag 42: UNPACK S-32 @31 of the float table's entry obj+0x3c, in every
+            // lane), sent only with an instance; VU1 keeps the last one otherwise.
+            if (((fp >> 10) & 1u) && haveTable)
+            {
+                const int32_t index = ee.s16(obj + 0x3cu);
+                const float weight = ee.f32(table + 4u * static_cast<uint32_t>(index));
+                const float vu31[4] = {weight, weight, weight, weight};
+                g_vu.setQw(31, vu31);
+            }
             // VU 9-21: the frame's constants as the game keeps them; VU 20-21 the fog's (pktCacheForAsm's scratchpad
             // cache: flag 41 picks the first set) while the fog is on.
             readConstants(ee, kConstVu9, 9, 4);
@@ -997,6 +1038,8 @@ namespace tmb::meshes
             for (uint32_t q = 0; q < 22u; ++q)
                 for (int k = 0; k < 4; ++k)
                     drawn.check[q][k] = g_vu.w(q, k);
+            for (int k = 0; k < 4; ++k)
+                drawn.check[22][k] = g_vu.w(31, k); // a morphing object's weight
 
             const uint32_t mark = g_nextMark;
             g_nextMark = (g_nextMark + 1u) & 0xffffffu;
@@ -1116,8 +1159,8 @@ namespace tmb::meshes
                          "[tmb:mesh] per 250 frames: %llu objects at the hook (%llu by the C path), %llu drawn from the pack (%llu triangles), "
                          "%llu taken in the stream, %llu unclaimed; left to the stream: %llu by program (%llu drawn with a group GS-state block), %llu outside "
                          "the loaded files, %llu not in the pack, %llu of another kind in the pack, %llu unmarked; %llu texture number mismatches; "
-                         "%llu resumes drawn, %llu resumes not after their pool's object; %llu sprites, %llu ribbons, %llu skinned, %llu environment-mapped "
-                         "drawn\n",
+                         "%llu resumes drawn, %llu resumes not after their pool's object; %llu sprites, %llu ribbons, %llu skinned, %llu environment-mapped, "
+                         "%llu morphing drawn\n",
                          static_cast<unsigned long long>(g_stats.calls), static_cast<unsigned long long>(g_stats.cCalls),
                          static_cast<unsigned long long>(g_stats.drawn), static_cast<unsigned long long>(g_stats.triangles),
                          static_cast<unsigned long long>(g_stats.taken), static_cast<unsigned long long>(g_stats.unclaimed),
@@ -1127,7 +1170,7 @@ namespace tmb::meshes
                          static_cast<unsigned long long>(g_stats.idMismatch), static_cast<unsigned long long>(g_stats.resumed),
                          static_cast<unsigned long long>(g_stats.resumeOther), static_cast<unsigned long long>(g_stats.sprites),
                          static_cast<unsigned long long>(g_stats.ribbons), static_cast<unsigned long long>(g_stats.skinned),
-                         static_cast<unsigned long long>(g_stats.reflective));
+                         static_cast<unsigned long long>(g_stats.reflective), static_cast<unsigned long long>(g_stats.morphed));
             g_stats = Stats{};
         }
     }

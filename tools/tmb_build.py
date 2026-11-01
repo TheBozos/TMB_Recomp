@@ -865,7 +865,114 @@ def main():
     if args.check:
         sys.exit(check_disc(args.disc))
     os.makedirs(os.path.abspath(args.out), exist_ok=True)
+    if needs_ascii_aliases(args):
+        sys.exit(run_through_aliases(args))
     sys.exit(Build(args).main())
+
+
+# ---- folders whose path is not ASCII (Windows) ----
+#
+# MSYS2's binutils open files in the ANSI code page: ld cannot open an object or library whose path, read from the
+# response file CMake writes in UTF-8, has a non-ASCII character (C:\Users\Jérôme\..., D:\Jeux\Été\...): "cannot find
+# ...obj". GCC itself and the fork's tools (UTF-8 manifests) cope; ld does not, and it is not ours to rebuild. So when
+# the code, the work folder, the game folder or the kit has such a path, tmb_build runs itself again through
+# directory junctions with plain names (%ProgramData%\TMB_Recomp\paths\<hash>-<name>, the same each time so CMake's
+# cache stays valid) and removes the junctions afterwards (only the links: os.rmdir on a junction never touches its
+# target). A junction needs no administrator rights; the disc image is read by Python only and keeps its path.
+
+ALIAS_ENV = 'TMB_BUILD_ALIASED'
+
+
+def is_ascii(path):
+    try:
+        path.encode('ascii')
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def needs_ascii_aliases(args):
+    if os.name != 'nt' or os.environ.get(ALIAS_ENV):
+        return False
+    kit = find_kit(args)
+    paths = [ROOT, os.path.abspath(args.out), os.path.abspath(args.game) if args.game else '', kit or '']
+    return not all(is_ascii(p) for p in paths)
+
+
+def alias_folder():
+    base = os.path.join(os.environ.get('ProgramData') or r'C:\ProgramData', 'TMB_Recomp', 'paths')
+    if is_ascii(base):
+        return base
+    return os.path.join(os.path.splitdrive(os.path.abspath(ROOT))[0] + os.sep, 'TMB_Recomp_paths')
+
+
+def make_alias(target, name):
+    import _winapi
+    target = os.path.abspath(target)
+    os.makedirs(target, exist_ok=True)
+    folder = alias_folder()
+    os.makedirs(folder, exist_ok=True)
+    link = os.path.join(folder, hashlib.sha1(os.path.normcase(target).encode('utf-8')).hexdigest()[:10] + '-' + name)
+    if os.path.lexists(link):
+        remove_alias(link)
+    _winapi.CreateJunction(target, link)
+    return link
+
+
+def remove_alias(link):
+    """Removes a junction this script made: the link only."""
+    if os.path.lexists(link) and (os.path.islink(link) or getattr(os.path, 'isjunction', lambda _p: True)(link)):
+        os.rmdir(link)
+
+
+def run_through_aliases(args):
+    kit = find_kit(args)
+    links = []
+    try:
+        root = make_alias(ROOT, 'source')
+        links.append(root)
+        argv = [sys.executable, '-I', '-X', 'utf8', os.path.join(root, 'tools', 'tmb_build.py')]
+        out = make_alias(args.out, 'build')
+        links.append(out)
+        game = None
+        if args.game:
+            game = make_alias(args.game, 'game')
+            links.append(game)
+        rest = sys.argv[1:]
+        # The same command line, the folders replaced by their aliases.
+        replace = {'--out': out, '--game': game}
+        if kit:
+            k = make_alias(kit, 'kit')
+            links.append(k)
+            replace['--kit'] = k
+        new = []
+        i = 0
+        while i < len(rest):
+            a = rest[i]
+            key = a.split('=', 1)[0]
+            if key in replace and replace[key]:
+                new += [key, replace[key]]
+                i += 1 if '=' in a else 2
+                continue
+            new.append(a)
+            i += 1
+        if kit and '--kit' not in [n.split('=', 1)[0] for n in new]:
+            new += ['--kit', replace['--kit']]
+        emit('INFO', 'paths', 'non-ASCII folders: building through %s' % alias_folder())
+        env = dict(os.environ)
+        env[ALIAS_ENV] = '1'
+        sys.stdout.flush()
+        return subprocess.call(argv + new, env=env)
+    except OSError as e:
+        emit('ERROR', 'verify', 'could not make plain-named links to the folders (%s): move the game\'s folder to a '
+             'path with plain letters, such as C:\\Games\\TMB_Recomp' % e)
+        return 1
+    finally:
+        for link in links:
+            try:
+                remove_alias(link)
+            except OSError:
+                pass
 
 
 if __name__ == '__main__':

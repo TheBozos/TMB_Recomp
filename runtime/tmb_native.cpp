@@ -58,6 +58,11 @@ namespace tmb::textures
     std::shared_ptr<const ps2x::native::TextureCache::Texture> lookup(uint64_t tex0, uint64_t texa);
 }
 
+namespace tmb::vu0
+{
+    std::string stats(); // runtime/tmb_vu0.cpp: the VIF0 kicks by chain, the VU0 programs not run natively
+}
+
 namespace tmb::particles
 {
     // TMB_NATIVE_PARTICLES_CHECK=1 (runtime/tmb_particles.cpp): the systems drawn natively are left to the game too, and
@@ -3205,9 +3210,10 @@ namespace tmb::native
         }
 
         // [tmb:packets] per 250 frames: what the fork read of the GS / VIF packets (ps2x::native::packetStats) and the DMA
-        // kicks per channel (those completed unread in brackets). Logged when a GS or VIF1 packet was read (none by
-        // default: the kicks to VIF1 and the GIF complete unread), or always with TMB_TRACE_PACKETS=1. VIF0 is still
-        // interpreted (hier__Fi's chain each frame: VU0 microcode, MPG, for the VU0 programs; not GS data).
+        // kicks per channel (those completed unread in brackets), with the VU0 microprograms run on VU0's interpreter or
+        // not run (no native version); [tmb:vu0] the VIF0 kicks by chain and the programs not native. Logged when
+        // anything was read or interpreted (nothing by default: the kicks to VIF0, VIF1 and the GIF complete unread, the
+        // VU0 programs all native), or always with TMB_TRACE_PACKETS=1.
         void logPacketStats()
         {
             static const bool s_always = []
@@ -3221,21 +3227,24 @@ namespace tmb::native
                                      signals = take(stats.signals), finishes = take(stats.finishes), labels = take(stats.labels),
                                      vif1 = take(stats.vif1Runs), vif1Bytes = take(stats.vif1Bytes), vif0 = take(stats.vif0Runs),
                                      walks = take(stats.chainWalks), path3 = take(stats.path3), host = take(stats.hostGif),
-                                     irqs = take(stats.gsIrqs);
+                                     irqs = take(stats.gsIrqs), vu0Interpreted = take(stats.vu0Interpreter),
+                                     vu0NotRun = take(stats.vu0NotRun);
             unsigned long long kicks[10], unread[10];
             for (uint32_t i = 0; i < 10u; ++i)
             {
                 kicks[i] = take(stats.kicks[i]);
                 unread[i] = take(stats.unread[i]);
             }
-            if (!s_always && gif + scans + vif1 + walks + path3 + host + irqs == 0u)
+            const std::string vu0 = tmb::vu0::stats();
+            if (!s_always && gif + scans + vif1 + walks + path3 + host + irqs + vif0 + vu0Interpreted + vu0NotRun == 0u)
                 return;
             std::string channels;
             for (uint32_t i = 0; i < 10u; ++i)
                 if (kicks[i] != 0u)
                     channels += " ch" + std::to_string(i) + " " + std::to_string(kicks[i]) + " (" + std::to_string(unread[i]) + ")";
-            std::fprintf(stderr, "[tmb:packets] per 250 frames: GIF packets %llu (%llu B), event scans %llu (SIGNAL %llu, FINISH %llu, LABEL %llu; GS interrupts %llu), VIF1 interpreter %llu runs (%llu B), VIF1 / GIF DMA chains walked %llu, VIF0 (VU0) %llu, PATH3 %llu, libgraph HLE packets %llu; DMA kicks (unread):%s\n",
-                         gif, gifBytes, scans, signals, finishes, labels, irqs, vif1, vif1Bytes, walks, vif0, path3, host, channels.c_str());
+            std::fprintf(stderr, "[tmb:packets] per 250 frames: GIF packets %llu (%llu B), event scans %llu (SIGNAL %llu, FINISH %llu, LABEL %llu; GS interrupts %llu), VIF1 interpreter %llu runs (%llu B), VIF1 / GIF DMA chains walked %llu, VIF0 interpreter %llu runs, VU0 interpreter %llu runs (%llu not run), PATH3 %llu, libgraph HLE packets %llu; DMA kicks (unread):%s\n",
+                         gif, gifBytes, scans, signals, finishes, labels, irqs, vif1, vif1Bytes, walks, vif0, vu0Interpreted, vu0NotRun, path3, host, channels.c_str());
+            std::fprintf(stderr, "[tmb:vu0] per 250 frames: %s\n", vu0.c_str());
         }
 
         // Publishes what was submitted and starts the next frame.

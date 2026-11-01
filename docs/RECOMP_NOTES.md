@@ -1067,3 +1067,54 @@ worker). 4P beside the main build: game thread 8.7 ms (9.9), all threads 13.9 ms
 
 Found while checking, on the main build too (not from this change): after quitting a match back to the shell's menus,
 the menus show grey and white rectangles over their pictures (the car select's panels, the game-mode menu).
+
+## 2026-11-01: VU0 without VIF0, its programs bit-exact
+
+The last thing the fork still read in a match was VIF0: one chain a frame, VU0's microcode. What reaches VU0, from a
+whole run per mode (`TMB_TRACE_PACKETS=1`: boot movies, menus, 1P Junkyard, its pause menu, quit to the menus and a
+second match; CITY 1P; 4P; story mode's first match; options and memory card screens) and from the game's code:
+- Code: VU0's code memory is only ever filled by VIF0 MPGs, from two static DMA chains in the ELF (CNT tags, data
+  inline; read offline from the ELF, the same bytes in both regions). The hierarchy chain (US 0x234060, PAL 0x2352e0):
+  an MPG of 256 pairs at 0 and one of 135 at 0x800, nothing else; hier__Fi kicks it every frame (and main once at
+  start). The 2D chain (US 0x2337d0, PAL 0x234a50): an MPG of the 2D image's 230 pairs at 0 (code below 0x730: above it
+  the hierarchy image's 0x808 and 0xab0 stay), then five UNPACKs (V4-32, CL = WL = 4: plain copies) to VU 234-237,
+  238-241, 242-245, 246-249 and 250 of qwords inside the chain; viewSetVUPacketMat writes its two view matrices into
+  the chain (VU 238-241, 242-245) and fogUpdate its fog terms (VU 250), the rest are constants. Only drawInit kicks it,
+  and only debug draws call drawInit (Helicopter::UpdateTrans, LoopTank::update, hdCarTest, behind their flags).
+  hierSetVu1Regs also kicks VIF0 (normal mode, 2 qwords from the scratchpad): STROW (0, 0, 0x1000, 0x1000) and STMASK
+  0x50505050, VIF0's own registers for UNPACKs, which no chain uses.
+- Per 250 frames, everywhere: 246 to 255 hierarchy-chain kicks (one a frame; 500 in a 4P match, two a frame), 0 or 1
+  ROW / MASK kick, 0 2D-chain kicks, 0 others. The rest of VU0's data the game's EE code stores itself through
+  0x11004000 (hierCacheForAsm VU 0.x and the view's frames at VU 10-21, plightClosestPts the light count at VU 9,
+  drawLines) and its programs write: unchanged.
+- Programs: every VCALLMS in the game names one of the 13 translated pcs (the hierarchy image's 0x278, 0x3a8, 0x410,
+  0x450, 0x5a8, 0x670, 0x808, 0xab0; the 2D image's 0x278, 0x3b0, 0x438, 0x548, 0x5e0), none uses VCALLMSR, and with
+  VIF0 read as before (`TMB_VIF0_PACKETS=1`) 0 programs reached VU0's interpreter in any of these runs. The 2D
+  image's five never run in play (its chain is never kicked).
+
+So VIF0 is now handled as VIF1 and the GIF are: the fork tells the port each VIF0 kick (`ps2x::native::setVif0Kick`:
+the CHCR, MADR, TADR and QWC the game wrote) and completes it unread (`setVif0Skipped`: QWC 0, STR cleared, D_STAT
+bit 0, no DMA tag, VIFcode, MPG or UNPACK read; VU0's code memory stays empty). `runtime/tmb_vu0.cpp` notes which
+image VU0 holds from the TADR (the game's own pointer to its chain): the hierarchy chain's, the 2D chain's (code below
+0x730; above it the hierarchy image's), and for the 2D chain copies its five UNPACKs' qwords from EE memory into VU0
+data memory at the kick, what the transfer would have written. The dispatch takes the image from that note instead of
+matching words of VU0's code memory. A program with no native version would not run at all (no code): counted
+(`packetStats().vu0NotRun`) and reported once per pc; none in any run. `TMB_VIF0_PACKETS=1` reads VIF0 as before (the
+image then also found in the uploaded code and checked against the note: no disagreement), and so do
+`TMB_VU0_NATIVE=0` and `PS2X_VU0_HLE_CHECK=1`, which need the code for the interpreter.
+
+The translations were close but not exact: over a CITY match, `PS2X_VU0_HLE_CHECK=1` found 26000 of 10 M calls of
+0x278 (the bounds test) with a different integer result (the sign flags vi4 the culling reads, an object on the view's
+edge), and float differences above 1e-4 relative in 0x450 (1500 of 1.5 M), 0x808 (416), 0x410 (137), 0x670 (45) and
+0xab0 (34, the hat sphere's cancelling terms). They now compute as VU0 does (`F` in `tmb_vu0.cpp`): the SSE rounding
+set toward zero while a program runs, every sum through the fork's FMAC rule (the smaller operand's bits below the
+larger one's last mantissa bit dropped first, no guard bits), the MULA / MADDA / MADD chains as products and sums in the
+microcode's order, nothing fused; and the fields the microcode moves with ADDbc vf0 (the transposes in 0x450, 0x670,
+0x808; 0x278's vf6.x) as 0 + the field, which turns -0 into +0. The check now also counts calls not bit-exact (any bit
+of a register or of data memory): Junkyard (two matches) 10.4 M calls, CITY 21.4 M, 4P 9.9 M, all eight programs 0 not
+bit-exact (0x808 does not run in 4P). The 2D image's five use the same arithmetic but were never called.
+
+`[tmb:packets]` in the default mode now shows, every 250 frames in every run above: GIF packets 0, event scans 0, VIF1
+interpreter 0, VIF0 interpreter 0, VU0 interpreter 0 runs (0 not run), chains walked 0, PATH3 0, libgraph packets 0, and
+every kick to channels 0, 1 and 2 unread; `[tmb:vu0]` the VIF0 kicks by chain and "programs not native: none". Nothing
+of the GS, VIF0 or VIF1 packets is read and no VU microcode is interpreted in the default mode.

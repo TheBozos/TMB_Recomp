@@ -3,31 +3,115 @@
 // ACC, Q, I and clip flags) and to VU0 data memory, in the microcode's order: VU0 stalls on a vector register still
 // being written, so its programs read as sequential code, but for the two instructions of a pair (both read their
 // operands before either writes) and the Q register (a DIV's result arrives 7 cycles on; every MULq here comes after
-// it). PS2X_VU0_HLE_CHECK=1 compares each program with the interpreter.
+// it). The arithmetic is VU0's (F below: rounding toward zero, sums without guard bits, fields moved with ADDbc vf0
+// turning -0 into +0), so the results are VU0's to the bit. PS2X_VU0_HLE_CHECK=1 compares each program with the
+// interpreter: the hierarchy image's eight, over Junkyard, CITY and 4P matches, are bit-exact (registers and data memory).
 //
-// The 2D image (ELF 0x1347e0, loaded at 0 by the 2D drawing code): 0x278 (drawcSetupAsm: the transforms), 0x548 and
-// 0x5e0 (drawcFirstPtAsm, drawcRenderAsm: a strip of quads along points, drawNonTexSprite), 0x3b0 and 0x438
-// (drawcFirstLineAsm, drawcRenderLinesAsm: lines through points, drawLines). TMB_VU0_NATIVE=0: all on the interpreter.
+// The hierarchy image (ELF 0x135070 / US 0x234070, loaded at 0 each frame by hier__Fi): 0x278, 0x3a8, 0x410, 0x450,
+// 0x5a8, 0x670, 0x808 and 0xab0, below. The 2D image (ELF 0x1347e0 / US 0x2337e0, loaded at 0 by drawInit): 0x278
+// (drawcSetupAsm: the transforms), 0x548 and 0x5e0 (drawcFirstPtAsm, drawcRenderAsm: a strip of quads along points,
+// drawNonTexSprite), 0x3b0 and 0x438 (drawcFirstLineAsm, drawcRenderLinesAsm: lines through points, drawLines). Only
+// debug draws call drawInit (Helicopter::UpdateTrans, LoopTank::update, hdCarTest, behind their flags): in play the 2D
+// image is never loaded and its programs never run. TMB_VU0_NATIVE=0: all on the interpreter.
+//
+// What VU0 holds, without VIF0: the game sends VU0 its microcode and data through VIF0 from two static DMA chains in the
+// ELF (read offline): drawInit kicks the 2D one (0x2337d0 in US: an MPG of the 2D image's 230 pairs, then UNPACKs to VU
+// 234-250: constants, the view matrices viewSetVUPacketMat writes into the chain (238-241, 242-245), the fog terms
+// fogUpdate writes (250)); hier__Fi (each frame) and main kick the hierarchy one (0x234060: two MPGs, 256 pairs at 0 and
+// 135 at 0x800; no data). hierSetVu1Regs's kick to VIF0 (2 qwords from the scratchpad) sets VIF0's ROW and MASK only.
+// The fork tells each kick (ps2x::native::setVif0Kick) and, by default, completes it unread (setVif0Skipped): the image
+// the programs belong to is the one whose chain the game's TADR names, and the 2D chain's data is copied into VU0 from
+// where the game keeps it in EE memory (the chain's own qwords) at the kick, as the transfer would. TMB_VIF0_PACKETS=1
+// (and PS2X_VU0_HLE_CHECK=1, which needs the uploaded code for the interpreter): VIF0 read as before, the image found
+// in VU0's code memory and checked against the noted one.
 
 #include "ps2_recomp_abi.h"
 #include "runtime/native/native_vu0_hle.h"
+#include "tmb_region.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <immintrin.h>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 namespace tmb::vu0
 {
     namespace
     {
+        // A VU float: its arithmetic as VU0's FMAC does it, run() having set the SSE rounding to toward zero (MXCSR):
+        // a product rounded toward zero; a sum with the smaller operand's bits below the larger one's last mantissa
+        // bit dropped first (no guard bits), then rounded toward zero. MULA / MADDA / MADD chains are these products
+        // and sums in their order: a * x + b * y + c * z here is ((a * x) + (b * y)) + (c * z), as the ACC chain
+        // computes it. Nothing is fused or reassociated (the sums are not the host's + at all).
+        struct F
+        {
+            float x = 0.0f;
+            F() = default;
+            F(float value) : x(value) {}
+            operator float() const { return x; }
+            F &operator+=(F other);
+            F &operator-=(F other);
+            F &operator*=(F other)
+            {
+                x = x * other.x;
+                return *this;
+            }
+        };
+        static_assert(sizeof(F) == 4, "F is a float");
+
+        inline float vuAdd(float a, float b)
+        {
+            uint32_t ua, ub;
+            std::memcpy(&ua, &a, 4);
+            std::memcpy(&ub, &b, 4);
+            const uint32_t ea = (ua >> 23) & 0xffu, eb = (ub >> 23) & 0xffu;
+            if (ea != 0u && eb != 0u && ea != eb)
+            {
+                uint32_t &small = ea > eb ? ub : ua;
+                const uint32_t shift = ea > eb ? ea - eb : eb - ea;
+                small &= shift >= 24u ? 0x80000000u : ~((1u << shift) - 1u);
+                std::memcpy(&a, &ua, 4);
+                std::memcpy(&b, &ub, 4);
+            }
+            return a + b;
+        }
+        inline F operator+(F a, F b) { return vuAdd(a.x, b.x); }
+        inline F operator+(F a, float b) { return vuAdd(a.x, b); }
+        inline F operator+(float a, F b) { return vuAdd(a, b.x); }
+        inline F operator-(F a, F b) { return vuAdd(a.x, -b.x); }
+        inline F operator-(F a, float b) { return vuAdd(a.x, -b); }
+        inline F operator-(float a, F b) { return vuAdd(a, -b.x); }
+        inline F operator*(F a, F b) { return a.x * b.x; }
+        inline F operator*(F a, float b) { return a.x * b; }
+        inline F operator*(float a, F b) { return a * b.x; }
+        inline F operator/(F a, F b) { return a.x / b.x; }
+        inline F operator/(F a, float b) { return a.x / b; }
+        inline F operator/(float a, F b) { return a / b.x; }
+        inline F operator-(F a) { return -a.x; }
+        inline F &F::operator+=(F other) { return *this = *this + other; }
+        inline F &F::operator-=(F other) { return *this = *this - other; }
+
+        // The SSE rounding toward zero while a program runs (VU0 rounds toward zero), the caller's mode put back.
+        struct TowardZero
+        {
+            unsigned int saved = _mm_getcsr();
+            TowardZero() { _mm_setcsr(saved | 0x6000u); }
+            ~TowardZero() { _mm_setcsr(saved); }
+        };
+
         struct Vec
         {
-            float v[4] = {0, 0, 0, 0};
-            float &operator[](int i) { return v[i]; }
-            float operator[](int i) const { return v[i]; }
+            F v[4] = {0, 0, 0, 0};
+            F &operator[](int i) { return v[i]; }
+            F operator[](int i) const { return v[i]; }
+            float *data() { return reinterpret_cast<float *>(v); }
+            const float *data() const { return reinterpret_cast<const float *>(v); }
         };
 
         // VU0 as the programs use it: registers loaded from the context, written back at the end.
@@ -43,12 +127,12 @@ namespace tmb::vu0
             explicit Vu(const R5900Context *ctx, uint8_t *vu0Data) : data(vu0Data)
             {
                 for (int r = 0; r < 32; ++r)
-                    _mm_storeu_ps(vf[r].v, ctx->vu0_vf[r]);
+                    _mm_storeu_ps(vf[r].data(), ctx->vu0_vf[r]);
                 vf[0] = Vec{{0, 0, 0, 1}};
                 for (int r = 0; r < 16; ++r)
                     vi[r] = static_cast<int16_t>(ctx->vi[r]);
                 vi[0] = 0;
-                _mm_storeu_ps(acc.v, ctx->vu0_acc);
+                _mm_storeu_ps(acc.data(), ctx->vu0_acc);
                 q = ctx->vu0_q;
                 i = ctx->vu0_i;
                 clip = ctx->vu0_clip_flags;
@@ -56,10 +140,10 @@ namespace tmb::vu0
             void store(R5900Context *ctx) const
             {
                 for (int r = 1; r < 32; ++r)
-                    ctx->vu0_vf[r] = _mm_loadu_ps(vf[r].v);
+                    ctx->vu0_vf[r] = _mm_loadu_ps(vf[r].data());
                 for (int r = 1; r < 16; ++r)
                     ctx->vi[r] = static_cast<uint16_t>(vi[r]);
-                ctx->vu0_acc = _mm_loadu_ps(acc.v);
+                ctx->vu0_acc = _mm_loadu_ps(acc.data());
                 ctx->vu0_q = q;
                 ctx->vu0_i = i;
                 ctx->vu0_clip_flags = clip;
@@ -69,10 +153,10 @@ namespace tmb::vu0
             Vec lq(int32_t qword)
             {
                 Vec out;
-                std::memcpy(out.v, mem(qword), 16);
+                std::memcpy(out.data(), mem(qword), 16);
                 return out;
             }
-            void sq(const Vec &value, int32_t qword) { std::memcpy(mem(qword), value.v, 16); }
+            void sq(const Vec &value, int32_t qword) { std::memcpy(mem(qword), value.data(), 16); }
             int32_t ilw(int32_t qword, int lane) // ILWR: the field's low 16 bits
             {
                 uint32_t word;
@@ -301,7 +385,7 @@ namespace tmb::vu0
             u.vi[11] = u.vi[2];
             for (int k = 0; k < 4; ++k)
                 f[12][k] = mini(f[12][k], 255.0f);
-            f[31][0] = -f[31][0];
+            f[31][0] = F(0.0f) - f[31][0]; // SUBx vf0: 0 - x
             // OPMULA / OPMSUB: vf10 = vf8 x vf7 (xyz)
             const Vec a = f[8], b = f[7];
             u.acc[0] = a[1] * b[2];
@@ -347,7 +431,7 @@ namespace tmb::vu0
             u.vi[1] = 0;
             f[20] = u.lq(1);
             u.vi[10] = u.ilw(0, 0);
-            f[31][0] = -f[30][2];
+            f[31][0] = F(0.0f) - f[30][2]; // SUBz vf0: 0 - z
             u.vi[12] = u.ilw(0, 3);
             u.vi[3] = 1;
             f[23] = u.lq(0);
@@ -388,12 +472,20 @@ namespace tmb::vu0
         // a * m.x + b * m.y + c * m.z over four lanes (the MULA / MADDA / MADD chains).
         Vec by3(const Vec &a, const Vec &b, const Vec &c, const Vec &m) { return Vu::combine(a, m[0], b, m[1], c, m[2]); }
 
-        // The 3x3 transpose the programs make of three registers in place (diagonals and w kept).
+        // A field moved the microcode's way, ADDbc with vf0 (0 + the field): a -0 comes out +0.
+        F moved(F value) { return F(0.0f) + value; }
+
+        // The 3x3 transpose the programs make of three registers in place (diagonals and w kept), each field moved with
+        // ADDbc vf0.
         void transpose3(Vec &a, Vec &b, Vec &c)
         {
-            std::swap(a[1], b[0]);
-            std::swap(a[2], c[0]);
-            std::swap(b[2], c[1]);
+            const F a1 = a[1], a2 = a[2], b2 = b[2];
+            a[1] = moved(b[0]);
+            b[0] = moved(a1);
+            a[2] = moved(c[0]);
+            c[0] = moved(a2);
+            b[2] = moved(c[1]);
+            c[1] = moved(b2);
         }
 
         // 0x278 (hierFovTest2Asm): an object's bounds against the view: its centre vf4 + vf5 (vf5.w its radius) in the
@@ -407,7 +499,7 @@ namespace tmb::vu0
             for (int k = 0; k < 3; ++k)
                 f[31][k] = f[5][k] + f[4][k];
             f[7] = u.lq(b + 53);
-            f[6][0] = f[5][3];
+            f[6][0] = moved(f[5][3]);
             f[8] = u.lq(b + 54);
             f[11][3] = f[5][3] * u.i;
             f[9] = u.lq(b + 55);
@@ -617,17 +709,17 @@ namespace tmb::vu0
             u.vi[5] = u.ilw(9, 0);
             f[17] = f[2];
             f[16] = f[1];
-            f[11][2] = f[3][0];
+            f[11][2] = moved(f[3][0]);
             u.sq(f[18], 1);
-            f[12][2] = f[3][1];
+            f[12][2] = moved(f[3][1]);
             f[15] = f[13];
-            f[13][0] = f[16][2];
+            f[13][0] = moved(f[16][2]);
             u.vi[8] = 0;
-            f[11][1] = f[17][0];
+            f[11][1] = moved(f[17][0]);
             f[22] = u.lq(30);
-            f[12][0] = f[16][1];
+            f[12][0] = moved(f[16][1]);
             u.sq(f[18], 2);
-            f[13][1] = f[17][2];
+            f[13][1] = moved(f[17][2]);
             u.vi[3] = 1;
             for (int k = 0; k < 4; ++k)
                 f[14][k] = f[4][k] + f[5][k];
@@ -717,32 +809,32 @@ namespace tmb::vu0
             f[14] = u.lq(5);
             f[15] = u.lq(6);
             f[16] = u.lq(7);
-            f[10][1] = f[18][0];
+            f[10][1] = moved(f[18][0]);
             f[10][3] = 0.0f;
             f[18][3] = 0.0f;
-            f[18][0] = f[21][1];
-            f[10][2] = f[12][0];
+            f[18][0] = moved(f[21][1]);
+            f[10][2] = moved(f[12][0]);
             f[23] = f[12];
-            f[18][2] = f[12][1];
+            f[18][2] = moved(f[12][1]);
             f[25] = f[15];
             f[26] = f[16];
-            f[12][0] = f[21][2];
-            f[12][1] = f[22][2];
+            f[12][0] = moved(f[21][2]);
+            f[12][1] = moved(f[22][2]);
             f[12][3] = 0.0f;
             f[24] = f[14];
-            f[13][0] = f[21][3];
+            f[13][0] = moved(f[21][3]);
             f[21] = u.lq(46);
-            f[13][1] = f[22][3];
+            f[13][1] = moved(f[22][3]);
             f[22] = u.lq(47);
-            f[13][2] = f[23][3];
+            f[13][2] = moved(f[23][3]);
             f[31] = u.lq(48);
-            f[14][1] = f[25][0];
-            f[14][2] = f[26][0];
+            f[14][1] = moved(f[25][0]);
+            f[14][2] = moved(f[26][0]);
             f[23] = Vec{{f[21][1], f[21][2], f[21][3], f[21][0]}};
-            f[15][0] = f[24][1];
-            f[15][2] = f[26][1];
-            f[16][0] = f[24][2];
-            f[16][1] = f[25][2];
+            f[15][0] = moved(f[24][1]);
+            f[15][2] = moved(f[26][1]);
+            f[16][0] = moved(f[24][2]);
+            f[16][1] = moved(f[25][2]);
             f[28] = Vec{{f[20][3], f[21][3], f[22][3], f[31][3]}};
             f[20][3] = f[31][0];
             f[21][3] = f[31][1];
@@ -823,10 +915,84 @@ namespace tmb::vu0
             return true;
         }
 
+        // The image VU0's code memory holds: the one whose chain the game kicked last. The 2D image's MPG covers pairs 0
+        // to 229 (code below 0x730) only: above it, what the hierarchy image's last MPG left there stays (its programs
+        // at 0x808 and 0xab0).
+        enum Image : uint8_t
+        {
+            kNoImage,
+            k2dImage,
+            kHierImage
+        };
+        std::atomic<uint8_t> g_image{kNoImage};
+        std::atomic<bool> g_hierHigh{false}; // the hierarchy image loaded once: its code from 0x730 up stays
+        constexpr uint32_t k2dImageEnd = 230u * 8u;
+        bool g_vif0Read = true; // TMB_VIF0_PACKETS=1 or PS2X_VU0_HLE_CHECK=1: VIF0 interpreted, the code memory filled
+
+        // The game's VIF0 chains (static data in the ELF, both regions alike).
+        const uint32_t k2dChain = TMB_ADDR(0x00234A50u);   // drawInit
+        const uint32_t kHierChain = TMB_ADDR(0x002352E0u); // hier__Fi, main
+        // The 2D chain's UNPACKs (V4-32, CL = WL = 4: copies): VU qword, its data's offset in the chain, qwords.
+        constexpr uint32_t k2dUnpacks[][3] = {{234u, 0x750u, 4u}, {238u, 0x798u, 4u}, {242u, 0x7e0u, 4u}, {246u, 0x828u, 4u}, {250u, 0x870u, 1u}};
+
+        // The programs called and not run natively, per image and pc ([tmb:vu0] with [tmb:packets]).
+        std::mutex g_missMutex;
+        std::unordered_map<uint32_t, uint64_t> g_misses;
+        std::atomic<uint64_t> g_kicks[4]{}; // 2D chain, hierarchy chain, VIF0 registers only, other
+
+        void onVif0Kick(const uint8_t *rdram, uint8_t *vu0Data, uint32_t chcr, uint32_t madr, uint32_t tadr, uint32_t qwc,
+                        bool unread)
+        {
+            const uint32_t mode = (chcr >> 2) & 3u;
+            if (mode == 1u && tadr == k2dChain)
+            {
+                g_image.store(k2dImage, std::memory_order_relaxed);
+                g_kicks[0].fetch_add(1, std::memory_order_relaxed);
+                if (unread)
+                    for (const auto &unpack : k2dUnpacks)
+                        std::memcpy(vu0Data + unpack[0] * 16u, rdram + k2dChain + unpack[1], unpack[2] * 16u);
+                return;
+            }
+            if (mode == 1u && tadr == kHierChain)
+            {
+                g_image.store(kHierImage, std::memory_order_relaxed);
+                g_hierHigh.store(true, std::memory_order_relaxed);
+                g_kicks[1].fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            // hierSetVu1Regs: STROW (0, 0, 0x1000, 0x1000) and STMASK 0x50505050 from the scratchpad, for VIF0's
+            // UNPACKs; none come without VIF0.
+            if (mode == 0u && qwc == 2u && (madr & 0x80000000u) != 0u)
+            {
+                g_kicks[2].fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            g_kicks[3].fetch_add(1, std::memory_order_relaxed);
+            static std::atomic<int> s_reported{0};
+            if (s_reported.fetch_add(1) < 8)
+                std::fprintf(stderr, "[tmb:vu0] VIF0 kick not known: CHCR %#x MADR %#x TADR %#x QWC %u%s\n", chcr, madr, tadr, qwc,
+                             unread ? " (unread: nothing written to VU0)" : "");
+        }
+
         bool run(R5900Context *ctx, const uint8_t *code, uint8_t *data, uint32_t pc)
         {
+            uint8_t image = g_image.load(std::memory_order_relaxed);
+            if (g_vif0Read)
+            {
+                // The code memory says which image it holds; it should be the one noted at the kick.
+                const uint8_t found = is2dImage(code) ? k2dImage : isHierImage(code) ? kHierImage : kNoImage;
+                if (found != image)
+                {
+                    static std::atomic<int> s_reported{0};
+                    if (s_reported.fetch_add(1) < 8)
+                        std::fprintf(stderr, "[tmb:vu0] pc %#x: VU0's code memory holds image %d, the kicks say %d\n", pc, found, image);
+                    image = found;
+                }
+            }
+            if (image == k2dImage && pc >= k2dImageEnd && g_hierHigh.load(std::memory_order_relaxed))
+                image = kHierImage;
             void (*program)(Vu &) = nullptr;
-            if (is2dImage(code))
+            if (image == k2dImage)
             {
                 switch (pc)
                 {
@@ -838,7 +1004,7 @@ namespace tmb::vu0
                 default: break;
                 }
             }
-            else if (isHierImage(code))
+            else if (image == kHierImage)
             {
                 switch (pc)
                 {
@@ -854,7 +1020,12 @@ namespace tmb::vu0
                 }
             }
             if (!program)
+            {
+                std::lock_guard<std::mutex> lock(g_missMutex);
+                ++g_misses[(static_cast<uint32_t>(image) << 16) | pc];
                 return false;
+            }
+            const TowardZero rounding;
             Vu u(ctx, data);
             program(u);
             u.store(ctx);
@@ -862,11 +1033,38 @@ namespace tmb::vu0
         }
     }
 
+    // [tmb:vu0] per 250 frames, with [tmb:packets]: the VIF0 kicks by chain and the programs not run natively.
+    std::string stats()
+    {
+        const auto take = [](std::atomic<uint64_t> &counter) { return std::to_string(counter.exchange(0, std::memory_order_relaxed)); };
+        std::string out = "VIF0 kicks: 2D chain " + take(g_kicks[0]) + ", hierarchy chain " + take(g_kicks[1]) + ", ROW / MASK " +
+                          take(g_kicks[2]) + ", other " + take(g_kicks[3]) + "; programs not native (image:pc calls):";
+        std::lock_guard<std::mutex> lock(g_missMutex);
+        if (g_misses.empty())
+            out += " none";
+        for (const auto &[key, calls] : g_misses)
+        {
+            char item[64];
+            std::snprintf(item, sizeof(item), " %s:%#x %llu", (key >> 16) == k2dImage ? "2d" : (key >> 16) == kHierImage ? "hier" : "none",
+                          key & 0xffffu, static_cast<unsigned long long>(calls));
+            out += item;
+        }
+        g_misses.clear();
+        return out;
+    }
+
     void install()
     {
         const char *value = std::getenv("TMB_VU0_NATIVE");
-        if (value && *value == '0')
-            return;
-        ps2x::native::setVu0Hle(&run);
+        const bool native = !(value && *value == '0');
+        const char *packets = std::getenv("TMB_VIF0_PACKETS");
+        const char *check = std::getenv("PS2X_VU0_HLE_CHECK");
+        // VIF0 read when asked, when the programs run on the interpreter (TMB_VU0_NATIVE=0) and when the check compares
+        // them with it: those need the uploaded code.
+        g_vif0Read = !native || (packets && *packets == '1') || (check && *check == '1');
+        ps2x::native::setVif0Kick(&onVif0Kick);
+        ps2x::native::setVif0Skipped(!g_vif0Read);
+        if (native)
+            ps2x::native::setVu0Hle(&run);
     }
 }

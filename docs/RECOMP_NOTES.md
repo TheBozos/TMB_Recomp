@@ -1279,3 +1279,46 @@ start code above; the whole-run total stays 1012 to the end.
   throughout. 4P split screen (multitap, `main4p.sh`): four views at 60 fps, sound. Memory card: main menu LOAD GAME ->
   the slot list (1-A to 1-D, 2) -> "TWISTED METAL STORY DATA DOES NOT EXIST" on an empty card (libmc HLE as before).
   `TMB_IOP_HARDWARE=1`: `[iop:hw] hardware modelled`, the same counts.
+
+## 2026-11-01: the mesh and texture packs generic, in the fork
+
+What TMB's offline packs and their runtime had that is not TMB's moved to the fork (PS2Recomp branch
+`native/generic-packs`, `docs/native_packs.md`), so another port (SC3 first) brings only its format reader, its hook
+addresses and its key scheme:
+- `ps2xRuntime/include/runtime/native/native_mesh_pack.h`: the mesh pack container (`PS2XMSH1`), its loader and object
+  store (per file: objects by offset with a port-defined kind, attributes and tagged sections, positions, strips in the
+  VU program's terms; GS register blocks by offset), `LoadedImages` (a loaded file checked by size and CRC32, an EE
+  address resolved to file and offset).
+- `native_mesh_draw.h`: `MeshBatch` / `MeshDraw`, `MeshViewList` (opaque in traversal order, the alpha ordering table
+  from the farthest bucket, each bucket's newest first), `MeshSubmitter` (the GS state, ALPHA_1 / TEST_1 / ZBUF_1.ZMSK,
+  followed in that order into each batch's material; the clip-volume and w > 0 cut with colour, UV and fog along the
+  cuts; FOGCOL by callback; an observer for checks; the live toggles).
+- `native_texture_pack.h`: the texture pack (`PS2XTEX1`: the same records as `TMBTEX1`), `nth`, CSM1 palettes, TEXA
+  alpha, `decodeRecord`.
+- `tools/native_pack`: `mesh.py` and `texture.py` (writers and readers), `ps2.py` (VIF codes, DMA chains in a linked
+  image, GS A+D blocks, ELF bytes).
+
+TMB keeps the NGP and `.TEX` / `.RTX` parsing (`tools/tmb_mesh_pack.py`, `tools/tmb_texture_pack.py`, now writing
+through the fork's writers), the binding hooks, `pktAddVu1ObjAsm` and the setup programs' meaning and shading, the
+alpha link / kick hooks, the GS context blocks' reading, `texInfo` and its texture key scheme, the skid marks' object (an
+in-memory `MeshObject`) and the stream comparisons (`runtime/tmb_meshes.cpp`, `runtime/tmb_textures.cpp`). TMB's object
+in the generic pack: kind as before, 40 bytes of attributes (flags, sphere, ntex, texture numbers, pool object), sections
+`AUX ` (morph deltas), `SRCS` (pool sources), `PRMS` (environment-map parameters), `SKIN` (bones and weights); the
+context blocks are the file's register blocks.
+
+Checks against the main build (its runner and packs, not rebuilt):
+- The packs: read back field by field, the new mesh pack's 54 files and 93,800 objects equal the old pack's (kind,
+  attributes, positions, aux, sources, parameters, skin, strips, context blocks: 0 differing); the texture pack's bytes
+  after the magic equal.
+- `TMB_NATIVE_VIF=1 TMB_NATIVE_MESHES_CHECK=1`, Junkyard 1P driving (200 s): `[tmb:order]` 1.86 M objects, 0 not
+  reached, 0 out of the stream's order, 0 materials differing (main: 1.87 M, the same zeros); geometry 1.86 M objects,
+  20.5 M strips, 143 M vertices, 0 vertex and 0 strip count differences; VU 0-21 0 differing. 4P (`main4p.sh`): 0.92 M
+  objects, all zeros, geometry 11.4 M strips / 90.5 M vertices with 0 differences (main 0.88 M, zeros).
+- `[tmb:mesh]` stats in the default mode, 8 runs each side (Junkyard, CITY, 4P): every object at the hook drawn, the
+  same categories zero (C path, program, outside the files, other kind, resume not after its pool, contexts missing),
+  4P's ~2000 "not in the pack" on both; the menus' per-250-frame counts the same (246, 250, 248 objects, two triangles
+  each). Match counts follow the run (the spawn point is random; same-build runs differ as much).
+- Window captures: the menus (11 frames, 30-85 s) differ in 0 to 270 pixels of 286,720 outside the fps counter
+  (animated pieces), the transitions excepted; in a match no two runs spawn alike (CITY and Junkyard, three no-AI runs
+  per build: main/new pairs differ by 35-70% of pixels, main/main and new/new by 34-63%), so the geometry checks above
+  stand for the match.

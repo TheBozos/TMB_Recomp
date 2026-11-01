@@ -44,6 +44,12 @@
 // menus seen), skinned objects without bones and resumes the pack path does not follow; their context blocks still
 // count for the state.
 //
+// The generic parts are the fork's (PS2Recomp/docs/native_packs.md): the pack's container, loader and object store
+// (runtime/native/native_mesh_pack.h: MeshPack, LoadedImages), the draws, the view's order, the GS state, the clip and
+// the live toggles (runtime/native/native_mesh_draw.h: MeshDraw, MeshViewList, MeshSubmitter). What is TMB's here: the
+// NGP files' binding, the hier hooks, the setup programs' meaning and shading, the GS context blocks' reading, the skid
+// marks' object and the checks against the stream.
+//
 // TMB_NATIVE_VIF=1 (runtime/tmb_native.cpp): the adapter follows the VIF1 stream again; the hook marks the header's
 // last qword (its VIF NOP's unused immediate) and the adapter submits the draws at that object's setup in the stream,
 // with the stream's GS state (the comparison mode). With TMB_NATIVE_MESHES_CHECK=1 too, the draws stay in the game's
@@ -55,6 +61,8 @@
 #include "ps2_recompiled_functions.h"
 #include "tmb_meshes.h"
 #include "tmb_vu1_shading.h"
+#include "runtime/native/native_mesh_draw.h"
+#include "runtime/native/native_mesh_pack.h"
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_texture_cache.h"
 #include "runtime/ps2_memory.h"
@@ -125,38 +133,26 @@ namespace tmb::meshes
             return s_on;
         }
 
-        // ---- the pack ----
-
-        struct PackObject
+        // ---- the pack (the fork's MeshPack, runtime/native/native_mesh_pack.h) ----
+        //
+        // TMB's objects in it (tools/tmb_mesh_pack.py): kind 0 rigid, 1 pool-less, 2 sprite, 3 ribbon, 4 skinned; the
+        // attributes (40 bytes) the hierobject's flags (obj+8, u64), bounding sphere (obj+0x10), ntex and texture
+        // numbers (obj+0x5a, obj+0x50) and, at 36, a pool-less object's pool object (the offset of the object whose
+        // pool it uses); the sections the morph deltas (kAux), where each pool's positions are in the image (kSources),
+        // the environment map's parameter batches (kParams) and a skinned object's bones and weights (kSkin); the
+        // file's register blocks the hier traversal's GS context blocks (ALPHA_1, TEST_1, ZBUF_1 writes).
+        using ps2x::native::packs::MeshFile;
+        using ps2x::native::packs::MeshObject;
+        using ps2x::native::packs::MeshSection;
+        constexpr uint32_t kAux = ps2x::native::packs::fourcc("AUX ");
+        constexpr uint32_t kSources = ps2x::native::packs::fourcc("SRCS");
+        constexpr uint32_t kParams = ps2x::native::packs::fourcc("PRMS");
+        constexpr uint32_t kSkin = ps2x::native::packs::fourcc("SKIN");
+        constexpr uint32_t kAttributeSize = 40u;
+        uint32_t poolFrom(const MeshObject &o)
         {
-            uint32_t offset = 0, kind = 0;
-            uint64_t flags = 0;
-            uint16_t ntex = 0;
-            uint16_t textures[5] = {};
-            uint32_t poolFrom = 0xffffffffu; // pool-less: the object whose pool it uses
-            const uint8_t *body = nullptr; // its positions' count
-        };
-        struct PackFile
-        {
-            std::string name;
-            uint32_t size = 0, crc = 0;
-            std::vector<PackObject> objects; // by offset
-            // The GS context blocks of the image (by offset): the A+D writes the hier objects' draws depend on.
-            struct Context
-            {
-                uint32_t offset = 0;
-                bool setsAlpha = false, setsTest = false, setsZbuf = false;
-                uint64_t alpha = 0, test = 0;
-                bool depthMasked = false;
-            };
-            std::vector<Context> contexts;
-        };
-        struct Pack
-        {
-            bool loaded = false;
-            std::vector<uint8_t> blob;
-            std::vector<PackFile> files;
-        };
+            return o.attributeSize >= kAttributeSize ? o.attribute<uint32_t>(36u) : 0xffffffffu;
+        }
 
         template <typename T>
         T rd(const uint8_t *&p)
@@ -167,157 +163,43 @@ namespace tmb::meshes
             return v;
         }
 
-        Pack &pack()
+        ps2x::native::packs::MeshPack &pack()
         {
-            static Pack s_pack;
-            if (s_pack.loaded)
+            static ps2x::native::packs::MeshPack s_pack;
+            static bool s_loaded = false;
+            if (s_loaded)
                 return s_pack;
-            s_pack.loaded = true;
+            s_loaded = true;
             const char *path = std::getenv("TMB_MESH_PACK");
             if (!path || !*path)
                 path = TMB_MESH_PACK;
-            std::ifstream in(path, std::ios::binary | std::ios::ate);
-            if (!in)
+            if (!s_pack.load(path))
             {
-                std::fprintf(stderr, "[tmb:mesh] no mesh pack at %s (tools/tmb_mesh_pack.py): objects stay on the stream path\n", path);
+                if (s_pack.error() == "missing")
+                    std::fprintf(stderr, "[tmb:mesh] no mesh pack at %s (tools/tmb_mesh_pack.py): objects stay on the stream path\n", path);
+                else
+                    std::fprintf(stderr, "[tmb:mesh] %s: %s (%s: run tools/tmb_mesh_pack.py again)\n", path, s_pack.error().c_str(),
+                                 ps2x::native::packs::MeshPack::kMagic);
                 return s_pack;
             }
-            s_pack.blob.resize(static_cast<size_t>(in.tellg()));
-            in.seekg(0);
-            in.read(reinterpret_cast<char *>(s_pack.blob.data()), static_cast<std::streamsize>(s_pack.blob.size()));
-            const uint8_t *p = s_pack.blob.data(), *end = p + s_pack.blob.size();
-            if (s_pack.blob.size() < 12u || std::memcmp(p, "TMBMESH5", 8) != 0)
-            {
-                std::fprintf(stderr, "[tmb:mesh] %s: not a mesh pack of this version (TMBMESH5: run tools/tmb_mesh_pack.py again)\n", path);
-                s_pack.blob.clear();
-                return s_pack;
-            }
-            p += 8;
-            const uint32_t fileCount = rd<uint32_t>(p);
-            size_t objects = 0;
-            for (uint32_t f = 0; f < fileCount && p < end; ++f)
-            {
-                PackFile file;
-                const uint16_t length = rd<uint16_t>(p);
-                file.name.assign(reinterpret_cast<const char *>(p), length);
-                p += length;
-                file.size = rd<uint32_t>(p);
-                file.crc = rd<uint32_t>(p);
-                const uint32_t count = rd<uint32_t>(p);
-                file.objects.resize(count);
-                for (PackObject &o : file.objects)
-                {
-                    o.offset = rd<uint32_t>(p);
-                    o.kind = rd<uint32_t>(p);
-                    o.flags = rd<uint64_t>(p);
-                    p += 16; // sphere
-                    o.ntex = rd<uint16_t>(p);
-                    for (uint16_t &t : o.textures)
-                        t = rd<uint16_t>(p);
-                    o.poolFrom = rd<uint32_t>(p);
-                    o.body = p;
-                    const uint32_t positions = rd<uint32_t>(p), aux = rd<uint32_t>(p);
-                    p += static_cast<size_t>(positions) * 16u * (aux ? 2u : 1u);
-                    const uint32_t sources = rd<uint32_t>(p);
-                    p += static_cast<size_t>(sources) * 20u;
-                    const uint32_t params = rd<uint32_t>(p);
-                    p += static_cast<size_t>(params) * 20u;
-                    const uint32_t skin = rd<uint32_t>(p);
-                    p += static_cast<size_t>(skin) * 20u;
-                    const uint32_t strips = rd<uint32_t>(p);
-                    for (uint32_t s = 0; s < strips; ++s)
-                    {
-                        p += 12;
-                        const uint32_t vertices = rd<uint32_t>(p);
-                        p += static_cast<size_t>(vertices) * 16u;
-                    }
-                }
-                objects += count;
-                const uint32_t contexts = rd<uint32_t>(p);
-                file.contexts.resize(contexts);
-                for (PackFile::Context &c : file.contexts)
-                {
-                    c.offset = rd<uint32_t>(p);
-                    const uint32_t writes = rd<uint32_t>(p);
-                    for (uint32_t w = 0; w < writes; ++w)
-                    {
-                        const uint32_t address = rd<uint32_t>(p);
-                        const uint64_t value = rd<uint64_t>(p);
-                        if (address == 0x42u)
-                            c.setsAlpha = true, c.alpha = value;
-                        else if (address == 0x47u)
-                            c.setsTest = true, c.test = value;
-                        else if (address == 0x4eu)
-                            c.setsZbuf = true, c.depthMasked = ((value >> 32) & 1u) != 0u;
-                    }
-                }
-                s_pack.files.push_back(std::move(file));
-            }
-            std::fprintf(stderr, "[tmb:mesh] mesh pack %s: %zu files, %zu objects\n", path, s_pack.files.size(), objects);
+            std::fprintf(stderr, "[tmb:mesh] mesh pack %s: %zu files, %zu objects\n", path, s_pack.files().size(), s_pack.objectCount());
             return s_pack;
-        }
-
-        uint32_t crc32(const uint8_t *data, size_t size)
-        {
-            static uint32_t s_table[256];
-            static const bool s_made = []
-            {
-                for (uint32_t i = 0; i < 256u; ++i)
-                {
-                    uint32_t c = i;
-                    for (int k = 0; k < 8; ++k)
-                        c = (c & 1u) ? 0xedb88320u ^ (c >> 1) : c >> 1;
-                    s_table[i] = c;
-                }
-                return true;
-            }();
-            (void)s_made;
-            uint32_t c = 0xffffffffu;
-            for (size_t i = 0; i < size; ++i)
-                c = s_table[(c ^ data[i]) & 0xffu] ^ (c >> 8);
-            return c ^ 0xffffffffu;
         }
 
         // ---- the NGP files as the game loaded them ----
 
-        struct Loaded
-        {
-            uint32_t base = 0, size = 0;
-            const PackFile *file = nullptr; // null: not in the pack (or not the converted image)
-            uint32_t index = 0;             // the pack file's index (keys)
-        };
-        std::mutex g_mutex;
-        std::vector<Loaded> g_loaded;
+        ps2x::native::packs::LoadedImages g_loaded;
 
         void noteNgp(uint8_t *rdram, R5900Context *ctx, bool only)
         {
             const uint32_t base = getRegU32(ctx, 4), size = getRegU32(ctx, 5);
             const std::string name = tmb::textures::nameAt(base);
-            Pack &p = pack();
-            Loaded loaded;
-            loaded.base = base;
-            loaded.size = size;
-            for (size_t i = 0; i < p.files.size(); ++i)
-                if (p.files[i].name == name)
-                {
-                    const PackFile &file = p.files[i];
-                    const uint32_t crc = size == file.size && (base & 0x1ffffffu) + size <= 0x2000000u ? crc32(rdram + (base & 0x1ffffffu), size) : 0u;
-                    if (size == file.size && crc == file.crc)
-                    {
-                        loaded.file = &file;
-                        loaded.index = static_cast<uint32_t>(i);
-                    }
-                    else
-                        std::fprintf(stderr, "[tmb:mesh] %s at %#x: %u bytes (crc %#x), the pack's is %u bytes (crc %#x): not used\n", name.c_str(), base,
-                                     size, crc, file.size, file.crc);
-                    break;
-                }
+            const ps2x::native::packs::LoadedImages::Bound bound = g_loaded.bind(pack(), rdram, name, base, size, only);
+            if (bound.named && !bound.image.file)
+                std::fprintf(stderr, "[tmb:mesh] %s at %#x: %u bytes (crc %#x), the pack's is %u bytes (crc %#x): not used\n", name.c_str(), base, size,
+                             bound.crc, bound.named->size, bound.named->crc);
             std::fprintf(stderr, "[tmb:mesh] NGP %s at %#x (%u bytes)%s\n", name.empty() ? "?" : name.c_str(), base, size,
-                         loaded.file ? "" : ": no pack entry");
-            std::lock_guard<std::mutex> lock(g_mutex);
-            if (only)
-                g_loaded.clear();
-            g_loaded.push_back(loaded);
+                         bound.image.file ? "" : ": no pack entry");
         }
 
         void fileOnlyNgpFileOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -423,31 +305,14 @@ namespace tmb::meshes
         bool g_inHier2pFlush = false;
         uint64_t g_unsentFlushes = 0; // views submitted at the frame's end (not kicked by hier__Fi)
         uint64_t g_listDrops = 0, g_submitted[2] = {}, g_built[2] = {}, g_kicks[2] = {};
-        struct ViewList
+        struct ViewList : ps2x::native::MeshViewList<Drawn>
         {
-            std::vector<Drawn> opaque;
-            std::vector<std::vector<Drawn>> buckets = std::vector<std::vector<Drawn>>(129);
-            bool pending = false; // an alpha object drawn at the hook, waiting for its pktLinkAlphaObjAsm
             // Built by hier2p: sent only by hier2pFlushDma. On the frame a split screen ends hier2p builds its view once
             // more and nothing sends it (the game drops the chain), so it is dropped too rather than drawn in the next view.
             bool hier2p = false;
-            Drawn pendingAlpha;
-            uint32_t frame = 0;
-            bool empty() const
-            {
-                if (!opaque.empty())
-                    return false;
-                for (const std::vector<Drawn> &b : buckets)
-                    if (!b.empty())
-                        return false;
-                return true;
-            }
             void clear()
             {
-                opaque.clear();
-                for (std::vector<Drawn> &b : buckets)
-                    b.clear();
-                pending = false;
+                MeshViewList<Drawn>::clear();
                 hier2p = false;
             }
         };
@@ -456,30 +321,10 @@ namespace tmb::meshes
         constexpr int g_building = 0;
 
         // The GS registers the hier objects' draws depend on, as their context and register blocks leave them in the
-        // order the objects are sent (they persist from one object to the next, as in the GS).
-        struct GsState
-        {
-            uint64_t alpha = 0x44, test = 0;
-            bool depthMasked = false;
-        } g_gs;
-
-        void apply(GsState &gs, const Batch &writes)
-        {
-            if (writes.setsAlpha)
-                gs.alpha = writes.alpha;
-            if (writes.setsTest)
-                gs.test = writes.test;
-            if (writes.setsZbuf)
-                gs.depthMasked = writes.depthMasked;
-        }
-
-        ps2x::native::Material::Blend blendFor(uint64_t alpha)
-        {
-            const uint32_t b = (alpha >> 2) & 3u, d = (alpha >> 6) & 3u;
-            if (b == 2u && d == 1u)
-                return ps2x::native::Material::Blend::Additive; // (A - 0) * C + Cd
-            return ps2x::native::Material::Blend::Alpha;
-        }
+        // order the objects are sent (they persist from one object to the next, as in the GS): the submitter's
+        // (runtime/native/native_mesh_draw.h), which follows them, makes each batch's material and clips its triangles.
+        using GsState = ps2x::native::MeshGsState;
+        ps2x::native::MeshSubmitter g_submitter;
 
         // A batch's material as the GS state has it (TMB_NATIVE_MESHES_CHECK compares it with the stream's).
         struct Mat
@@ -519,52 +364,26 @@ namespace tmb::meshes
 
         // TMB_LIVE_TOGGLES=<file> (a diagnostic): words read from the file every 60 frames, while the game runs:
         // nodepth (the hier objects drawn without the depth test), nofog, noclip (no view clip), flat (each object
-        // untextured in a colour of its own).
-        struct LiveToggles
-        {
-            bool noDepth = false, noFog = false, noClip = false, flat = false, opaque = false, noAtest = false, noTex = false, dump = false, noGuard = false;
-            bool dumping = false; // this frame
-        } g_live;
+        // untextured in a colour of its own), opaque, noatest, notex, noguard (no clip volume), dump.
+        ps2x::native::MeshLiveToggles &g_live = g_submitter.live;
         void readLiveToggles()
         {
             static const char *s_path = std::getenv("TMB_LIVE_TOGGLES");
             if (!s_path)
                 return;
-            std::string words;
-            if (FILE *f = std::fopen(s_path, "rb"))
-            {
-                char buffer[256];
-                const size_t n = std::fread(buffer, 1, sizeof(buffer), f);
-                std::fclose(f);
-                words.assign(buffer, n);
-            }
-            const LiveToggles was = g_live;
-            g_live.noDepth = words.find("nodepth") != std::string::npos;
-            g_live.noFog = words.find("nofog") != std::string::npos;
-            g_live.noClip = words.find("noclip") != std::string::npos;
-            g_live.flat = words.find("flat") != std::string::npos;
-            g_live.opaque = words.find("opaque") != std::string::npos;
-            g_live.noAtest = words.find("noatest") != std::string::npos;
-            g_live.noTex = words.find("notex") != std::string::npos;
-            g_live.noGuard = words.find("noguard") != std::string::npos;
-            const bool dump = words.find("dump") != std::string::npos;
-            g_live.dumping = dump && !g_live.dump;
-            g_live.dump = dump;
-            if (std::memcmp(&was, &g_live, sizeof(was)) != 0)
-                std::fprintf(stderr, "[tmb:live] frame %u: nodepth %d nofog %d noclip %d flat %d opaque %d noatest %d notex %d\n", g_frame, g_live.noDepth, g_live.noFog,
-                             g_live.noClip, g_live.flat, g_live.opaque, g_live.noAtest, g_live.noTex);
+            g_live.read(s_path, g_frame, "tmb");
         }
 
-        void submit(const Drawn &drawn)
+        // TMB_NATIVE_MESHES_CHECK=1: what the submitter applies, per marked object, recorded for compareOrders.
+        struct CheckObserver : ps2x::native::MeshSubmitter::Observer
         {
-            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
-            renderer.setKey(drawn.screenSpace ? 0u : drawn.key); // sprites: screen space, not interpolated
-            static const float kScreenSpace[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-            if (drawn.hasContext)
-                apply(g_gs, drawn.context);
             CheckRecord *record = nullptr;
-            if (checking() && drawn.mark != 0u)
+            void draw(const ps2x::native::MeshDraw &d) override
             {
+                const Drawn &drawn = static_cast<const Drawn &>(d);
+                record = nullptr;
+                if (drawn.mark == 0u)
+                    return;
                 record = &g_checks[drawn.mark];
                 record->frame = drawn.frame;
                 record->hookOrder = g_hookSeq++;
@@ -573,180 +392,19 @@ namespace tmb::meshes
                 if (drawn.hasContext)
                     record->sets.push_back(drawn.context);
             }
-            const uint32_t fog = tmb::native::fogColour();
-            for (const Batch &batch : drawn.batches)
+            void batch(const Batch &batch, const GsState &gs) override
             {
-                apply(g_gs, batch);
-                if (record)
-                {
-                    Batch sets;
-                    sets.setsAlpha = batch.setsAlpha, sets.alpha = batch.alpha, sets.setsTest = batch.setsTest, sets.test = batch.test;
-                    sets.setsZbuf = batch.setsZbuf, sets.depthMasked = batch.depthMasked, sets.blended = batch.blended;
-                    sets.textured = !batch.vertices.empty(); // (whether it draws)
-                    record->sets.push_back(sets);
-                    if (!batch.vertices.empty())
-                        record->hook.push_back(matFor(g_gs, batch));
-                }
-                if (batch.vertices.empty())
-                    continue;
-                // The strips' clip volume (the microprograms' CLIP, Drawn::clip): a triangle wholly outside one of its
-                // planes is not drawn, one partly outside is cut to it (its colour, texture coordinates and fog along
-                // the cuts: VU1's new vertices there), so what is nearer than its near plane never shows (a wall under
-                // the car seen from above) and the ground around the car is drawn to it. Then nothing behind the camera
-                // (w <= 0) of what is left: cut there too.
-                const std::vector<ps2x::native::Vertex> *vertices = &batch.vertices;
-                static thread_local std::vector<ps2x::native::Vertex> s_kept;
-                if (!drawn.screenSpace && !g_live.noGuard)
-                {
-                    const float *m = drawn.matrix, *c = drawn.clip;
-                    const int planeCount = drawn.hasClip ? 7 : 1;
-                    constexpr float kWMin = 1.0e-3f;
-                    // Plane p's distance (inside > 0): 0 the screen's w > kWMin, then the clip volume's w -+ x, y, z.
-                    const auto distance = [m, c](const ps2x::native::Vertex &v, int plane)
-                    {
-                        if (plane == 0)
-                            return m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15] - kWMin;
-                        const int axis = (plane - 1) >> 1;
-                        const float w = c[3] * v.x + c[7] * v.y + c[11] * v.z + c[15];
-                        const float a = c[axis] * v.x + c[4 + axis] * v.y + c[8 + axis] * v.z + c[12 + axis];
-                        return (plane & 1) ? w - a : w + a;
-                    };
-                    const auto lerp = [](const ps2x::native::Vertex &a, const ps2x::native::Vertex &b, float t)
-                    {
-                        ps2x::native::Vertex o = a;
-                        o.x = a.x + t * (b.x - a.x), o.y = a.y + t * (b.y - a.y), o.z = a.z + t * (b.z - a.z);
-                        o.u = a.u + t * (b.u - a.u), o.v = a.v + t * (b.v - a.v), o.fog = a.fog + t * (b.fog - a.fog);
-                        uint32_t rgba = 0;
-                        for (int ch = 0; ch < 32; ch += 8)
-                        {
-                            const float ca = static_cast<float>((a.rgba >> ch) & 0xffu), cb = static_cast<float>((b.rgba >> ch) & 0xffu);
-                            rgba |= static_cast<uint32_t>(std::lround(ca + t * (cb - ca))) << ch;
-                        }
-                        o.rgba = rgba;
-                        return o;
-                    };
-                    const size_t count = batch.vertices.size();
-                    bool change = false;
-                    for (size_t t = 0; t < count && !change; ++t)
-                        for (int p = 0; p < planeCount && !change; ++p)
-                            change = !(distance(batch.vertices[t], p) > 0.0f);
-                    if (change)
-                    {
-                        s_kept.clear();
-                        for (size_t t = 0; t + 2u < count; t += 3u)
-                        {
-                            ps2x::native::Vertex poly[10], next[10];
-                            int n = 3;
-                            for (int k = 0; k < 3; ++k)
-                                poly[k] = batch.vertices[t + static_cast<size_t>(k)];
-                            for (int p = 0; p < planeCount && n >= 3; ++p)
-                            {
-                                float d[10];
-                                bool allIn = true;
-                                for (int k = 0; k < n; ++k)
-                                    allIn = (d[k] = distance(poly[k], p)) > 0.0f && allIn;
-                                if (allIn)
-                                    continue;
-                                int n2 = 0;
-                                for (int k = 0; k < n && n2 < 9; ++k)
-                                {
-                                    const int k1 = (k + 1) % n;
-                                    if (d[k] > 0.0f)
-                                        next[n2++] = poly[k];
-                                    if ((d[k] > 0.0f) != (d[k1] > 0.0f))
-                                        next[n2++] = lerp(poly[k], poly[k1], d[k] / (d[k] - d[k1]));
-                                }
-                                for (int k = 0; k < n2; ++k)
-                                    poly[k] = next[k];
-                                n = n2;
-                            }
-                            for (int f = 1; f + 1 < n; ++f)
-                            {
-                                s_kept.push_back(poly[0]);
-                                s_kept.push_back(poly[f]);
-                                s_kept.push_back(poly[f + 1]);
-                            }
-                        }
-                        if (s_kept.empty())
-                            continue;
-                        vertices = &s_kept;
-                    }
-                }
-                ps2x::native::Material material;
-                material.textured = batch.textured && batch.texture != nullptr;
-                material.tex0 = batch.tex0;
-                material.blend = batch.blended ? blendFor(g_gs.alpha) : ps2x::native::Material::Blend::Opaque;
-                material.depthWrite = !g_gs.depthMasked;
-                const uint32_t atst = (g_gs.test >> 1) & 7u, aref = (g_gs.test >> 4) & 0xffu;
-                if ((g_gs.test & 1u) && (atst == 5u || atst == 6u))
-                {
-                    material.alphaTest = atst == 6u || aref > 0u;
-                    material.alphaRef = static_cast<uint8_t>(atst == 6u ? aref : aref - 1u);
-                }
-                material.fog = batch.fogged;
-                material.fogColour = fog;
-                if (g_live.noDepth)
-                    material.depthTest = false;
-                if (g_live.noFog)
-                    material.fog = false;
-                if (g_live.opaque)
-                    material.blend = ps2x::native::Material::Blend::Opaque;
-                if (g_live.noAtest)
-                    material.alphaTest = false;
-                if (g_live.noTex)
-                    material.textured = false;
-                if (g_live.flat)
-                {
-                    material.textured = false;
-                    material.blend = ps2x::native::Material::Blend::Opaque;
-                    std::vector<ps2x::native::Vertex> tinted(*vertices);
-                    const uint32_t h = drawn.object * 2654435761u;
-                    const uint32_t colour = 0x80000000u | ((h >> 8) & 0x7f7f7fu) | 0x202020u;
-                    for (ps2x::native::Vertex &v : tinted)
-                        v.rgba = colour;
-                    renderer.draw(material, drawn.screenSpace ? kScreenSpace : drawn.matrix, tinted.data(), static_cast<uint32_t>(tinted.size()), nullptr);
-                    continue;
-                }
-                if (g_live.dumping)
-                {
-                    uint32_t aMin = 255u, aMax = 0u;
-                    for (const ps2x::native::Vertex &v : batch.vertices)
-                        aMin = std::min(aMin, v.rgba >> 24), aMax = std::max(aMax, v.rgba >> 24);
-                    // Its triangles through the matrix: all in front (w > 0), some corner behind, all behind; the
-                    // screen box and GS Z range of the corners in front.
-                    const float *m = drawn.screenSpace ? kScreenSpace : drawn.matrix;
-                    uint32_t front = 0, mixed = 0, behind = 0;
-                    float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f, z0 = 1e30f, z1 = -1e30f, w0 = 1e30f, w1 = -1e30f;
-                    for (size_t t = 0; t + 2u < batch.vertices.size(); t += 3u)
-                    {
-                        int in = 0;
-                        for (size_t k = 0; k < 3u; ++k)
-                        {
-                            const ps2x::native::Vertex &v = batch.vertices[t + k];
-                            const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
-                            w0 = std::min(w0, w), w1 = std::max(w1, w);
-                            if (w > 0.0f)
-                            {
-                                ++in;
-                                const float x = (m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12]) / w, y = (m[1] * v.x + m[5] * v.y + m[9] * v.z + m[13]) / w,
-                                            z = (m[2] * v.x + m[6] * v.y + m[10] * v.z + m[14]) / w;
-                                x0 = std::min(x0, x), x1 = std::max(x1, x), y0 = std::min(y0, y), y1 = std::max(y1, y), z0 = std::min(z0, z), z1 = std::max(z1, z);
-                            }
-                        }
-                        (in == 3 ? front : in == 0 ? behind : mixed) += 1u;
-                    }
-                    std::fprintf(stderr, "[tmb:dump]   tris front %u mixed %u behind %u; w %.3g..%.3g; x %.0f..%.0f y %.0f..%.0f z %.4g..%.4g\n", front, mixed, behind,
-                                 w0, w1, x0, x1, y0, y1, z0, z1);
-                    std::fprintf(stderr, "[tmb:dump] obj %#x file %u off %#x: %zu verts blend %d alpha %#llx test %#llx atest %d ref %u zw %d tex %d found %d tex0 %#llx vA %u-%u fog %d\n",
-                                 drawn.object, drawn.file, drawn.offset, batch.vertices.size(), static_cast<int>(material.blend),
-                                 static_cast<unsigned long long>(g_gs.alpha), static_cast<unsigned long long>(g_gs.test), material.alphaTest,
-                                 material.alphaRef, material.depthWrite, batch.textured, batch.texture != nullptr,
-                                 static_cast<unsigned long long>(batch.tex0), aMin, aMax, batch.fogged);
-                }
-                renderer.draw(material, drawn.screenSpace ? kScreenSpace : drawn.matrix, vertices->data(),
-                              static_cast<uint32_t>(vertices->size()), material.textured ? batch.texture : nullptr);
+                if (!record)
+                    return;
+                Batch sets;
+                sets.setsAlpha = batch.setsAlpha, sets.alpha = batch.alpha, sets.setsTest = batch.setsTest, sets.test = batch.test;
+                sets.setsZbuf = batch.setsZbuf, sets.depthMasked = batch.depthMasked, sets.blended = batch.blended;
+                sets.textured = !batch.vertices.empty(); // (whether it draws)
+                record->sets.push_back(sets);
+                if (!batch.vertices.empty())
+                    record->hook.push_back(matFor(gs, batch));
             }
-        }
+        } g_checkObserver;
 
         // A GS context block as the traversal keeps it (s4: the default one, ctxGetDefaultGSCtx, or a node's): its first
         // quadword's VIF codes FLUSH, DIRECT n, then a PACKED GIF tag of n - 1 A+D writes. The writes this path follows.
@@ -777,19 +435,19 @@ namespace tmb::meshes
         // (the executable's data, as defaultContextInit / ctxGetDefaultGSCtx leave it in EE memory).
         bool contextAt(const Ee &ee, uint32_t at, Batch &out)
         {
-            const PackFile *file = nullptr;
+            const MeshFile *file = nullptr;
             uint32_t base = 0;
-            {
-                std::lock_guard<std::mutex> lock(g_mutex);
-                for (const Loaded &l : g_loaded)
-                    if (at >= l.base && at < l.base + l.size)
-                    {
-                        file = l.file;
-                        base = l.base;
-                        if (!file)
-                            break;
-                    }
-            }
+            g_loaded.forEach([&](const ps2x::native::packs::LoadedImages::Image &l)
+                             {
+                                 if (at >= l.base && at < l.base + l.size)
+                                 {
+                                     file = l.file;
+                                     base = l.base;
+                                     if (!file)
+                                         return false;
+                                 }
+                                 return true;
+                             });
             if (!file)
             {
                 if (at >= 0x00980000u && (at & 0x1ffffffu) < 0x02000000u && base != 0u)
@@ -800,9 +458,8 @@ namespace tmb::meshes
                 ++g_stats.contextsDefault;
                 return readContext(ee, at, out);
             }
-            const auto it = std::lower_bound(file->contexts.begin(), file->contexts.end(), at - base,
-                                             [](const PackFile::Context &c, uint32_t v) { return c.offset < v; });
-            if (it == file->contexts.end() || it->offset != at - base)
+            const ps2x::native::packs::RegisterBlock *block = file->block(at - base);
+            if (!block)
             {
                 ++g_stats.contextsMissing;
                 static uint32_t s_logged = 0;
@@ -811,9 +468,18 @@ namespace tmb::meshes
                 return false;
             }
             ++g_stats.contextsPack;
-            out.setsAlpha = it->setsAlpha, out.alpha = it->alpha;
-            out.setsTest = it->setsTest, out.test = it->test;
-            out.setsZbuf = it->setsZbuf, out.depthMasked = it->depthMasked;
+            out.setsAlpha = false, out.alpha = 0;
+            out.setsTest = false, out.test = 0;
+            out.setsZbuf = false, out.depthMasked = false;
+            for (const auto &[address, value] : block->writes)
+            {
+                if (address == 0x42u)
+                    out.setsAlpha = true, out.alpha = value;
+                else if (address == 0x47u)
+                    out.setsTest = true, out.test = value;
+                else if (address == 0x4eu)
+                    out.setsZbuf = true, out.depthMasked = ((value >> 32) & 1u) != 0u;
+            }
             if (checking()) // the pack's against the block as the game has it now
             {
                 Batch now;
@@ -863,7 +529,7 @@ namespace tmb::meshes
         // The object's strips from the pack, shaded as the setup's strip program shades them.
         // screen: the setup's matrix before the depth factor when it is not this object's (a resume), else null.
         // bones: a skinned object's bone matrices in EE memory (16 floats each), else 0.
-        void buildStrips(const Ee &ee, uint32_t obj, uint32_t fileBase, const PackObject &object, uint32_t pc, Drawn &out,
+        void buildStrips(const Ee &ee, uint32_t obj, uint32_t fileBase, const MeshObject &object, uint32_t pc, Drawn &out,
                          const float *screen = nullptr, uint32_t bones = 0u)
         {
             const tmb::vu1::Shading mode = pc == 0x0ce8u || pc == 0x0d48u ? tmb::vu1::Shading::Directional
@@ -885,16 +551,17 @@ namespace tmb::meshes
             else
                 tmb::vu1::objectToScreen(g_vu, out.matrix, depthScaled);
             const float *m = out.matrix;
-            const uint8_t *p = object.body;
-            const uint32_t positionCount = rd<uint32_t>(p), aux = rd<uint32_t>(p);
+            const uint32_t positionCount = object.positionCount;
             // x, y, z, w: the pack's, then each pool's from where the game keeps it in the loaded file (the V3-32 data of
             // its packet: a few meshes have their vertices moved by the game, a car's headlight beams among them).
             static thread_local std::vector<float> s_positions;
-            s_positions.assign(reinterpret_cast<const float *>(p), reinterpret_cast<const float *>(p) + static_cast<size_t>(positionCount) * 4u);
+            s_positions.assign(object.positions, object.positions + static_cast<size_t>(positionCount) * 4u);
             // The morph deltas (the pools' @373 blocks), per position.
-            const float *deltas = aux ? reinterpret_cast<const float *>(p + static_cast<size_t>(positionCount) * 16u) : nullptr;
-            p += static_cast<size_t>(positionCount) * 16u * (aux ? 2u : 1u);
-            const uint32_t sources = rd<uint32_t>(p);
+            const MeshSection *aux = object.section(kAux);
+            const float *deltas = aux && aux->size >= positionCount * 16u ? reinterpret_cast<const float *>(aux->data) : nullptr;
+            const MeshSection *sourceList = object.section(kSources);
+            const uint32_t sources = sourceList ? sourceList->size / 20u : 0u;
+            const uint8_t *p = sourceList ? sourceList->data : nullptr;
             for (uint32_t i = 0; i < sources; ++i)
             {
                 const uint32_t offset = rd<uint32_t>(p), first = rd<uint32_t>(p), count = rd<uint32_t>(p);
@@ -928,21 +595,22 @@ namespace tmb::meshes
             }
             const float *positions = s_positions.data();
             // The parameter batches (environment map: the alpha terms of the strips after them).
-            const uint32_t params = rd<uint32_t>(p);
-            const uint8_t *paramAt = p;
-            p += static_cast<size_t>(params) * 20u;
+            const MeshSection *paramList = object.section(kParams);
+            const uint32_t params = paramList ? paramList->size / 20u : 0u;
+            const uint8_t *paramAt = paramList ? paramList->data : nullptr;
             const bool reflective = pc == 0x1db8u;
             tmb::vu1::Reflection reflection;
             // A skinned object's vertex pass: each position and its normal blended by its bones' matrices, as they are
             // in EE memory now (the chain sends them from there).
-            const uint32_t skinCount = rd<uint32_t>(p);
+            const MeshSection *skinList = object.section(kSkin);
+            const uint32_t skinCount = skinList ? skinList->size / 20u : 0u;
             static thread_local std::vector<float> s_skinNormals;
             if (bones != 0u && skinCount == positionCount)
             {
                 s_skinNormals.assign(static_cast<size_t>(positionCount) * 3u, 0.0f);
                 for (uint32_t i = 0; i < skinCount; ++i)
                 {
-                    const uint8_t *v = p + static_cast<size_t>(i) * 20u;
+                    const uint8_t *v = skinList->data + static_cast<size_t>(i) * 20u;
                     const int count = std::min<int>(v[0], 3);
                     int32_t raw[3];
                     std::memcpy(raw, v + 8, 12);
@@ -957,9 +625,10 @@ namespace tmb::meshes
                     tmb::vu1::skinVertex(count, matrices, weight, bind, n, pos, &s_skinNormals[static_cast<size_t>(i) * 3u]);
                 }
             }
-            p += static_cast<size_t>(skinCount) * 20u;
             const bool skin = bones != 0u && skinCount == positionCount;
-            const uint32_t strips = rd<uint32_t>(p);
+            // The strips (the fork's StripHeader and StripVertex, 16 bytes each).
+            p = object.strips;
+            const uint32_t strips = object.stripCount;
             const float uOffset = g_vu.f(4, 0), vOffset = g_vu.f(4, 1);
             // The material as the strip program and the GS keep it: a strip's header brings a texture (its slot's
             // register block) or keeps the last; the setup starts untextured (as the adapter's useMaterial).
@@ -1248,8 +917,9 @@ namespace tmb::meshes
         struct Skid
         {
             bool valid = false;
-            std::vector<uint8_t> body;
-            std::vector<PackObject> objects; // one: the skid object
+            std::vector<float> positions;
+            std::vector<uint8_t> strips;
+            MeshObject object; // the skid object, over those
         } g_skid;
 
         template <typename T>
@@ -1310,17 +980,9 @@ namespace tmb::meshes
                     mark = next(mark);
                 }
             }
-            std::vector<uint8_t> &body = g_skid.body;
+            g_skid.positions = std::move(positions); // no pool sources: the positions are the object's; no parameters, no skin
+            std::vector<uint8_t> &body = g_skid.strips;
             body.clear();
-            const uint32_t positionCount = static_cast<uint32_t>(positions.size() / 4u);
-            put<uint32_t>(body, positionCount);
-            put<uint32_t>(body, 0u); // no aux
-            for (float f : positions)
-                put<float>(body, f);
-            put<uint32_t>(body, 0u); // no pool sources: the positions are the pack's
-            put<uint32_t>(body, 0u); // no parameters
-            put<uint32_t>(body, 0u); // not skinned
-            put<uint32_t>(body, static_cast<uint32_t>(strips.size()));
             for (size_t k = 0; k < strips.size(); ++k)
             {
                 put<uint16_t>(body, 0x7cu); // PRIM: triangle strip, Gouraud, textured, fogged, blended
@@ -1340,12 +1002,13 @@ namespace tmb::meshes
                     put<uint16_t>(body, 0u);
                 }
             }
-            if (g_skid.objects.empty())
-                g_skid.objects.resize(1);
-            PackObject &object = g_skid.objects[0];
+            MeshObject &object = g_skid.object;
             object.offset = kSkidBuffer; // its "file" starts at 0
             object.kind = 0u;
-            object.body = body.data();
+            object.positions = g_skid.positions.data();
+            object.positionCount = static_cast<uint32_t>(g_skid.positions.size() / 4u);
+            object.strips = body.data();
+            object.stripCount = static_cast<uint32_t>(strips.size());
             g_skid.valid = true;
         }
 
@@ -1567,16 +1230,11 @@ namespace tmb::meshes
                 // submitDrawn takes. Drawn here as the others.
                 ++g_stats.extra;
             }
-            const Loaded *file = nullptr;
-            {
-                std::lock_guard<std::mutex> lock(g_mutex);
-                for (const Loaded &l : g_loaded)
-                    if (obj >= l.base && obj < l.base + l.size)
-                        file = &l;
-            }
+            ps2x::native::packs::LoadedImages::Image file;
+            const bool inFile = g_loaded.find(obj, file);
             // The skid marks' object (skidBuffer, which SkidMarks::draw fills): drawn from the marks themselves.
             const bool skid = obj == kSkidBuffer && g_skid.valid && !resume;
-            if (!skid && (!file || !file->file))
+            if (!skid && (!inFile || !file.file))
             {
                 ++g_stats.noFile;
                 static std::unordered_map<uint32_t, bool> s_seen;
@@ -1589,11 +1247,10 @@ namespace tmb::meshes
                 stateOnly(ee, extra, opaque);
                 return;
             }
-            const uint32_t fileIndex = skid ? 0xffffu : file->index, fileBase = skid ? 0u : file->base;
+            const uint32_t fileIndex = skid ? 0xffffu : file.index, fileBase = skid ? 0u : file.base;
             const uint32_t offset = obj - fileBase;
-            const std::vector<PackObject> &objects = skid ? g_skid.objects : file->file->objects;
-            const auto it = std::lower_bound(objects.begin(), objects.end(), offset, [](const PackObject &o, uint32_t v) { return o.offset < v; });
-            if (it == objects.end() || it->offset != offset)
+            const MeshObject *it = skid ? (g_skid.object.offset == offset ? &g_skid.object : nullptr) : file.file->object(offset);
+            if (!it)
             {
                 ++g_stats.noObject;
                 stateOnly(ee, extra, opaque);
@@ -1610,7 +1267,7 @@ namespace tmb::meshes
             // A resume draws a pool-less object with the pool (and setup) the object before it left: that object must be
             // its pool's (or another pool-less object of that pool).
             if (resume && (it->kind != 1u || previous.file != fileIndex ||
-                           (it->poolFrom != previous.offset && it->poolFrom != previous.poolFrom)))
+                           (poolFrom(*it) != previous.offset && poolFrom(*it) != previous.poolFrom)))
             {
                 ++g_stats.resumeOther;
                 stateOnly(ee, extra, opaque);
@@ -1683,7 +1340,7 @@ namespace tmb::meshes
                 g_previous.valid = true;
                 g_previous.file = fileIndex;
                 g_previous.offset = offset;
-                g_previous.poolFrom = it->kind == 1u ? it->poolFrom : offset;
+                g_previous.poolFrom = it->kind == 1u ? poolFrom(*it) : offset;
                 g_previous.pc = drawPc;
                 std::memcpy(g_previous.screen, screen, sizeof(screen));
                 std::memcpy(g_previous.clip, clip, sizeof(clip));
@@ -1778,9 +1435,7 @@ namespace tmb::meshes
                     int32_t bucket = 1;
                     if (depth[0] > 8.0f)
                         bucket = FPU_CVT_W_S((depth[0] > 1024.0f ? 1016.0f : depth[0]) * 0.125f) + 1;
-                    bucket = std::clamp(bucket, 0, 128);
-                    list.buckets[static_cast<size_t>(bucket)].push_back(std::move(list.pendingAlpha));
-                    list.pending = false;
+                    list.link(std::clamp(bucket, 0, 128));
                 }
             }
             pktLinkAlphaObjAsm_0x1eaf84(rdram, ctx, runtime);
@@ -1801,14 +1456,8 @@ namespace tmb::meshes
             g_submitIndex = 0;
             const int which = g_inHier2pFlush ? 1 : 0; // hier__Fi's, hier2p's
             ++g_kicks[which];
-            g_submitted[which] += list.opaque.size();
-            for (const std::vector<Drawn> &b : list.buckets)
-                g_submitted[which] += b.size();
-            for (const Drawn &drawn : list.opaque)
-                submit(drawn);
-            for (size_t b = list.buckets.size(); b-- > 0;)
-                for (size_t i = list.buckets[b].size(); i-- > 0;)
-                    submit(list.buckets[b][i]);
+            g_submitted[which] += list.size();
+            g_submitter.submitInOrder(list);
             list.clear();
         }
 
@@ -1925,7 +1574,7 @@ namespace tmb::meshes
                 for (size_t i = 0; i < record.sets.size(); ++i)
                 {
                     const Batch &sets = record.sets[i];
-                    apply(gs, sets);
+                    gs.apply(sets);
                     if (i == 0u && record.hasContext)
                         continue;
                     if (!sets.textured) // draws nothing
@@ -2074,6 +1723,10 @@ namespace tmb::meshes
         if (!active())
             return;
         pack();
+        g_submitter.tag = "tmb";
+        g_submitter.fogColour = &tmb::native::fogColour;
+        if (checking())
+            g_submitter.observer = &g_checkObserver;
         runtime.registerFunction(kFileOnlyNgpFile, &fileOnlyNgpFileOverride);
         runtime.registerFunction(kFileAddNgpFile, &fileAddNgpFileOverride);
         runtime.registerFunction(kHierCacheForAsm, &hierCacheForAsmOverride);

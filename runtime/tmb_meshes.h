@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ps2_runtime.h"
+#include "runtime/native/native_mesh_draw.h"
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_texture_cache.h"
 
@@ -12,43 +13,21 @@
 
 namespace tmb::meshes
 {
-    // One batch of an object: its material as the strip program keeps it (the GS state around it, ALPHA_1, TEST_1,
-    // ZBUF_1, FOGCOL, is the adapter's at the object's place) and its triangles in the object's space.
-    struct Batch
-    {
-        uint64_t tex0 = 0;
-        bool textured = false, blended = false, fogged = false;
-        // GS registers the strip starting it set from the object's register block besides TEX0_1 (the adapter's
-        // useMaterial follows them the same way): ALPHA_1, TEST_1, ZBUF_1.ZMSK.
-        bool setsAlpha = false, setsTest = false, setsZbuf = false, setsTex0 = false;
-        uint64_t alpha = 0, test = 0;
-        bool depthMasked = false;
-        std::shared_ptr<const ps2x::native::TextureCache::Texture> texture;
-        std::vector<ps2x::native::Vertex> vertices;
-    };
+    // One batch of an object (the fork's, runtime/native/native_mesh_draw.h): its material as the strip program keeps
+    // it (the GS state around it, ALPHA_1, TEST_1, ZBUF_1, FOGCOL, is the adapter's at the object's place) and its
+    // triangles in the object's space.
+    using Batch = ps2x::native::MeshBatch;
 
-    // One object drawn from the pack, waiting for its place in the stream.
-    struct Drawn
+    // One object drawn from the pack, waiting for its place in the stream: the fork's MeshDraw (matrix, clip volume,
+    // batches, context block, key) and what TMB's checks and the stream path add.
+    struct Drawn : ps2x::native::MeshDraw
     {
         uint32_t setupPc = 0;
         uint32_t resumes = 0; // a resume (setupPc 0xc78): the setup it goes on with, which the stream's must be
-        float matrix[16] = {}; // object to GS screen (columns), the z row times the depth factor
-        // The microprograms' clip volume (VU 13-16 x VU 0-3, the CLIP their strips test each vertex with): a triangle
-        // with a corner outside it (|x|, |y| or |z| past |w|) is not drawn. hasClip: the world's strips.
-        float clip[16] = {};
-        bool hasClip = false;
-        bool screenSpace = false; // sprites and ribbons: their vertices in screen space (matrix: the setup's, unscaled)
-        uint64_t key = 0;      // Renderer::setKey
-        std::vector<Batch> batches;
         uint32_t check[24][4] = {}; // VU 0-21, then VU 31, as the hook built them (TMB_NATIVE_MESHES_CHECK: the adapter compares)
         uint32_t frame = 0;
-        uint32_t object = 0, file = 0, offset = 0;
         uint32_t mark = 0;      // TMB_NATIVE_VIF=1: the mark the header carries
         bool alphaList = false; // sent through the depth-sorted alpha list (pktLinkAlphaObjAsm), after the view's opaque ones
-        // The GS state the object's context block sets before its batches (the hier traversal's GS context, which
-        // pktAddVu1ObjAsm copies into the header when it changed: ALPHA_1, TEST_1, ZBUF_1): its sets* fields.
-        bool hasContext = false;
-        Batch context;
         // TMB_NATIVE_MESHES_CHECK: each strip's vertices before triangles (sprites and ribbons: its triangles; the
         // adapter compares its own translation).
         std::vector<std::vector<ps2x::native::Vertex>> checkStrips;

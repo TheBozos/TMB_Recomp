@@ -45,54 +45,45 @@ What it reads:
   packet comes in sections, each closed by STCYCL 4,4 and NOPs to the quadword (the chain sends the bones again
   before each); the next starts with its pool's S-32 @180. A bone offset is 4 quadwords per bone: bone = offset / 4.
 
-The pack, all little-endian:
-  "TMBMESH5", u32 file count, then per file:
-    u16 name length, name (upper case, no directory, e.g. "JUNKYARD.NGP"), u32 image size (inflated), u32 image CRC32,
-    u32 object count, then per object (sorted by offset):
-      u32 offset (obj - 0x980000 in the image), u32 kind (0 rigid, 1 pool-less, 2 sprite, 3 ribbon, 4 skinned),
-      u64 flags (obj+8), f32[4] bounding sphere (obj+0x10), u16 ntex, u16[5] texture numbers (obj+0x50),
-      u32 pool object (pool-less: the offset of the object whose pool it uses, else 0xffffffff),
-      u32 position count, u32 has aux, then per position f32 x, y, z, w (pools: w = 0; inline points: their w),
-        then, if has aux, per position f32 x, y, z, 0 (the @373 block; 0 where none),
-      u32 pool source count, then per pool the object uses: u32 the image offset of its x, y, z floats (V3-32 @181
-        data: the runtime reads the positions there, where a game that moves a mesh's vertices writes them;
-        0xffffffff when they are not in one piece), u32 its first position, u32 its position count, u32 its vertex
-        pass (the MSCAL after it, as a VU1 address: 0x00 rigid, 0x10 morph), u32 the image offset of its morph deltas'
-        x, y, z floats (V3-32 @373 data; 0xffffffff: none, or not in one piece: the aux block has them),
-      u32 parameter count, then per parameter u32 the index of the strip it comes before, f32[4],
-      u32 skin vertex count (skinned: one per position, else 0), then per skin vertex 20 bytes: u8 bones (the vertex
-        pass's: 1, 2, 3), u8 normal x, y, z (n = 1 - b / 128), u8 bone 0, 1, 2 (the matrix index), u8 pad, i32 weight
-        0, 1, 2 (/ 65536; one bone: unweighted),
-      u32 strip count, then per strip:
-        u16 prim (GIF PRIM, 11 bits), u16 gif flags (bit 0 PRE, bit 1 EOP), u32 material header (GIF tag word 3),
-        i32 texture slot ((w3 - 1) / 3, -1 = keep the current texture), u32 vertex count, then per vertex 16 bytes:
-          u16 position index (into the object's positions), u8 normal x, y, z (raw bytes: n = 1 - b / 128 for the
-          directional modes, (b - 128) / 127 for point lights; 0 for inline points), u8 flags (bit 0 inline point,
-          bit 1 ADC: skip the triangle this vertex closes, never set by TMB's strips, bit 2 a corner the VU program
-          expands from its point: corner = the vertex's index in the strip),
-          u8 r, g, b, a, s16 s, t (4.12: st = s / 4096 plus the object's UV scroll), u16 pad.
-    then u32 GS context count, per context (sorted by offset): u32 offset (its block in the image: FLUSH, DIRECT n, a
-      GIF tag of A+D writes; hierTraverseAsm's s4 for the objects under a node, which pktAddVu1ObjAsm sends in their
-      header), u32 write count, per write u32 GS register (ALPHA_1, TEST_1, ZBUF_1 only), u64 value.
+The pack is the fork's generic mesh pack (PS2Recomp/tools/native_pack/mesh.py, PS2XMSH1; the runtime's loader is
+ps2x::native::packs::MeshPack, PS2Recomp/docs/native_packs.md): one file per NGP file (its name upper case, no
+directory, e.g. "JUNKYARD.NGP"; the image's size and CRC32 inflated), one object per hierobject keyed by its offset
+(obj - 0x980000 in the image). What TMB puts in it:
+  kind: 0 rigid, 1 pool-less, 2 sprite, 3 ribbon, 4 skinned.
+  attributes (40 bytes): u64 flags (obj+8), f32[4] bounding sphere (obj+0x10), u16 ntex, u16[5] texture numbers
+    (obj+0x50), u32 pool object (pool-less: the offset of the object whose pool it uses, else 0xffffffff).
+  positions: per position x, y, z, w (pools: w = 0; inline points: their w).
+  sections:
+    "AUX " per position f32 x, y, z, 0 (the @373 block, the morph deltas; 0 where none): only when one is not 0.
+    "SRCS" per pool the object uses (20 bytes): u32 the image offset of its x, y, z floats (V3-32 @181 data: the
+      runtime reads the positions there, where a game that moves a mesh's vertices writes them; 0xffffffff when they
+      are not in one piece), u32 its first position, u32 its position count, u32 its vertex pass (the MSCAL after it,
+      as a VU1 address: 0x00 rigid, 0x10 morph), u32 the image offset of its morph deltas' x, y, z floats (V3-32 @373
+      data; 0xffffffff: none, or not in one piece: the aux block has them).
+    "PRMS" per parameter batch (20 bytes): u32 the index of the strip it comes before, f32[4].
+    "SKIN" per position of a skinned object (20 bytes): u8 bones (the vertex pass's: 1, 2, 3), u8 normal x, y, z
+      (n = 1 - b / 128), u8 bone 0, 1, 2 (the matrix index), u8 pad, i32 weight 0, 1, 2 (/ 65536; one bone: unweighted).
+  strips: prim (GIF PRIM), gif flags (bit 0 PRE, bit 1 EOP), material (GIF tag word 3), texture slot ((w3 - 1) / 3,
+    -1 = keep the current texture), then per vertex: the position index, the normal bytes (raw: n = 1 - b / 128 for
+    the directional modes, (b - 128) / 127 for point lights; 0 for inline points), flags (1 inline point, 2 ADC: never
+    set by TMB's strips, 4 a corner the VU program expands from its point: corner = the vertex's index in the strip),
+    r, g, b, a, s, t (4.12: st = s / 4096 plus the object's UV scroll).
+  register blocks: the image's GS context blocks (FLUSH, DIRECT n, a GIF tag of A+D writes; hierTraverseAsm's s4 for
+    the objects under a node, which pktAddVu1ObjAsm sends in their header), their writes to ALPHA_1, TEST_1, ZBUF_1.
 """
 import os
 import struct
 import sys
 import zlib
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'PS2Recomp', 'tools'))
+from native_pack import mesh as native_mesh  # noqa: E402
+from native_pack.ps2 import UNPACK_FORMATS, u16, u32, vif_codes, dma_chain, chain_stream, image_offset  # noqa: E402,F401
+from native_pack.ps2 import find_gs_register_blocks  # noqa: E402
+
 LINK = 0x980000
 RIGID, POOLLESS, SPRITE, RIBBON, SKINNED = range(5)
 KIND_NAMES = ['rigid', 'pool-less', 'sprite', 'ribbon', 'skinned']
-UNPACK_FORMATS = {0: 'S-32', 1: 'S-16', 2: 'S-8', 4: 'V2-32', 5: 'V2-16', 6: 'V2-8', 8: 'V3-32', 9: 'V3-16',
-                  10: 'V3-8', 12: 'V4-32', 13: 'V4-16', 14: 'V4-8', 15: 'V4-5'}
-
-
-def u16(data, at):
-    return struct.unpack_from('<H', data, at)[0]
-
-
-def u32(data, at):
-    return struct.unpack_from('<I', data, at)[0]
 
 
 def load_image(path):
@@ -125,60 +116,9 @@ def find_objects(image, pointers):
     return sorted(set(found))
 
 
-def unpack_size(fmt, count):
-    vn, vl = (fmt >> 2) & 3, fmt & 3
-    return ((32, 16, 8, 5)[vl] * (vn + 1) * count + 31) // 32 * 4
-
-
-def vif_codes(data, pos, end):
-    """The VIF codes in data[pos:end]: (offset, cmd, num, imm, payload offset)."""
-    while pos + 4 <= end:
-        code = u32(data, pos)
-        cmd, num, imm = (code >> 24) & 0x7f, (code >> 16) & 0xff, code & 0xffff
-        at = pos
-        pos += 4
-        if cmd >= 0x60:
-            count = num or 256
-            yield at, cmd, count, imm, pos
-            pos += unpack_size(cmd & 0xf, count)
-        elif cmd in (0x50, 0x51):
-            yield at, cmd, imm or 65536, imm, pos
-            pos += (imm or 65536) * 16
-        elif cmd == 0x4a:
-            yield at, cmd, num or 256, imm, pos
-            pos += (num or 256) * 8
-        elif cmd in (0x30, 0x31):
-            yield at, cmd, 0, imm, pos
-            pos += 16
-        elif cmd == 0x20:
-            yield at, cmd, 0, imm, pos
-            pos += 4
-        else:
-            yield at, cmd, num, imm, pos
-
-
 def packet_segments(image, start):
     """The DMA chain from start: [(VIF bytes, their offset in the image)] (the tag's two VIF codes first)."""
-    segments = []
-    at = start
-    for _ in range(256):
-        lo, addr = u32(image, at), u32(image, at + 4)
-        qwc, tag = lo & 0xffff, (lo >> 28) & 7
-        segments.append((image[at + 8:at + 16], at + 8))
-        if tag in (3, 4):  # REF / REFS
-            segments.append((image[addr - LINK:addr - LINK + qwc * 16], addr - LINK))
-            at += 16
-        elif tag in (1, 6, 7):  # CNT / RET / END
-            segments.append((image[at + 16:at + 16 + qwc * 16], at + 16))
-            if tag != 1:
-                return segments
-            at += 16 + qwc * 16
-        elif tag == 2:  # NEXT
-            segments.append((image[at + 16:at + 16 + qwc * 16], at + 16))
-            at = addr - LINK
-        else:
-            raise ValueError(f'DMA tag {tag} at {at:#x}')
-    raise ValueError(f'DMA chain from {start:#x} does not end')
+    return dma_chain(image, start, LINK)
 
 
 def packet_stream(image, obj):
@@ -189,20 +129,7 @@ def packet_stream(image, obj):
 
 def packet_stream_mapped(image, obj):
     """The same, with where each piece of it is in the image: (stream, [(stream offset, image offset, length)])."""
-    pieces, at = [], 0
-    segments = packet_segments(image, obj + 0x70 + 0x30 * u16(image, obj + 0x5a))
-    for data, offset in segments:
-        pieces.append((at, offset, len(data)))
-        at += len(data)
-    return b''.join(data for data, _ in segments), pieces
-
-
-def image_offset(pieces, at, length):
-    """The image offset of stream bytes [at, at + length) when one piece holds them all, else None."""
-    for start, offset, size in pieces:
-        if start <= at and at + length <= start + size:
-            return offset + at - start
-    return None
+    return chain_stream(image, obj + 0x70 + 0x30 * u16(image, obj + 0x5a), LINK)
 
 
 class Strip:
@@ -545,67 +472,33 @@ GS_CONTEXT_REGISTERS = {0x42, 0x47, 0x4e}  # ALPHA_1, TEST_1, ZBUF_1: what the h
 
 
 def find_contexts(image):
-    """The GS context blocks in an image: FLUSH, DIRECT / DIRECTHL n in a quadword's upper words (its lower two 0), then a
-    PACKED GIF tag (NREG 1, A+D) of NLOOP <= n - 1 writes to GS registers. hierTraverseAsm keeps one per subtree (s4)
-    and pktAddVu1ObjAsm copies it into an object's header when it changed. Returns [(offset, [(address, value)])],
-    the writes those of GS_CONTEXT_REGISTERS."""
-    found = []
-    at = image.find(b'\x00\x00\x00\x11')
-    while at >= 0:
-        o = at - 8
-        if o >= 0 and o % 16 == 0 and o + 32 <= len(image):
-            w0, w1, _, code = struct.unpack_from('<4I', image, o)
-            tag, regs = struct.unpack_from('<QQ', image, o + 16)
-            nloop, flg, nreg = tag & 0x7fff, (tag >> 58) & 3, (tag >> 60) & 0xf
-            n = code & 0xffff
-            if (w0 == 0 and w1 == 0 and (code >> 24) & 0x7e == 0x50 and flg == 0 and nreg == 1 and regs & 0xf == 0xe
-                    and 0 < nloop and nloop + 1 <= n and o + 32 + nloop * 16 <= len(image)):
-                writes = []
-                ok = True
-                for q in range(nloop):
-                    value, address = struct.unpack_from('<QQ', image, o + 32 + q * 16)
-                    if address > 0x63:
-                        ok = False
-                        break
-                    if address in GS_CONTEXT_REGISTERS:
-                        writes.append((address, value))
-                if ok:
-                    found.append((o, writes))
-        at = image.find(b'\x00\x00\x00\x11', at + 1)
-    return found
+    """The GS context blocks in an image (the fork's find_gs_register_blocks: FLUSH, DIRECT / DIRECTHL n, then a PACKED
+    GIF tag of A+D writes). hierTraverseAsm keeps one per subtree (s4) and pktAddVu1ObjAsm copies it into an object's
+    header when it changed. Returns [(offset, [(address, value)])], the writes those of GS_CONTEXT_REGISTERS."""
+    return find_gs_register_blocks(image, keep=GS_CONTEXT_REGISTERS)
 
 
 def write_pack(out_path, files):
-    with open(out_path, 'wb') as out:
-        out.write(b'TMBMESH5')
-        out.write(struct.pack('<I', len(files)))
-        for name, image, meshes in files:
-            encoded = name.encode()
-            out.write(struct.pack('<H', len(encoded)) + encoded)
-            out.write(struct.pack('<III', len(image), zlib.crc32(image) & 0xffffffff, len(meshes)))
-            for m in meshes:
-                out.write(struct.pack('<IIQ4fH5HI', m.offset, m.kind, m.flags, *m.sphere, *m.textures, m.pool_from))
-                has_aux = any(a != (0.0, 0.0, 0.0, 0.0) for a in m.aux)
-                out.write(struct.pack('<II', len(m.positions), int(has_aux)))
-                out.write(b''.join(struct.pack('<4f', *p) for p in m.positions))
-                if has_aux:
-                    out.write(b''.join(struct.pack('<4f', *a) for a in m.aux))
-                out.write(struct.pack('<I', len(m.sources)))
-                out.write(b''.join(struct.pack('<IIIII', *src) for src in m.sources))
-                out.write(struct.pack('<I', len(m.params)))
-                out.write(b''.join(struct.pack('<I4f', i, *q) for i, q in m.params))
-                out.write(struct.pack('<I', len(m.skin)))
-                out.write(b''.join(struct.pack('<8B3i', bones, *normal, *ids, 0, *weights) for bones, normal, ids, weights in m.skin))
-                out.write(struct.pack('<I', len(m.strips)))
-                for prim, gif_flags, w3, slot, vertices in m.strips:
-                    out.write(struct.pack('<HHIiI', prim, gif_flags, w3, slot, len(vertices)))
-                    out.write(b''.join(struct.pack('<H4B4B2hH', v[0], v[1], v[2], v[3], v[4], *v[5], v[6], v[7], 0)
-                                       for v in vertices))
-            contexts = find_contexts(image)
-            out.write(struct.pack('<I', len(contexts)))
-            for offset, writes in contexts:
-                out.write(struct.pack('<II', offset, len(writes)))
-                out.write(b''.join(struct.pack('<IQ', a, v) for a, v in writes))
+    pack = native_mesh.MeshPackWriter()
+    for name, image, meshes in files:
+        f = pack.add_file(name, image)
+        for m in meshes:
+            o = f.add_object(m.offset, m.kind, struct.pack('<Q4fH5HI', m.flags, *m.sphere, *m.textures, m.pool_from))
+            o.positions = m.positions
+            if any(a != (0.0, 0.0, 0.0, 0.0) for a in m.aux):
+                o.add_section(b'AUX ', b''.join(struct.pack('<4f', *a) for a in m.aux))
+            if m.sources:
+                o.add_section(b'SRCS', b''.join(struct.pack('<IIIII', *src) for src in m.sources))
+            if m.params:
+                o.add_section(b'PRMS', b''.join(struct.pack('<I4f', i, *q) for i, q in m.params))
+            if m.skin:
+                o.add_section(b'SKIN', b''.join(struct.pack('<8B3i', bones, *normal, *ids, 0, *weights)
+                                                for bones, normal, ids, weights in m.skin))
+            for prim, gif_flags, w3, slot, vertices in m.strips:
+                o.add_strip(prim, gif_flags, w3, slot, vertices)
+        for offset, writes in find_contexts(image):
+            f.add_register_block(offset, writes)
+    pack.write(out_path)
 
 
 def ngp_files(game):

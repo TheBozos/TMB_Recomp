@@ -15,47 +15,25 @@ What it reads:
   the T8H / T4HL / T4HH textures (pixels at +0x80) and the palettes (entries at +0x10).
 - the font (fontDmaFontData's sources in the ELF: a 128 x 128 T4 raster, a 16-entry CT32 palette).
 
-The pack: "TMBTEX1\\0", a file count, then per file its name (upper case, no directory), its record count and each
-record: psm, width, height, then its texels unpacked (indexed formats one byte per texel, CT32 four bytes, CT24 four
-bytes with alpha 0, CT16 two bytes), each record's byte count before them.
+The pack is the fork's generic texture pack (PS2Recomp/tools/native_pack/texture.py, PS2XTEX1; the runtime's loader
+and decoders are ps2x::native::packs, PS2Recomp/docs/native_packs.md): per file its name (upper case, no directory)
+and its records in the order the game sets them up (the runtime's key scheme counts them so), each psm, width, height
+and its texels unpacked; the font as the file "FONT" (its raster, then its palette).
 """
 import os
 import struct
 import sys
 import zlib
 
-CT32, CT24, CT16, CT16S, T8, T4, T8H, T4HL, T4HH = 0x00, 0x01, 0x02, 0x0a, 0x13, 0x14, 0x1b, 0x24, 0x2c
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'PS2Recomp', 'tools'))
+from native_pack import texture as native_texture  # noqa: E402
+from native_pack.texture import bits, unpack_texels  # noqa: E402,F401
+from native_pack.ps2 import u32, elf_bytes  # noqa: E402
+
+CT32, CT24, CT16, CT16S, T8, T4, T8H, T4HL, T4HH = (native_texture.PSMCT32, native_texture.PSMCT24, native_texture.PSMCT16,
+                                                    native_texture.PSMCT16S, native_texture.PSMT8, native_texture.PSMT4,
+                                                    native_texture.PSMT8H, native_texture.PSMT4HL, native_texture.PSMT4HH)
 FONT = {'SCUS_971.01': (0x22aba0, 0x22ab60), 'SCES_503.60': (0x22be20, 0x22bde0)}
-
-
-def u32(data, at):
-    return struct.unpack_from('<I', data, at)[0]
-
-
-def unpack_texels(psm, raw, width, height):
-    count = width * height
-    if psm in (T8, T8H):
-        return bytes(raw[:count])
-    if psm in (T4, T4HL, T4HH):
-        out = bytearray(count)
-        for i in range(count):
-            byte = raw[i >> 1]
-            out[i] = (byte >> 4) if i & 1 else (byte & 0xf)
-        return bytes(out)
-    if psm == CT32:
-        return bytes(raw[:count * 4])
-    if psm == CT24:
-        out = bytearray(count * 4)
-        for i in range(count):
-            out[i * 4:i * 4 + 3] = raw[i * 3:i * 3 + 3]
-        return bytes(out)
-    if psm in (CT16, CT16S):
-        return bytes(raw[:count * 2])
-    raise ValueError(f'psm {psm:#x}')
-
-
-def bits(psm):
-    return {CT32: 32, CT24: 24, CT16: 16, CT16S: 16, T8: 8, T8H: 8}.get(psm, 4)
 
 
 def record_size(data, rec, texels_at):
@@ -74,11 +52,7 @@ def record(data, rec, texels_at):
     psm = fmt & 0x3f
     width, height = 1 << ((fmt >> 8) & 0xf), 1 << ((fmt >> 12) & 0xf)
     size = record_size(data, rec, texels_at)
-    raw = data[rec + texels_at:rec + size]
-    need = (width * height * bits(psm) + 7) // 8
-    if len(raw) < need:  # a palette smaller than its format's size: what is there
-        raw = raw + bytes(need - len(raw))
-    return psm, width, height, unpack_texels(psm, raw, width, height)
+    return native_texture.record(psm, width, height, data[rec + texels_at:rec + size])  # a short palette: zeros after it
 
 
 def walk(data, first, texels_at):
@@ -118,17 +92,6 @@ def rtx_records(path):
     return out
 
 
-def elf_bytes(path, address, size):
-    elf = open(path, 'rb').read()
-    phoff, phentsize, phnum = u32(elf, 0x1c), struct.unpack_from('<H', elf, 0x2a)[0], struct.unpack_from('<H', elf, 0x2c)[0]
-    for i in range(phnum):
-        p = phoff + i * phentsize
-        offset, vaddr, filesz = u32(elf, p + 4), u32(elf, p + 8), u32(elf, p + 16)
-        if vaddr <= address and address + size <= vaddr + filesz:
-            return elf[offset + address - vaddr:offset + address - vaddr + size]
-    raise ValueError(f'{address:#x} not in the ELF')
-
-
 def main():
     game, elf, out_path = sys.argv[1:4]
     files = []
@@ -142,15 +105,11 @@ def main():
     pixels_at, palette_at = FONT[os.path.basename(elf).upper()]
     font = unpack_texels(T4, elf_bytes(elf, pixels_at, 128 * 64), 128, 128)
     files.append(('FONT', [(T4, 128, 128, font), (CT32, 8, 2, elf_bytes(elf, palette_at, 64))]))
-    with open(out_path, 'wb') as out:
-        out.write(b'TMBTEX1\0')
-        out.write(struct.pack('<I', len(files)))
-        for name, records in files:
-            encoded = name.encode()
-            out.write(struct.pack('<H', len(encoded)) + encoded + struct.pack('<I', len(records)))
-            for psm, width, height, texels in records:
-                out.write(struct.pack('<IIII', psm, width, height, len(texels)) + texels)
-    print(f'{out_path}: {len(files)} files, {sum(len(r) for _, r in files)} records')
+    pack = native_texture.TexturePackWriter()
+    for name, records in files:
+        pack.add_file(name, records)
+    pack.write(out_path)
+    print(f'{out_path}: {len(files)} files, {pack.record_count()} records')
 
 
 if __name__ == '__main__':

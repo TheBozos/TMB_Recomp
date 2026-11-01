@@ -12,11 +12,15 @@
 // << 31 per id, word 1 of 4) has there, CBP -> the palette loaded at that block.
 //
 // Each hook checks the pack record against the game's own arguments (format, size) and reports a mismatch.
+//
+// The pack's container, its loader and the decoders (PSM, CSM1 palettes, TEXA alpha) are the fork's
+// (runtime/native/native_texture_pack.h, tools/native_pack/texture.py); what is TMB's here is the key scheme above.
 
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
 #include "runtime/native/native_texture_cache.h"
+#include "runtime/native/native_texture_pack.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -54,24 +58,17 @@ namespace tmb::textures
         constexpr uint32_t kResLoadReturn = 0x001F8AB4u; // texmLoadResTexture's call of sceGsSetDefLoadImage
         constexpr uint32_t kFontInit = 0x001C3E48u;
 
-        enum : uint32_t
-        {
-            CT32 = 0x00, CT24 = 0x01, CT16 = 0x02, CT16S = 0x0a, T8 = 0x13, T4 = 0x14, T8H = 0x1b, T4HL = 0x24, T4HH = 0x2c
-        };
-        bool isH(uint32_t psm) { return psm == T8H || psm == T4HL || psm == T4HH; }
-        bool indexed(uint32_t psm) { return psm == T8 || psm == T4 || isH(psm); }
-
-        struct Record
-        {
-            uint32_t psm = 0, width = 0, height = 0;
-            std::vector<uint8_t> texels; // indexed: a byte per texel; CT32 / CT24: 4 bytes; CT16: 2 bytes
-        };
+        using ps2x::native::packs::psmIndexed;
+        using ps2x::native::packs::psmIsH;
+        using Record = ps2x::native::packs::TextureRecord;
+        bool isH(uint32_t psm) { return psmIsH(psm); }
+        bool indexed(uint32_t psm) { return psmIndexed(psm); }
 
         struct Store
         {
             std::mutex mutex;
             bool loaded = false;
-            std::unordered_map<std::string, std::vector<Record>> pack; // file name -> its records in order
+            ps2x::native::packs::TexturePack pack; // file name -> its records in order
             std::unordered_map<uint32_t, std::string> nameAt;          // destination -> the disc file read there
             std::vector<std::string> texFiles, resFiles;               // the level's, in the game's order
             uint32_t texOrdinal = 0, resOrdinal = 0;
@@ -104,38 +101,12 @@ namespace tmb::textures
             const char *path = std::getenv("TMB_TEXTURE_PACK");
             if (!path || !*path)
                 path = TMB_TEXTURE_PACK;
-            std::ifstream in(path, std::ios::binary);
-            char magic[8] = {};
-            uint32_t files = 0;
-            if (!in.read(magic, 8) || std::memcmp(magic, "TMBTEX1", 8) != 0 || !in.read(reinterpret_cast<char *>(&files), 4))
+            if (!s.pack.load(path))
             {
                 std::fprintf(stderr, "[tmb:tex] no texture pack at %s (tools/tmb_texture_pack.py): the native draws are untextured\n", path);
                 return;
             }
-            size_t records = 0;
-            for (uint32_t f = 0; f < files; ++f)
-            {
-                uint16_t length = 0;
-                in.read(reinterpret_cast<char *>(&length), 2);
-                std::string name(length, '\0');
-                in.read(name.data(), length);
-                uint32_t count = 0;
-                in.read(reinterpret_cast<char *>(&count), 4);
-                std::vector<Record> &list = s.pack[name];
-                list.resize(count);
-                for (Record &r : list)
-                {
-                    uint32_t header[4];
-                    in.read(reinterpret_cast<char *>(header), 16);
-                    r.psm = header[0];
-                    r.width = header[1];
-                    r.height = header[2];
-                    r.texels.resize(header[3]);
-                    in.read(reinterpret_cast<char *>(r.texels.data()), header[3]);
-                }
-                records += count;
-            }
-            std::fprintf(stderr, "[tmb:tex] texture pack %s: %u files, %zu records\n", path, files, records);
+            std::fprintf(stderr, "[tmb:tex] texture pack %s: %zu files, %zu records\n", path, s.pack.fileCount(), s.pack.recordCount());
         }
 
         // "cdrom0:\LVL\JUNKYARD.TEX;1" -> "JUNKYARD.TEX"
@@ -158,16 +129,7 @@ namespace tmb::textures
         // The n-th record of the listed files.
         const Record *nth(Store &s, const std::vector<std::string> &files, uint32_t n)
         {
-            for (const std::string &file : files)
-            {
-                const auto it = s.pack.find(file);
-                if (it == s.pack.end())
-                    return nullptr;
-                if (n < it->second.size())
-                    return &it->second[n];
-                n -= static_cast<uint32_t>(it->second.size());
-            }
-            return nullptr;
+            return s.pack.nth(files, n);
         }
 
         void mismatch(const char *what, uint32_t n, const Record *r, uint32_t psm, uint32_t width, uint32_t height)
@@ -355,32 +317,10 @@ namespace tmb::textures
             fontInit__F10_vramAddrs_0x1c3e48(rdram, ctx, runtime);
         }
 
-        uint32_t fromCt16(uint32_t c, uint64_t texa)
-        {
-            const uint32_t r = (c & 0x1fu) << 3, g = ((c >> 5) & 0x1fu) << 3, b = ((c >> 10) & 0x1fu) << 3;
-            const uint32_t ta0 = texa & 0xffu, ta1 = (texa >> 32) & 0xffu;
-            const bool aem = (texa >> 15) & 1u;
-            const uint32_t a = (c & 0x8000u) ? ta1 : ((aem && (c & 0x7fffu) == 0u) ? 0u : ta0);
-            return r | (g << 8) | (b << 16) | (a << 24);
-        }
         // A record's entry as RGBA with the GS's alpha (0x80 is 1.0), as ps2x::native::TextureCache gives it.
         uint32_t colour(const Record &r, uint32_t index, uint64_t texa)
         {
-            if (r.psm == CT16 || r.psm == CT16S)
-            {
-                uint16_t c;
-                std::memcpy(&c, r.texels.data() + index * 2u, 2);
-                return fromCt16(c, texa);
-            }
-            uint32_t c;
-            std::memcpy(&c, r.texels.data() + index * 4u, 4);
-            if (r.psm == CT24)
-            {
-                const bool aem = (texa >> 15) & 1u;
-                const uint32_t a = (aem && (c & 0xffffffu) == 0u) ? 0u : static_cast<uint32_t>(texa & 0xffu);
-                return (c & 0xffffffu) | (a << 24);
-            }
-            return c;
+            return ps2x::native::packs::recordColour(r, index, texa);
         }
     }
 
@@ -417,10 +357,12 @@ namespace tmb::textures
             const uint32_t height = 1u << std::min<uint32_t>(10u, (tex0 >> 30) & 0xfu);
 
             const Record *texels = nullptr, *palette = nullptr;
-            if (tbp == s.fontTbp && s.pack.count("FONT"))
+            const std::vector<Record> *font = s.pack.file("FONT");
+            const Record *fontPalette = font && font->size() > 1u ? &(*font)[1] : nullptr;
+            if (tbp == s.fontTbp && font)
             {
-                texels = &s.pack["FONT"][0];
-                palette = &s.pack["FONT"][1];
+                texels = &(*font)[0];
+                palette = fontPalette;
             }
             else if (isH(psm))
             {
@@ -464,7 +406,7 @@ namespace tmb::textures
                 for (uint32_t i = 0; i < 16u && !paletteFound; ++i)
                 {
                     uint32_t px = 0, py = 0;
-                    ps2x::native::csm1Position(psm == T8 || psm == T8H ? i : (csa * 16u + i) & 0xffu, px, py);
+                    ps2x::native::csm1Position(ps2x::native::packs::psmEightBit(psm) ? i : (csa * 16u + i) & 0xffu, px, py);
                     paletteFound = paletteEntry(px, py, ignored);
                 }
                 if (const auto it = s.byBlock.find(cbp); it != s.byBlock.end())
@@ -491,39 +433,23 @@ namespace tmb::textures
 
             uint32_t colours[256] = {};
             if (indexed(psm))
-            {
-                const bool eight = psm == T8 || psm == T8H;
-                for (uint32_t i = 0; i < (eight ? 256u : 16u); ++i)
-                {
-                    uint32_t px = 0, py = 0;
-                    ps2x::native::csm1Position(eight ? i : (csa * 16u + i) & 0xffu, px, py);
-                    if (palette == &s.pack["FONT"][1] && !s.pack["FONT"].empty())
-                    {
-                        if (px < palette->width && py < palette->height)
-                            colours[i] = colour(*palette, py * palette->width + px, texa);
-                    }
-                    else
-                        paletteEntry(px, py, colours[i]);
-                }
-            }
+                ps2x::native::packs::csm1Palette(psm, csa,
+                                                 [&](uint32_t px, uint32_t py, uint32_t &out)
+                                                 {
+                                                     if (palette && palette == fontPalette)
+                                                     {
+                                                         if (px < palette->width && py < palette->height)
+                                                             out = colour(*palette, py * palette->width + px, texa);
+                                                     }
+                                                     else
+                                                         paletteEntry(px, py, out);
+                                                 },
+                                                 colours);
 
             Texture texture;
-            texture.width = width;
-            texture.height = height;
             texture.key = key;
             texture.version = ++s.decodes;
-            texture.rgba.resize(static_cast<size_t>(width) * height);
-            for (uint32_t y = 0; y < height; ++y)
-                for (uint32_t x = 0; x < width; ++x)
-                {
-                    uint32_t c = 0;
-                    if (x < texels->width && y < texels->height)
-                    {
-                        const uint32_t at = y * texels->width + x;
-                        c = indexed(psm) ? colours[texels->texels[at]] : colour(*texels, at, texa);
-                    }
-                    texture.rgba[static_cast<size_t>(y) * width + x] = c;
-                }
+            ps2x::native::packs::decodeRecord(texture, width, height, psm, *texels, colours, texa);
             // A texture with no texel showing: reported once (a palette or texels taken from the wrong record).
             if (std::all_of(texture.rgba.begin(), texture.rgba.end(), [](uint32_t c) { return (c >> 24) == 0u; }))
             {
@@ -582,10 +508,10 @@ namespace tmb::textures
         std::lock_guard<std::mutex> lock(s.mutex);
         loadPack(s);
         static std::shared_ptr<const Texture> s_font;
-        const auto it = s.pack.find("FONT");
-        if (s_font || it == s.pack.end() || it->second.size() < 2u)
+        const std::vector<Record> *records = s.pack.file("FONT");
+        if (s_font || !records || records->size() < 2u)
             return s_font;
-        const Record &texels = it->second[0], &palette = it->second[1];
+        const Record &texels = (*records)[0], &palette = (*records)[1];
         Texture texture;
         texture.width = texels.width;
         texture.height = texels.height;

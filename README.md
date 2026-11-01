@@ -226,6 +226,7 @@ key positions):
 | Variable | Effect |
 |---|---|
 | `TMB_NATIVE=1` | The native port: the native renderer, the GS native back end at 2x, the recompiled IOP modules, the SPU2 and IOP on the PC's clock (`scripts/run_native.sh` sets it; each part has its own switch below) |
+| `TMB_NATIVE_FRAME=0` | The native draws go into the GS front end's frame, which presents it, instead of the native renderer presenting its own frame |
 | `TMB_NATIVE_MESHES=0` | The rigid 3D objects back on the VIF stream's translation instead of the mesh pack (`TMB_NATIVE_MESHES_CHECK=1`: compare the two) |
 | `TMB_NATIVE_PARTICLES=0` | The particles back on the game's own packets (`TMB_NATIVE_PARTICLE_TYPES=1,2,3`: which types are native; `TMB_NATIVE_PARTICLES_TOGGLE=<s>`: alternate, for an A/B) |
 | `TMB_NATIVE_FRAMES=0` | Frames on the emulated vblanks instead of the PC clock |

@@ -3068,10 +3068,10 @@ namespace tmb::native
             ps2x::native::setDirectGate(&directDrawnNatively);
             // In the GS stream where VU1's output would have been (with PS2X_GS_RENDERER=native: particles, the 2D
             // and the other GS draws sort with the 3D); with other GS renderers present() draws over the GS frame.
-            // TMB_NATIVE_FRAME=1: the native renderer's own frame instead (its targets, presented by it), the GS front end
-            // left out of it.
+            // The native renderer's own frame (its targets, presented by it), the GS front end left out of it;
+            // TMB_NATIVE_FRAME=0: drawn into the GS front end's frame instead.
             const char *own = std::getenv("TMB_NATIVE_FRAME");
-            const bool ownFrame = own && *own == '1';
+            const bool ownFrame = !(own && *own == '0');
             ps2x::native::Renderer::instance().setStreamDraws(!ownFrame);
             ps2x::native::Renderer::instance().setPresentsAlone(ownFrame);
         }

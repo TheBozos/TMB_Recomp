@@ -20,6 +20,7 @@
 #include "runtime/native/native_vu1_sandbox.h"
 #include "runtime/ps2_memory.h"
 #include "tmb_region.h" // TMB_REGION_US / TMB_REGION_PAL
+#include "runtime/native/native_gs_hook.h"
 #include "tmb_meshes.h"
 #include "tmb_vu1_shading.h"
 
@@ -3072,6 +3073,9 @@ namespace tmb::native
             const bool ownFrame = !(own && *own == '0');
             ps2x::native::Renderer::instance().setStreamDraws(!ownFrame);
             ps2x::native::Renderer::instance().setPresentsAlone(ownFrame);
+            // Presenting alone, the GS front end draws nothing (TMB_GS_HEADLESS=0: it still draws its unseen frame).
+            const char *headless = std::getenv("TMB_GS_HEADLESS");
+            ps2x::native::setGsHeadless(ownFrame && !(headless && *headless == '0'));
         }
     }
 

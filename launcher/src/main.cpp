@@ -926,7 +926,11 @@ static void drawReady(App &app, float inner)
             app.startBuild();
     }
     std::string newVersion, page;
-    if (app.updates.get(&newVersion, &page) == UpdateCheck::State::Available && newVersion != app.sourceVersion)
+    // One note at a time (both do not fit the card at the window's smallest size): Rebuild first; the footer and
+    // Maintenance still say a newer release is out.
+    const bool rebuildShown = built && !app.cfg.buildPending && app.codeChanged() && !app.building;
+    if (!rebuildShown && app.updates.get(&newVersion, &page) == UpdateCheck::State::Available &&
+        newVersion != app.sourceVersion)
     {
         gap(12);
         std::string what = std::string(L("Version ", "La version ")) + newVersion + L(" is available.", " est disponible.");

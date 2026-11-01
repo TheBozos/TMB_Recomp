@@ -56,7 +56,8 @@ Release: `TMB_Recomp-<version>.zip`, SHA-256 `<from the .sha256>`, commit `<comm
       now**; after it, the notice is gone, the memory cards (`%APPDATA%\TMB_Recomp\mc0`, `mc1`) and settings are
       unchanged, the game plays.
 - [ ] Uninstall: delete the release folder, then `%APPDATA%\TMB_Recomp`: nothing else was written (no registry, no
-      Start menu entry, no other folder: check `%LOCALAPPDATA%`, `%TEMP%`).
+      Start menu entry, no other folder: check `%LOCALAPPDATA%`, `%TEMP%`; `%ProgramData%\TMB_Recomp\paths` empty or
+      absent: the junctions of a non-ASCII path are removed after each build).
 
 ## Before publishing
 
@@ -67,4 +68,26 @@ Release: `TMB_Recomp-<version>.zip`, SHA-256 `<from the .sha256>`, commit `<comm
 
 ## Results on the development PC
 
-RESULTS_PLACEHOLDER
+2026-11-01, Windows 10 Home 22H2 (16 threads, 1920 x 1080 at 100 %), not a clean PC: what could be checked here.
+Release `TMB_Recomp-0.1.0-test.zip` (commit ac63080, fork 1466e9d, SHA-256
+`8fc2cb3713f171d9493646587c83c21944221868d5e719da0410bfa0aaaeb214`), then `0.1.1-test` (commit 29179f4) over it.
+
+| Check | Result |
+|---|---|
+| SHA-256 | `Get-FileHash` equals the `.sha256` file |
+| Unzip | PowerShell's `Expand-Archive` (no Mark of the Web: SmartScreen not exercised) into `D:\tmb_rel_test\Jérôme Jeux\` (spaces and accents), 96 s |
+| Non-ASCII path with spaces | **Failed three times, fixed**: ps2_recomp could not open the ELF (UTF-8 manifest, fork), windres's preprocessor (a space in the path: bare `gcc`), ld (junctions with plain names). Then: built and played from there |
+| European disc | Refused: "This is the European disc. Only the USA disc (SCUS-97101) is supported." (launcher screenshot; `tmb_build --check` exit 1) |
+| `.bin` + `.cue` | A MODE2/2352 image made from the ISO (4.36 GB) in `D:\tmb_rel_test\bin cue Jérôme\`: `--check` OK; extract 30.9 s, `disc.iso` a copy (1 link) byte-identical to the ISO. The copy path is the one an ISO on another drive takes; no second drive here (C: has 12 GB free) |
+| ISO on the same drive | `game\disc.iso` a hard link |
+| Preparing, Stop / resume | From an empty folder 186.6 s (extract 3.4, recompile 5.2, packs 33.4, iop 2.8, configure 5.3, compile 20 + 114.4 after a stop at 40 %, stage 0.2); "Prepared in 3:07", the sum of both runs |
+| 4-core / 8 GB | Not available here (16 threads) |
+| No internet | Not unplugged. The update check pointed at a closed port: silent, no notice; the real API (no release published yet, 404): silent. The build's network use is none by construction (FetchContent fully disconnected, the kit's sources) |
+| Defender | On, no detection while unzipping, building or playing; scan time not measured |
+| Play | Boot movies and the main menu (window captures), `GS scale 1` from video.ini, closed with code 0, the launcher back |
+| Crash report | `PS2X_TEST_CRASH=25`: exit 0xC0000005, the report offered |
+| High DPI | No 150 % / 200 % display here: `--ui-scale 1.5` and `2`. The layout did not fit a 1920 x 1080 screen at 150 % (1680 x 1140): the scale is now lowered to fit (1.32), every tab readable, nothing clipped; the Maintenance rows were made fixed-height (six rows overflowed the card at 1x). A real high-DPI monitor is still to check |
+| Update notice | A local server answering as the API with `v0.2.0`: "Version 0.2.0 is available", the link `.../releases/tag/v0.2.0`, "update available" in the footer and Maintenance |
+| Rebuild after an update | 0.1.1-test unzipped over 0.1.0-test (`-Force`): "Version 0.1.1-test is installed", Rebuild now; 31.8 s (recompile, packs, iop, configure again; nothing to compile); `built_from.ini` updated; the memory card file and video.ini byte-identical before and after; played again |
+| Uninstall | Not run here; the launcher writes only the release folder and the user folder (and, for a non-ASCII path, junctions under `%ProgramData%\TMB_Recomp\paths` removed after each build) |
+| Program Files | Not run (needs administrator rights to unzip there) |

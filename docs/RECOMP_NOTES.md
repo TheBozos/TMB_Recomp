@@ -1738,12 +1738,17 @@ Unzipped into `D:\tmb_rel_test\Jérôme Jeux\`, the build failed three times bef
 
 With the three, from the unzipped release in `D:\tmb_rel_test\Jérôme Jeux\TMB_Recomp`, the launcher's selftest
 (`PS2X_USER_DIR` = `D:\tmb_rel_test\user Jérôme`, the USA ISO hard-linked as `game\disc.iso`, the European ISO
-refused, a stop at 40 % of the compile): 186.6 s to the game (extract 3.5, recompile 5, packs 33, iop 2.7, configure
-5.4, compile 20 + 114.4, stage 0.2), Play to the boot movies and the main menu (11 window captures,
+refused, a stop at 40 % of the compile): 186.6 s to the game (extract 3.4, recompile 5.2, packs 33.4, iop 2.8,
+configure 5.3, compile 20 + 114.4, stage 0.2), Play to the boot movies and the main menu (11 window captures,
 `[tmb] disc image: D:\tmb_rel_test\Jérôme Jeux\...\game\disc.iso`, no GS front end), closed with code 0;
 `PS2X_TEST_CRASH=25`: exit 0xC0000005 and the crash report offered. `C:\ProgramData\TMB_Recomp\paths` empty afterwards.
 
-UPDATE_TEST_PLACEHOLDER
+Update test: `0.1.1-test` (commit 29179f4) unzipped over the installed `0.1.0-test` (the zip's `TMB_Recomp\` folder
+replaced): the Play tab said "Version 0.1.1-test is installed" with Rebuild now; the rebuild took 31.8 s (recompile,
+packs, iop and configure again since the source changed, nothing to compile), `game\built_from.ini` moved to 29179f4,
+a memory-card file and video.ini were byte-identical before and after, the game played again. The real API (no
+release published yet) answers 404: silent. With both notes the card overflowed at the smallest window: the update
+notice now waits until the rebuild is done (the footer still says it).
 
 What is left for the owner: push the branches, tag, `make_release.py --with-sources --publish` (a draft), finish the
 notes, attach nothing else, publish; a LICENSE file at the repository's root (the code is GPL-3.0 through PS2Recomp;

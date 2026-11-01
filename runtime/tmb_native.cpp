@@ -24,7 +24,6 @@
 #include "runtime/native/native_vif1.h"
 #include "runtime/native/native_vu1_sandbox.h"
 #include "runtime/ps2_memory.h"
-#include "tmb_region.h" // TMB_REGION_US / TMB_REGION_PAL
 #include "runtime/native/native_display.h"
 #include "runtime/native/native_gs_hook.h"
 #include "tmb_meshes.h"
@@ -342,7 +341,7 @@ namespace tmb::native
         {
             if (!g_rdram)
                 return streamColour;
-            constexpr uint32_t kFogPacket = TMB_ADDR(0x004A25D0u);
+            constexpr uint32_t kFogPacket = 0x0049F5D0u;
             if (g_rdram[(kFogPacket + 8u) & 0x1ffffffu] != 0x3du)
                 return streamColour;
             uint32_t value;
@@ -574,11 +573,7 @@ namespace tmb::native
         // What the native frame starts from, as the GS frame was cleared before the views drew: the fog colour in a
         // match (where nothing is drawn, a sky left to the fog, it shows; viewGetBgColor's until fogUpdate's is known),
         // black in the menus.
-#if TMB_REGION_US
         constexpr uint32_t kBgColour = 0x004E04F0u;
-#else
-        constexpr uint32_t kBgColour = 0x004E34F0u;
-#endif
         uint32_t frameClearColour();
 
         void flush(State &s, std::vector<ps2x::native::Vertex> &triangles);
@@ -2059,7 +2054,7 @@ namespace tmb::native
             if (static const bool s_logFrameTex = std::getenv("TMB_NATIVE_LOG_FRAMETEX") != nullptr; s_logFrameTex && g_rdram)
             {
                 uint32_t displayBuffer;
-                std::memcpy(&displayBuffer, g_rdram + TMB_ADDR(0x00504014u), 4);
+                std::memcpy(&displayBuffer, g_rdram + 0x004FBBC4u, 4);
                 static uint32_t s_logged = 0;
                 if ((material.tex0 & 0x3fffu) == (displayBuffer & 0x3fffu) && s_logged++ % 200u == 0u)
                 {
@@ -2080,7 +2075,7 @@ namespace tmb::native
             if (material.textured && g_rdram)
             {
                 uint32_t displayBuffer;
-                std::memcpy(&displayBuffer, g_rdram + TMB_ADDR(0x00504014u), 4);
+                std::memcpy(&displayBuffer, g_rdram + 0x004FBBC4u, 4);
                 const uint32_t psm = (material.tex0 >> 20) & 0x3fu;
                 if ((material.tex0 & 0x3fffu) == (displayBuffer & 0x3fffu) && (psm == 0x00u || psm == 0x01u))
                 {
@@ -3043,13 +3038,8 @@ namespace tmb::native
             ps2x::native::Screen screen;
             // A match draws fields (the frame's every other line), the shell's menus whole frames.
             const float lines = menusNative() ? 2.0f : 1.0f;
-#if defined(TMB_REGION_US)
             screen.originY = 2048.0f - 112.0f * lines; // NTSC: a 640 x 224 field
             screen.height = 224.0f * lines;
-#else
-            screen.originY = 2048.0f - 128.0f * lines;
-            screen.height = 256.0f * lines;
-#endif
             // The microprograms write Z as FTOI4 of z / w, but into XYZF2 (the strips, the sprites: they carry fog),
             // whose 24-bit Z is that word over 16: GS Z is z / w itself. With 16, the adapter's scenery sat 16 times
             // nearer than the effects drawn over it, and hid most of them.

@@ -52,7 +52,6 @@
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
 #include "ps2_runtime_macros.h"
-#include "tmb_region.h"
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_texture_cache.h"
 
@@ -90,7 +89,6 @@ namespace tmb::particles
         using ps2x::native::Vertex;
         using TexturePtr = std::shared_ptr<const ps2x::native::TextureCache::Texture>;
 
-#if TMB_REGION_US
         constexpr bool kRegionSupported = true;
         constexpr float kScreenTop = 2048.0f - 112.0f; // the field's top line (640 x 224)
         constexpr uint32_t kParticleDraw = 0x1e9540u, kTexSpriteBuild = 0x1e12d8u;
@@ -151,34 +149,6 @@ namespace tmb::particles
                            kFlareWeights = 0x4f30d0u, kFlareUvs = 0x4f3118u;
         void gameLensTest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { particleLensFlareTestZbuffer__Fi_0x1dfe00(rdram, ctx, runtime); }
         void gameLensRender(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { particleLensFlareRender__FP6QwDatai_0x1e01c8(rdram, ctx, runtime); }
-#else
-        // PAL (SCES-50360): dropped (US only); the addresses would be particleDraw 0x1ea750, systems 0x690500, nodes
-        // 0x74b580, type textures 0x68f880, slots 0x68ffc0 / 0x6903c0, gp offsets 0x308 higher. Not installed.
-        constexpr bool kRegionSupported = false;
-        constexpr float kScreenTop = 2048.0f - 128.0f;
-        constexpr uint32_t kParticleDraw = 0u, kTexSpriteBuild = 0u, kResumeChainLoop = 0u, kResumeTail = 0u;
-        constexpr uint32_t kSystems = 0u, kNodes = 0u, kTypeTextures = 0u, kSlotTex0 = 0u, kSlotIds = 0u, kViews = 0u,
-                           kViewTable2 = 0u, kEffectsVu = 0u, kFogPacket = 0u;
-        constexpr int32_t kGpColours = 0, kGpChain = 0, kGpHead = 0, kGpLensCounts = 0, kGpLensLists = 0, kGpLensScale = 0,
-                          kGpSeed = 0;
-        constexpr uint32_t kPostInit = 0u, kStripeBuild = 0u, kArcBuild = 0u, kArcUpdate = 0u;
-        constexpr int32_t kGpPrecipIndex = 0, kGpPrecipCount = 0, kGpRainFlag = 0, kGpRainMatrix = 0, kGpRainHead = 0, kGpRainBox = 0,
-                          kGpRainTail = 0, kGpRainTexMatrix = 0, kGpRainStep = 0, kGpRainMul = 0, kGpKite = 0, kGpSprine = 0;
-        void gameParticleDraw(uint8_t *, R5900Context *, PS2Runtime *) {}
-        void gameTexSpriteBuild(uint8_t *, R5900Context *, PS2Runtime *) {}
-        void gamePostInit(uint8_t *, R5900Context *, PS2Runtime *) {}
-        void gameStripeBuild(uint8_t *, R5900Context *, PS2Runtime *) {}
-        constexpr uint32_t kPrecipCreate = 0u;
-        constexpr int32_t kGpPrecipLevel = 0;
-        void gamePrecipCreate(uint8_t *, R5900Context *, PS2Runtime *) {}
-        void gameArcBuild(uint8_t *, R5900Context *, PS2Runtime *) {}
-        void gameArcUpdate(uint8_t *, R5900Context *, PS2Runtime *) {}
-        constexpr uint32_t kLensTest = 0u, kLensRender = 0u;
-        constexpr uint32_t kWeTrans = 0u, kWorldToScreen = 0u, kLensSamples = 0u, kLensDebounce = 0u;
-        constexpr uint32_t kFlareColours = 0u, kFlareTypes = 0u, kFlareSteps = 0u, kFlareSizes = 0u, kFlareWeights = 0u, kFlareUvs = 0u;
-        void gameLensTest(uint8_t *, R5900Context *, PS2Runtime *) {}
-        void gameLensRender(uint8_t *, R5900Context *, PS2Runtime *) {}
-#endif
 
         // _ParticleType
         constexpr uint32_t kStride = 0x2e80u;

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(TMB_Recomp LANGUAGES C CXX)
 
-# Twisted Metal: Black (PAL, SCES-50360) static recompilation on top of PS2Recomp.
+# Twisted Metal: Black (USA, SCUS-97101) static recompilation on top of PS2Recomp.
 #
 # Build the tools first (scripts/build_tools.sh), generate code (scripts/recomp.sh),
 # then configure this project to get the `ps2EntryRunner` executable with the

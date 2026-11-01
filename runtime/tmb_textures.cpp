@@ -16,7 +16,6 @@
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
-#include "tmb_region.h"
 #include "runtime/native/native_texture_cache.h"
 
 #include <algorithm>
@@ -40,20 +39,20 @@ namespace tmb::textures
     {
         using Texture = ps2x::native::TextureCache::Texture;
 
-        constexpr uint32_t kTexInfo = TMB_ADDR(0x004D4930u); // texInfo[1000], 16 bytes each
-        constexpr uint32_t kFileReadf = TMB_ADDR(0x001C31D8u);
-        constexpr uint32_t kZipInflateAll = TMB_ADDR(0x00201C30u);
-        constexpr uint32_t kFileOnlyTexFile = TMB_ADDR(0x001C3B68u);
-        constexpr uint32_t kFileAddTexFile = TMB_ADDR(0x001C3948u);
-        constexpr uint32_t kFileOnlyResFile = TMB_ADDR(0x001C3BB0u);
-        constexpr uint32_t kFileAddResFile = TMB_ADDR(0x001C39E0u);
-        constexpr uint32_t kTexmInit = TMB_ADDR(0x001F9A78u);
-        constexpr uint32_t kTexmSetupTexture = TMB_ADDR(0x001FA170u);
-        constexpr uint32_t kTexmResInit = TMB_ADDR(0x001F9B08u);
-        constexpr uint32_t kSceGsSetDefLoadImage = TMB_ADDR(0x00205140u);
-        constexpr uint32_t kTexmLoadResTexture = TMB_ADDR(0x001F9BC8u);
-        constexpr uint32_t kResLoadReturn = TMB_ADDR(0x001F9CC4u); // texmLoadResTexture's call of sceGsSetDefLoadImage
-        constexpr uint32_t kFontInit = TMB_ADDR(0x001C4E50u);
+        constexpr uint32_t kTexInfo = 0x004D1930u; // texInfo[1000], 16 bytes each
+        constexpr uint32_t kFileReadf = 0x001C21D0u;
+        constexpr uint32_t kZipInflateAll = 0x00200A20u;
+        constexpr uint32_t kFileOnlyTexFile = 0x001C2B60u;
+        constexpr uint32_t kFileAddTexFile = 0x001C2940u;
+        constexpr uint32_t kFileOnlyResFile = 0x001C2BA8u;
+        constexpr uint32_t kFileAddResFile = 0x001C29D8u;
+        constexpr uint32_t kTexmInit = 0x001F8868u;
+        constexpr uint32_t kTexmSetupTexture = 0x001F8F60u;
+        constexpr uint32_t kTexmResInit = 0x001F88F8u;
+        constexpr uint32_t kSceGsSetDefLoadImage = 0x00203F30u;
+        constexpr uint32_t kTexmLoadResTexture = 0x001F89B8u;
+        constexpr uint32_t kResLoadReturn = 0x001F8AB4u; // texmLoadResTexture's call of sceGsSetDefLoadImage
+        constexpr uint32_t kFontInit = 0x001C3E48u;
 
         enum : uint32_t
         {
@@ -189,12 +188,12 @@ namespace tmb::textures
         void fileReadfOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             noteFile(rdram, ctx);
-            fileReadf__FPcPv_0x1c31d8(rdram, ctx, runtime);
+            fileReadf__FPcPv_0x1c21d0(rdram, ctx, runtime);
         }
         void zipInflateAllOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             noteFile(rdram, ctx);
-            zipInflateAll__FPcPv_0x201c30(rdram, ctx, runtime);
+            zipInflateAll__FPcPv_0x200a20(rdram, ctx, runtime);
         }
 
         void listFile(R5900Context *ctx, bool tex, bool only)
@@ -218,22 +217,22 @@ namespace tmb::textures
         void fileOnlyTexFileOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             listFile(ctx, true, true);
-            fileOnlyTexFile__FPci_0x1c3b68(rdram, ctx, runtime);
+            fileOnlyTexFile__FPci_0x1c2b60(rdram, ctx, runtime);
         }
         void fileAddTexFileOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             listFile(ctx, true, false);
-            fileAddTexFile__FPci_0x1c3948(rdram, ctx, runtime);
+            fileAddTexFile__FPci_0x1c2940(rdram, ctx, runtime);
         }
         void fileOnlyResFileOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             listFile(ctx, false, true);
-            fileOnlyResFile__FPci_0x1c3bb0(rdram, ctx, runtime);
+            fileOnlyResFile__FPci_0x1c2ba8(rdram, ctx, runtime);
         }
         void fileAddResFileOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             listFile(ctx, false, false);
-            fileAddResFile__FPci_0x1c39e0(rdram, ctx, runtime);
+            fileAddResFile__FPci_0x1c29d8(rdram, ctx, runtime);
         }
 
         void texmInitOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -247,7 +246,7 @@ namespace tmb::textures
                 s.byId.clear();
                 s.decoded.clear();
             }
-            texmInit__F10_vramAddrs_0x1f9a78(rdram, ctx, runtime);
+            texmInit__F10_vramAddrs_0x1f8868(rdram, ctx, runtime);
             Store &s = store();
             std::lock_guard<std::mutex> lock(s.mutex);
             std::string files;
@@ -274,7 +273,7 @@ namespace tmb::textures
                 else
                     mismatch("texture", n, r, psm, width, height);
             }
-            texmSetupTexture__FiiiiiP6QwDataii_0x1fa170(rdram, ctx, runtime);
+            texmSetupTexture__FiiiiiP6QwDataii_0x1f8f60(rdram, ctx, runtime);
         }
 
         void texmResInitOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -289,7 +288,7 @@ namespace tmb::textures
                 s.hAt.clear();
                 s.decoded.clear();
             }
-            texmResInit__F10_vramAddrsP6QwData_0x1f9b08(rdram, ctx, runtime);
+            texmResInit__F10_vramAddrsP6QwData_0x1f88f8(rdram, ctx, runtime);
             Store &s = store();
             std::lock_guard<std::mutex> lock(s.mutex);
             std::string files;
@@ -312,7 +311,7 @@ namespace tmb::textures
                 s.hAt.clear();
                 s.decoded.clear();
             }
-            texmLoadResTexture__FP6QwData_0x1f9bc8(rdram, ctx, runtime);
+            texmLoadResTexture__FP6QwData_0x1f89b8(rdram, ctx, runtime);
             Store &s = store();
             std::lock_guard<std::mutex> lock(s.mutex);
             std::fprintf(stderr, "[tmb:tex] texmLoadResTexture: %u palettes and resident textures loaded\n", s.resOrdinal);
@@ -342,7 +341,7 @@ namespace tmb::textures
                         mismatch("resident record", n, r, psm, width, height);
                 }
             }
-            sceGsSetDefLoadImage_0x205140(rdram, ctx, runtime);
+            sceGsSetDefLoadImage_0x203f30(rdram, ctx, runtime);
         }
 
         void fontInitOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -353,7 +352,7 @@ namespace tmb::textures
                 loadPack(s);
                 s.fontTbp = static_cast<uint32_t>((static_cast<int32_t>(getRegU32(ctx, 4)) - 0x840) / 64);
             }
-            fontInit__F10_vramAddrs_0x1c4e50(rdram, ctx, runtime);
+            fontInit__F10_vramAddrs_0x1c3e48(rdram, ctx, runtime);
         }
 
         uint32_t fromCt16(uint32_t c, uint64_t texa)

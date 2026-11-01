@@ -20,14 +20,11 @@ display mode) comes from native code on the PC's clock.
 > [!IMPORTANT]
 > No game files are included: no ELF, IRX modules, data archives, or code generated from them.
 > You need **your own copy** of the game: the USA release, PS2 ID **`SCUS-97101`**. The port is built against its
-> executable. The build also reads the European executable's code (the hooks in `runtime/` were written against its
-> addresses; `tools/tmb_region_map.py` maps them to the USA one), so for now it needs `SCES_503.60` from the European
-> disc in `game/` as well; the European release itself is not supported.
+> executable:
 >
 > | File | SHA-1 |
 > |---|---|
-> | `SCUS_971.01` (USA) | `3ff17f4897552e355d0bb8c3abfa5125fe3ff2ef` |
-> | `SCES_503.60` (European, its executable only, for the build) | `d097dd85167b6a188bf5ec17ecfc53a1f275a581` |
+> | `SCUS_971.01` | `3ff17f4897552e355d0bb8c3abfa5125fe3ff2ef` |
 
 ## Status
 
@@ -137,13 +134,10 @@ disc files (game_us/, game/) ──► ps2_analyzer ──► recomp/tmb_scus971
    what is left of the PS2: EE kernel HLE · DMAC (kicks to the GIF / VIF complete unread) · IPU · IOP kernel layer
 ```
 
-- **The European executable as the hooks' reference.** The USA release is built (`game_us/`, `generated_us/`,
-  `build/game_us`); `runtime/` is written against the European executable and marks the addresses it uses
-  (`TMB_ADDR`, `TMB_GP`); `tools/tmb_region_map.py` maps them to the region's executable by symbol (a file's statics
-  through the code that uses them) into `tmb_region.h`, and `recomp/tmb_manual.toml` holds the recompiler's hand-written
-  settings by symbol name. The two executables differ little (the US one is five months older); NTSC draws a 640 x 224
-  field instead of 640 x 256, which the native renderer follows.
-- Both executables ship their full symbol table (3,572 named functions, `.mdebug`), so no Ghidra pass is needed:
+- **The USA executable's addresses.** The build is `game_us/` -> `generated_us/` -> `build/game_us`; `runtime/`'s hooks
+  use the USA executable's addresses and its generated function names directly, and `recomp/tmb_manual.toml` holds the
+  recompiler's hand-written settings by symbol name. NTSC draws a 640 x 224 field, which the native renderer follows.
+- The executable ships its full symbol table (3,572 named functions, `.mdebug`), so no Ghidra pass is needed:
   `ps2_analyzer` reads the symbols, recognises the Sony SDK functions that have runtime handlers and writes the config.
 - PS2Recomp turns every function into C++ and emits the address-indexed function table.
 - `runtime/tmb_meshes.cpp` (3D at the game's hooks), `runtime/tmb_particles.cpp` (effects from the particle lists),
@@ -165,7 +159,7 @@ Age*, *Jade Cocoon 2*, *Soulcalibur III* and others). Fixes made for this port l
 - X11/Wayland and OpenGL development headers (raylib is fetched and built by the fork)
 - `bsdtar` (libarchive) to extract the disc
 - A CPU with AVX2 (the runtime is built for `x86-64-v3`)
-- Your own copy of `SCUS-97101`, and the European disc's executable `SCES_503.60` in `game/` for the build (check the hashes above)
+- Your own copy of `SCUS-97101` (check the hash above)
 
 ## Build and run
 

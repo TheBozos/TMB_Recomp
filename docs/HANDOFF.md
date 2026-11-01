@@ -24,8 +24,7 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
    settles).
 3. The game data is not in the repository (never commit it). Put your own ISO at the repo root, then follow "Build and
    run" in the README: `extract_iso.sh`, `build_tools.sh`, `recomp.sh`, `build_runtime.sh`, optionally
-   `iop_recomp.sh` (the USA release: `game_us/`, `generated_us/`, `build/game_us`; the European disc's executable
-   `SCES_503.60` in `game/` too, for the region map the hooks' addresses go through).
+   `iop_recomp.sh` (`game_us/`, `generated_us/`, `build/game_us`).
 4. On Windows: MSYS2 UCRT64 with its GCC, as in the README's Windows section; `scripts/stage_dlls.sh` after a build
    to start the runner outside the MSYS2 shell. No `perf`: use the fork's sampling profiler (`PS2X_PROFILE=<s>`).
 5. The first build compiles about 3500 generated files. A change to `ps2_runtime.h`, `ps2_memory.h` or

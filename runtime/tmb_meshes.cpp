@@ -53,7 +53,6 @@
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
-#include "tmb_region.h"
 #include "tmb_meshes.h"
 #include "tmb_vu1_shading.h"
 #include "runtime/native/native_renderer.h"
@@ -98,22 +97,18 @@ namespace tmb::meshes
 {
     namespace
     {
-        constexpr uint32_t kFileOnlyNgpFile = TMB_ADDR(0x001C3B20u);
-        constexpr uint32_t kFileAddNgpFile = TMB_ADDR(0x001C38A8u);
-        constexpr uint32_t kHierCacheForAsm = TMB_ADDR(0x002032F4u);
-        constexpr uint32_t kPktAddVu1ObjAsm = TMB_ADDR(0x001EBCF8u);
-        constexpr uint32_t kPktAddVu1Obj = TMB_ADDR(0x001EADD0u);
+        constexpr uint32_t kFileOnlyNgpFile = 0x001C2B18u;
+        constexpr uint32_t kFileAddNgpFile = 0x001C28A0u;
+        constexpr uint32_t kHierCacheForAsm = 0x002020E4u;
+        constexpr uint32_t kPktAddVu1ObjAsm = 0x001EAAE8u;
+        constexpr uint32_t kPktAddVu1Obj = 0x001E9BC0u;
         // hierTraverseAsm's two calls of pktAddVu1ObjAsm: an opaque object (sent in traversal order) and an alpha one
         // (linked into the depth-sorted list, sent after: it always sends its matrix and leaves VU1's matrix as is).
-        constexpr uint32_t kOpaqueReturn = TMB_ADDR(0x001D67C0u);
+        constexpr uint32_t kOpaqueReturn = 0x001D55B0u;
         // The constants block hier__Fi sends to VU1 at each view (its VIF1 chain after the hier image's MPG): VU 5-8
         // from here, then VU 9-12, 13-16, 17-20, 21, each block after its STCYCL / UNPACK pair. An EE buffer the game
         // keeps (the camera, plightUpdateParaLights' colours, fogUpdate's terms); no symbol holds it.
-#if defined(TMB_REGION_US)
         constexpr uint32_t kConstants = 0x002335F0u;
-#else
-        constexpr uint32_t kConstants = 0x00234870u;
-#endif
         constexpr uint32_t kConstVu5 = kConstants + 0x10u;  // VU 5-8
         constexpr uint32_t kConstVu9 = kConstants + 0x58u;  // VU 9-12
         constexpr uint32_t kConstVu13 = kConstants + 0xa0u; // VU 13-16
@@ -328,12 +323,12 @@ namespace tmb::meshes
         void fileOnlyNgpFileOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             noteNgp(rdram, ctx, true);
-            fileOnlyNgpFile__FPci_0x1c3b20(rdram, ctx, runtime);
+            fileOnlyNgpFile__FPci_0x1c2b18(rdram, ctx, runtime);
         }
         void fileAddNgpFileOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             noteNgp(rdram, ctx, false);
-            fileAddNgpFile__FPci_0x1c38a8(rdram, ctx, runtime);
+            fileAddNgpFile__FPci_0x1c28a0(rdram, ctx, runtime);
         }
 
         // ---- EE memory ----
@@ -419,11 +414,11 @@ namespace tmb::meshes
         // submitted there, in that order, under the view's clip: what reached VU1 in that order. The particles,
         // drawn after the view (particleDraw), come after them.
 
-        constexpr uint32_t kHierCheckVifComplete = TMB_ADDR(0x001D59D8u);
-        constexpr uint32_t kHierKickReturn = TMB_ADDR(0x001D4610u); // hier__Fi's call of hierCheckVifComplete, before its kick
-        constexpr uint32_t kHier2pFlushDma = TMB_ADDR(0x001D3B00u);
-        constexpr uint32_t kHier2pCacheReturn = TMB_ADDR(0x001D3D34u); // hier2p's call of hierCacheForAsm, its view's start
-        constexpr uint32_t kPktLinkAlphaObjAsm = TMB_ADDR(0x001EC194u);
+        constexpr uint32_t kHierCheckVifComplete = 0x001D47C8u;
+        constexpr uint32_t kHierKickReturn = 0x001D3400u; // hier__Fi's call of hierCheckVifComplete, before its kick
+        constexpr uint32_t kHier2pFlushDma = 0x001D28F0u;
+        constexpr uint32_t kHier2pCacheReturn = 0x001D2B24u; // hier2p's call of hierCacheForAsm, its view's start
+        constexpr uint32_t kPktLinkAlphaObjAsm = 0x001EAF84u;
 
         bool g_inHier2pFlush = false;
         uint64_t g_unsentFlushes = 0; // views submitted at the frame's end (not kicked by hier__Fi)
@@ -1247,9 +1242,9 @@ namespace tmb::meshes
         // this+0x29048 + 4 * mark), texture coordinates (1, 1), (0, 1), (1, 0), (0, 0) for the corners 0-3. The marks
         // follow a list from this+0x2a7b8 (next: this+0x17708 + 12 * mark, -1 ends it), this+0x2a7c0 of them. Kept here
         // as draw sees them (the update after it moves them), in the pack's object format, for the hook.
-        constexpr uint32_t kSkidDraw = TMB_ADDR(0x00169610u);
-        constexpr uint32_t kSkidBuffer = TMB_ADDR(0x00448D70u);
-        constexpr uint32_t kSkidColors = TMB_ADDR(0x00448AC0u);
+        constexpr uint32_t kSkidDraw = 0x00169490u;
+        constexpr uint32_t kSkidBuffer = 0x00446810u;
+        constexpr uint32_t kSkidColors = 0x00446560u;
         struct Skid
         {
             bool valid = false;
@@ -1361,7 +1356,7 @@ namespace tmb::meshes
                 const Ee ee{rdram, runtime->memory().getScratchpad()};
                 skidSnapshot(ee, getRegU32(ctx, 4));
             }
-            draw__9SkidMarks_0x169610(rdram, ctx, runtime);
+            draw__9SkidMarks_0x169490(rdram, ctx, runtime);
         }
 
         // An object this path does not draw: its GS context still changes the GS state for those after it (in the
@@ -1392,7 +1387,7 @@ namespace tmb::meshes
             // Its arguments as the caller set them (it walks s4 through the extra qwords it copies).
             const uint32_t obj = getRegU32(ctx, 21), inst = getRegU32(ctx, 23), spr = getRegU32(ctx, 16);
             const uint32_t a3 = getRegU32(ctx, 7), extra = getRegU32(ctx, 20), s6 = getRegU32(ctx, 22);
-            pktAddVu1ObjAsm_0x1ebcf8(rdram, ctx, runtime);
+            pktAddVu1ObjAsm_0x1eaae8(rdram, ctx, runtime);
             if (!active())
                 return;
             ++g_stats.calls;
@@ -1766,7 +1761,7 @@ namespace tmb::meshes
                     }
                 }
             }
-            pktAddVu1Obj__FP9Vu1DmaPktP6QwDataP11_hierobjecti_0x1eadd0(rdram, ctx, runtime);
+            pktAddVu1Obj__FP9Vu1DmaPktP6QwDataP11_hierobjecti_0x1e9bc0(rdram, ctx, runtime);
         }
 
         // pktLinkAlphaObjAsm links the alpha object pktAddVu1ObjAsm just built into the view's depth-sorted list, by the
@@ -1788,7 +1783,7 @@ namespace tmb::meshes
                     list.pending = false;
                 }
             }
-            pktLinkAlphaObjAsm_0x1ec194(rdram, ctx, runtime);
+            pktLinkAlphaObjAsm_0x1eaf84(rdram, ctx, runtime);
         }
 
         // The draws of a view's chain in the order the chain sends them: the opaque objects, then the alpha list's
@@ -1841,7 +1836,7 @@ namespace tmb::meshes
         {
             if (active() && hookOrder() && getRegU32(ctx, 31) == kHierKickReturn)
                 submitList(g_lists[0]);
-            hierCheckVifComplete__Fv_0x1d59d8(rdram, ctx, runtime);
+            hierCheckVifComplete__Fv_0x1d47c8(rdram, ctx, runtime);
         }
 
         void hier2pFlushDmaOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1850,14 +1845,14 @@ namespace tmb::meshes
             if (active() && hookOrder())
                 submitList(g_lists[0]); // what hier2p built, at its view's turn (nothing is built in between)
             g_inHier2pFlush = false;
-            hier2pFlushDma__Fv_0x1d3b00(rdram, ctx, runtime);
+            hier2pFlushDma__Fv_0x1d28f0(rdram, ctx, runtime);
         }
 
         // At each view hier__Fi sends the constants block (VU 5-8 among it: the light directions until a car sends
         // its own), then calls hierCacheForAsm.
         void hierCacheForAsmOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            hierCacheForAsm_0x2032f4(rdram, ctx, runtime);
+            hierCacheForAsm_0x2020e4(rdram, ctx, runtime);
             if (!active())
                 return;
             const Ee ee{rdram, runtime->memory().getScratchpad()};

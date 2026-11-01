@@ -27,7 +27,6 @@
 
 #include "ps2_recomp_abi.h"
 #include "runtime/native/native_vu0_hle.h"
-#include "tmb_region.h"
 
 #include <algorithm>
 #include <atomic>
@@ -930,8 +929,8 @@ namespace tmb::vu0
         bool g_vif0Read = true; // TMB_VIF0_PACKETS=1 or PS2X_VU0_HLE_CHECK=1: VIF0 interpreted, the code memory filled
 
         // The game's VIF0 chains (static data in the ELF, both regions alike).
-        const uint32_t k2dChain = TMB_ADDR(0x00234A50u);   // drawInit
-        const uint32_t kHierChain = TMB_ADDR(0x002352E0u); // hier__Fi, main
+        const uint32_t k2dChain = 0x002337D0u;   // drawInit
+        const uint32_t kHierChain = 0x00234060u; // hier__Fi, main
         // The 2D chain's UNPACKs (V4-32, CL = WL = 4: copies): VU qword, its data's offset in the chain, qwords.
         constexpr uint32_t k2dUnpacks[][3] = {{234u, 0x750u, 4u}, {238u, 0x798u, 4u}, {242u, 0x7e0u, 4u}, {246u, 0x828u, 4u}, {250u, 0x870u, 1u}};
 

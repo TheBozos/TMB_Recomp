@@ -4,7 +4,6 @@
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
-#include "tmb_region.h" // the region's addresses for TMB_ADDR / TMB_GP and its generated function names (tools/tmb_region_map.py)
 #include "Stubs/MPEG.h"
 #include "runtime/ee_scheduler.h"
 #include "runtime/gs/gs_cpu_backend.h"
@@ -84,7 +83,7 @@ namespace tmb::particles
 
 namespace
 {
-    constexpr uint32_t kTmbPalEntry = TMB_ADDR(0x00100008u);
+    constexpr uint32_t kTmbPalEntry = 0x00100008u;
 
     void timelineEvent(char type, uint32_t arg = 0); // TMB_TRACE_TIMELINE
 
@@ -177,12 +176,12 @@ namespace
     // thread reaches it. With libmpeg HLE'd that code never reaches the host decoder, so
     // sceMpegIsEnd stays false and updateMpegMovieDecoding waits forever. Tell the HLE the
     // playback is over at the abort; the VideoDec starts with its sceMpeg, so a0 is both.
-    constexpr uint32_t kVideoDecAbort = TMB_ADDR(0x001FF920u);
+    constexpr uint32_t kVideoDecAbort = 0x001FE710u;
 
     void videoDecAbortOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t videoDec = getRegU32(ctx, 4);
-        videoDecAbort__FP8VideoDec_0x1ff920(rdram, ctx, runtime);
+        videoDecAbort__FP8VideoDec_0x1fe710(rdram, ctx, runtime);
         ps2_stubs::abortMpegPlayback(runtime, videoDec);
     }
 
@@ -193,8 +192,8 @@ namespace
     // the abort, which it never gets to do: the game hung on a skipped copyright movie. A priority-0 caller drops
     // to priority 1 for the rotation, so the priority-1 threads run once, and gets its priority back when it is
     // scheduled again, through kSwitchThreadReturn (padding after readMpeg, never executed).
-    constexpr uint32_t kSwitchThread = TMB_ADDR(0x001E06D0u);
-    constexpr uint32_t kSwitchThreadReturn = TMB_ADDR(0x001E06CCu);
+    constexpr uint32_t kSwitchThread = 0x001DF4C0u;
+    constexpr uint32_t kSwitchThreadReturn = 0x001DF4BCu;
     constexpr int kMoviePriority = 1;
     std::unordered_map<int, std::pair<int, uint32_t>> g_switchThreadSaved; // thread -> (priority, return address)
 
@@ -204,14 +203,14 @@ namespace
         const GuestThread *self = ee.currentThread();
         if (!self || self->currentPriority >= kMoviePriority)
         {
-            switchThread__Fv_0x1e06d0(rdram, ctx, runtime);
+            switchThread__Fv_0x1df4c0(rdram, ctx, runtime);
             return;
         }
         const int id = ee.currentThreadId();
         int oldPriority = 0;
         if (ee.changePriority(id, kMoviePriority, false, oldPriority) != 0) // KE_OK
         {
-            switchThread__Fv_0x1e06d0(rdram, ctx, runtime);
+            switchThread__Fv_0x1df4c0(rdram, ctx, runtime);
             return;
         }
         g_switchThreadSaved[id] = {oldPriority, getRegU32(ctx, 31)};
@@ -235,14 +234,14 @@ namespace
     }
 
     // TMB_TRACE_MOVIE=1: log the movie player's thread teardown (temporary bring-up aid).
-    constexpr uint32_t kTermAll = TMB_ADDR(0x001E0948u);
+    constexpr uint32_t kTermAll = 0x001DF738u;
 
     void termAllTrace(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t gp = getRegU32(ctx, 28);
         const auto readGuest = [&](uint32_t addr) { return *reinterpret_cast<const int32_t *>(rdram + (addr & 0x1FFFFFFu)); };
-        const int ids[2] = {readGuest(gp + TMB_GP(-0x321C)), readGuest(gp + TMB_GP(-0x3218))};
-        termAll__Fv_0x1e0948(rdram, ctx, runtime);
+        const int ids[2] = {readGuest(gp + -0x34EC), readGuest(gp + -0x34E8)};
+        termAll__Fv_0x1df738(rdram, ctx, runtime);
         for (int id : ids)
         {
             const GuestThread *t = runtime->eeScheduler().thread(id);
@@ -259,11 +258,11 @@ namespace
     // byte count from then on: full-scale noise through the logo and intro movies, then a buzz when the IOP looped
     // its last buffers. Here the packets go through a host queue that feeds the ring with the game's own
     // bookkeeping (audioDecBeginPut/EndPut) as space frees, before every audioDecSendToIOP: no byte is lost.
-    constexpr uint32_t kPcmCallback = TMB_ADDR(0x001ED5F8u);
-    constexpr uint32_t kAudioDecSendToIop = TMB_ADDR(0x00202090u);
-    constexpr uint32_t kAudioDecCreate = TMB_ADDR(0x00201E18u);
-    constexpr uint32_t kAudioDecReset = TMB_ADDR(0x00201E90u);
-    constexpr uint32_t kAudioDec = TMB_ADDR(0x004C7B48u);       // the player's AudioDec
+    constexpr uint32_t kPcmCallback = 0x001EC3E8u;
+    constexpr uint32_t kAudioDecSendToIop = 0x00200E80u;
+    constexpr uint32_t kAudioDecCreate = 0x00200C08u;
+    constexpr uint32_t kAudioDecReset = 0x00200C80u;
+    constexpr uint32_t kAudioDec = 0x004C4B48u;       // the player's AudioDec
     constexpr uint32_t kAudioDecHeaderBytes = 0x28u;  // 'SShd' + 'SSbd' headers, kept apart from the ring
     constexpr uint32_t kReadBufSizeOffset = 0x50008u; // ReadBuf: data[0x50000], then its size
     std::deque<uint8_t> g_moviePcm;
@@ -372,7 +371,7 @@ namespace
         const uint32_t ad = getRegU32(ctx, 4);
         const auto rd = [&](uint32_t off) { return static_cast<int32_t>(guestU32(rdram, ad + off)); };
         const int32_t stateBefore = rd(0x0);
-        audioDecSendToIOP__FP8AudioDec_0x202090(rdram, ctx, runtime);
+        audioDecSendToIOP__FP8AudioDec_0x200e80(rdram, ctx, runtime);
         if (g_traceMovie && (g_sendCalls++ % 50u) == 0u)
         {
             std::cerr << "[tmb:audio] send#" << g_sendCalls << " state " << stateBefore << "->" << rd(0x0)
@@ -387,16 +386,16 @@ namespace
     void audioDecCreateOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         g_moviePcm.clear();
-        audioDecCreate__FP8AudioDecPUcii_0x201e18(rdram, ctx, runtime);
+        audioDecCreate__FP8AudioDecPUcii_0x200c08(rdram, ctx, runtime);
     }
 
     void audioDecResetOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         g_moviePcm.clear();
-        audioDecReset__FP8AudioDec_0x201e90(rdram, ctx, runtime);
+        audioDecReset__FP8AudioDec_0x200c80(rdram, ctx, runtime);
     }
 
-    constexpr uint32_t kVblankHandler = TMB_ADDR(0x001C2898u);
+    constexpr uint32_t kVblankHandler = 0x001C1890u;
     bool g_nativeFrames = false; // native frames, TMB_NATIVE_FRAMES=0 off (timer1HandlerNative)
     uint32_t g_vblankCalls = 0;
     bool g_gsLag = false;
@@ -410,8 +409,8 @@ namespace
     // (gp-0x340C). The vblank handler, which only runs while movies play, turns the lag off; hier (each frame of
     // 3D rendering) turns it back on when no movie plays. TMB_GS_LAG_AB=1 switches it on and off every 100
     // vblanks instead (measurements).
-    constexpr uint32_t kMovieDisplaying = TMB_ADDR(0x00503BE4u); // gp - 0x340C
-    constexpr uint32_t kHier = TMB_ADDR(0x001D40B0u);
+    constexpr uint32_t kMovieDisplaying = 0x004FB794u; // gp - 0x340C
+    constexpr uint32_t kHier = 0x001D2EA0u;
 
     void updateGsLag(uint8_t *rdram, PS2Runtime *runtime)
     {
@@ -692,7 +691,7 @@ namespace
         tmb::native::setGuestMemory(rdram); // the adapter reads the game's fog packet
         const auto start = std::chrono::steady_clock::now();
         timelineEvent('H');
-        hier__Fi_0x1d40b0(rdram, ctx, runtime);
+        hier__Fi_0x1d2ea0(rdram, ctx, runtime);
         timelineEvent('h');
         // hier draws the state of the TheGame::Update before it (the frame's own Update comes after).
         if (g_gsLagAb && g_lastUpdateTick != 0u && runtime->memory().vif1Threaded())
@@ -717,9 +716,9 @@ namespace
     {
         const uint32_t gp = getRegU32(ctx, 28);
         const auto rd = [&](uint32_t addr) { return *reinterpret_cast<const int32_t *>(rdram + (addr & 0x1FFFFFFu)); };
-        const int32_t displaying = rd(gp + TMB_GP(-0x340C));
+        const int32_t displaying = rd(gp + -0x36DC);
         timelineEvent('B');
-        vblankHandler__Fi_0x1c2898(rdram, ctx, runtime);
+        vblankHandler__Fi_0x1c1890(rdram, ctx, runtime);
         updateGsLag(rdram, runtime);
         // Native frames: vblanks latch no picture. A movie's or a load's screen (they end no frame) is shown by the
         // host on its own clock (PS2X_NATIVE_IDLE_PRESENT_MS), not here.
@@ -737,14 +736,14 @@ namespace
         if (displaying && (g_vblankCalls++ % 100u) == 0u)
         {
             std::cerr << "[tmb:vblank] call#" << g_vblankCalls << " displaying=" << displaying
-                      << " pathBusy=" << rd(gp + TMB_GP(-0x3400)) << " ret=" << static_cast<int32_t>(getRegU32(ctx, 2))
-                      << " voBuf(+8,+0x10,+0xc)=" << rd(TMB_ADDR(0x4C7A18u) + 8u) << "," << rd(TMB_ADDR(0x4C7A18u) + 0x10u) << ","
-                      << rd(TMB_ADDR(0x4C7A18u) + 0xCu) << " | " << ps2_stubs::mpegDebugSummary() << std::endl;
+                      << " pathBusy=" << rd(gp + -0x36D0) << " ret=" << static_cast<int32_t>(getRegU32(ctx, 2))
+                      << " voBuf(+8,+0x10,+0xc)=" << rd(0x004C4A18u + 8u) << "," << rd(0x004C4A18u + 0x10u) << ","
+                      << rd(0x004C4A18u + 0xCu) << " | " << ps2_stubs::mpegDebugSummary() << std::endl;
         }
     }
 
     // TMB_TRACE_FONT=1: dump the font packet state on each fontDmaFontData (bring-up aid).
-    constexpr uint32_t kFontDmaFontData = TMB_ADDR(0x001C4FE0u);
+    constexpr uint32_t kFontDmaFontData = 0x001C3FB8u;
     uint32_t g_fontCalls = 0;
 
     void fontDmaFontDataTrace(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -752,18 +751,18 @@ namespace
         const uint32_t gp = getRegU32(ctx, 28);
         const auto rd32 = [&](uint32_t addr) { return *reinterpret_cast<const int32_t *>(rdram + (addr & 0x1FFFFFFu)); };
         const auto rd64 = [&](uint32_t addr) { return *reinterpret_cast<const uint64_t *>(rdram + (addr & 0x1FFFFFFu)); };
-        const int32_t state = rd32(gp + TMB_GP(-0x2D28)), count = rd32(gp + TMB_GP(-0x2D2C)), base = rd32(gp + TMB_GP(-0x2D20));
-        const int32_t tagIdx = rd32(gp + TMB_GP(-0x2D24)), prims = static_cast<int32_t>(rd32(gp + TMB_GP(-0x2D30)) & 0xFFFF);
-        fontDmaFontData__Fv_0x1c4fe0(rdram, ctx, runtime);
+        const int32_t state = rd32(gp + -0x3034), count = rd32(gp + -0x3038), base = rd32(gp + -0x302C);
+        const int32_t tagIdx = rd32(gp + -0x3030), prims = static_cast<int32_t>(rd32(gp + -0x303C) & 0xFFFF);
+        fontDmaFontData__Fv_0x1c3fb8(rdram, ctx, runtime);
         const uint32_t n = g_fontCalls++;
         if (n < 6u || (n % 200u) == 0u || (state == 2 && n < 400u && (n % 20u) == 0u))
         {
-            constexpr uint32_t kBuf = TMB_ADDR(0x0050CB60u);
+            constexpr uint32_t kBuf = 0x00504580u;
             std::cerr << std::hex << "[tmb:font] call#" << std::dec << n << " state=" << state << " count=" << count
                       << " base=" << base << " tagIdx=" << tagIdx << " prims=" << prims << std::hex
                       << " | tag@idx=0x" << rd64(kBuf + 16u * static_cast<uint32_t>(tagIdx)) << "_" << rd64(kBuf + 16u * static_cast<uint32_t>(tagIdx) + 8u)
-                      << " q0=0x" << rd64(kBuf) << "_" << rd64(kBuf + 8u) << " after: count=" << std::dec << rd32(gp + TMB_GP(-0x2D2C))
-                      << " tagIdx=" << rd32(gp + TMB_GP(-0x2D24)) << " state=" << rd32(gp + TMB_GP(-0x2D28)) << std::endl;
+                      << " q0=0x" << rd64(kBuf) << "_" << rd64(kBuf + 8u) << " after: count=" << std::dec << rd32(gp + -0x3038)
+                      << " tagIdx=" << rd32(gp + -0x3030) << " state=" << rd32(gp + -0x3034) << std::endl;
         }
     }
 
@@ -821,12 +820,12 @@ namespace
     // player treats the stream as complete with < 5 bytes left and never reads them. It then calls
     // videoDecFlush, which appends a sequence_end_code to the IPU ring so the decoder finishes. With
     // libmpeg HLE'd, tell the HLE the input is complete once that flush succeeds.
-    constexpr uint32_t kVideoDecFlush = TMB_ADDR(0x001FF9E0u);
+    constexpr uint32_t kVideoDecFlush = 0x001FE7D0u;
 
     void videoDecFlushOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t videoDec = getRegU32(ctx, 4);
-        videoDecFlush__FP8VideoDec_0x1ff9e0(rdram, ctx, runtime);
+        videoDecFlush__FP8VideoDec_0x1fe7d0(rdram, ctx, runtime);
         if (getRegU32(ctx, 2) != 0u)
         {
             ps2_stubs::endMpegPlaybackInput(runtime, videoDec);
@@ -834,7 +833,7 @@ namespace
     }
 
     // TMB_TRACE_SND=1: log every 989snd command sent with snd_SendIOPCommandAndWait (bring-up aid).
-    constexpr uint32_t kSndSendIopCommandAndWait = TMB_ADDR(0x001BCE28u);
+    constexpr uint32_t kSndSendIopCommandAndWait = 0x001BBFC0u;
 
     void sndSendIopCommandAndWaitTrace(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
@@ -849,33 +848,33 @@ namespace
             std::cerr << std::hex << " 0x" << *reinterpret_cast<const uint32_t *>(rdram + ((args + 4u * static_cast<uint32_t>(i)) & 0x1FFFFFFu));
         }
         std::cerr << std::dec << std::endl;
-        snd_SendIOPCommandAndWait_0x1bce28(rdram, ctx, runtime);
+        snd_SendIOPCommandAndWait_0x1bbfc0(rdram, ctx, runtime);
         std::cerr << "[tmb:snd] #" << n << " -> 0x" << std::hex << getRegU32(ctx, 2) << std::dec << std::endl;
     }
 
     // TMB_TRACE_HIER=1: count VIF1 DMA completion handler calls of the hier renderer (bring-up aid).
-    constexpr uint32_t kHierDmaHandler = TMB_ADDR(0x001D63A0u);
+    constexpr uint32_t kHierDmaHandler = 0x001D5190u;
     std::atomic<uint32_t> g_hierDmaCalls{0};
 
     void hierDmaHandlerTrace(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t channel = getRegU32(ctx, 4);
         const auto rd = [&](uint32_t addr) { return *reinterpret_cast<const uint32_t *>(rdram + (addr & 0x1FFFFFFu)); };
-        const uint32_t before0 = rd(TMB_ADDR(0x00503CF8u)), before1 = rd(TMB_ADDR(0x00503CFCu));
-        hierDmaHandler__Fi_0x1d63a0(rdram, ctx, runtime);
+        const uint32_t before0 = rd(0x004FB8A8u), before1 = rd(0x004FB8ACu);
+        hierDmaHandler__Fi_0x1d5190(rdram, ctx, runtime);
         const uint32_t n = g_hierDmaCalls.fetch_add(1);
         if (n < 20u || (n % 500u) == 0u)
             std::cerr << "[tmb:hier] dma handler #" << n << " ch=" << channel << " flags " << before0 << "," << before1
-                      << " -> " << rd(TMB_ADDR(0x00503CF8u)) << "," << rd(TMB_ADDR(0x00503CFCu)) << std::endl;
+                      << " -> " << rd(0x004FB8A8u) << "," << rd(0x004FB8ACu) << std::endl;
     }
 
     // The game measures each frame with T0 (BUSCLK/256, 576 ticks per ms) into a global that timerGetFrameTime turns
     // into milliseconds, and moves weapons and debris over it without a limit. Built for 50 fps (20 ms), it blows
     // up at the 80-100 ms frames of a slow host. Capped at 40 ms (TMB_MAX_FRAME_MS), they move in slow motion
     // instead when the host cannot keep up. (The cars use the vblank fields: theGameUpdateOverride below.)
-    constexpr uint32_t kTimerEndOfRealTimeProcessing = TMB_ADDR(0x001F7A00u);
-    constexpr uint32_t kSceGsExecStoreImage = TMB_ADDR(0x002055E8u);
-    constexpr uint32_t kLensFlareTestZbuffer = TMB_ADDR(0x001E1010u), kLensFlareTestZbufferEnd = TMB_ADDR(0x001E13D8u);
+    constexpr uint32_t kTimerEndOfRealTimeProcessing = 0x001F67F0u;
+    constexpr uint32_t kSceGsExecStoreImage = 0x002043D8u;
+    constexpr uint32_t kLensFlareTestZbuffer = 0x001DFE00u, kLensFlareTestZbufferEnd = 0x001E01C8u;
 
     // GS readbacks: the lens flares' Z samples get the native frame's depth (TMB_NATIVE, tmb_native.cpp).
     void sceGsExecStoreImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -898,7 +897,7 @@ namespace
             ctx->pc = ra;
             return;
         }
-        sceGsExecStoreImage_0x2055e8(rdram, ctx, runtime);
+        sceGsExecStoreImage_0x2043d8(rdram, ctx, runtime);
         // TMB_LOG_STOREIMAGE=1: each GS readback's caller (ra) and first words, every 100th per caller.
         static const bool s_log = std::getenv("TMB_LOG_STOREIMAGE") != nullptr;
         if (s_log)
@@ -927,7 +926,7 @@ namespace
         if (ra >= kLensFlareTestZbuffer && ra < kLensFlareTestZbufferEnd)
             tmb::native::patchFlareDepth(rdram, image, dest);
     }
-    constexpr int32_t kFrameTicksGpOffset = TMB_GP(-0x2BDC); // timerGetFrameTime's tick count (gp-relative)
+    constexpr int32_t kFrameTicksGpOffset = -0x2EE4; // timerGetFrameTime's tick count (gp-relative)
     int32_t g_maxFrameTicks = 40 * 576;
 
     // TMB_TRACE_FRAMES=1: every 100 frames, the host time from the end of one frame's real-time processing to the
@@ -1035,7 +1034,7 @@ namespace
                     std::snprintf(text, sizeof(text), " %x:%.0f", vehicle, health);
                     line += text;
                 }
-                if (vehicle != TMB_ADDR(0x00259C70u) && health > s_enemyCap)
+                if (vehicle != 0x00257B50u && health > s_enemyCap)
                 {
                     health = s_enemyCap;
                     std::memcpy(rdram + ((vehicle + 1012u) & 0x1FFFFFFu), &health, 4);
@@ -1051,24 +1050,24 @@ namespace
         {
             static float s_best = 0.0f;
             float health = 0.0f;
-            std::memcpy(&health, rdram + TMB_ADDR(0x00259C70u) + 1012u, 4);
+            std::memcpy(&health, rdram + 0x00257B50u + 1012u, 4);
             if (health > s_best && health < 10000.0f)
                 s_best = health;
             else if (health < s_best && health > -10000.0f)
-                std::memcpy(rdram + TMB_ADDR(0x00259C70u) + 1012u, &s_best, 4);
+                std::memcpy(rdram + 0x00257B50u + 1012u, &s_best, 4);
         }
         if (s_healthCap >= 0.0f)
         {
             float health = 0.0f, maximum = 0.0f;
-            std::memcpy(&health, rdram + TMB_ADDR(0x00259C70u) + 1012u, 4);
-            std::memcpy(&maximum, rdram + TMB_ADDR(0x00259C70u) + 1008u, 4);
+            std::memcpy(&health, rdram + 0x00257B50u + 1012u, 4);
+            std::memcpy(&maximum, rdram + 0x00257B50u + 1008u, 4);
             static uint32_t s_frames = 0;
             if (++s_frames % 250u == 0u)
                 std::fprintf(stderr, "[tmb:health] %.1f of %.1f\n", health, maximum);
             if (health > s_healthCap)
             {
                 health = s_healthCap;
-                std::memcpy(rdram + TMB_ADDR(0x00259C70u) + 1012u, &health, 4);
+                std::memcpy(rdram + 0x00257B50u + 1012u, &health, 4);
             }
         }
         // PS2X_PROFILE_GATED=1: the profiler samples while frames take two vblanks or more (busy scenes; they come
@@ -1097,7 +1096,7 @@ namespace
             traceFrameEnd();
         const uint32_t gp = getRegU32(ctx, 28);
         tmb::native::onFrameEnd(); // TMB_NATIVE: publish the frame's native draws
-        timerEndOfRealTimeProcessing__Fv_0x1f7a00(rdram, ctx, runtime);
+        timerEndOfRealTimeProcessing__Fv_0x1f67f0(rdram, ctx, runtime);
         int32_t *frameTicks = reinterpret_cast<int32_t *>(rdram + ((gp + kFrameTicksGpOffset) & 0x1FFFFFFu));
         if (*frameTicks > g_maxFrameTicks)
             *frameTicks = g_maxFrameTicks;
@@ -1112,10 +1111,10 @@ namespace
     // the EE is charged the real time its code did not account (the timers, the vblank interrupt and the IOP follow the
     // EE clock), and the picture is shown. The frame's fields come from the real time it took, the remainder carried
     // to the next frame (the tick count rounds a 21 ms frame up to two fields: a game running 1.9 times too fast).
-    constexpr uint32_t kTimer1Handler = TMB_ADDR(0x001F7A98u);
-    constexpr uint32_t kSceGsSyncV = TMB_ADDR(0x00204D90u);
-    constexpr int32_t kTicsGpOffset = TMB_GP(-0x2BE0);       // the ticks before the T0 count
-    constexpr int32_t kFieldCountGpOffset = TMB_GP(-0x2BE8); // fields since the start
+    constexpr uint32_t kTimer1Handler = 0x001F6888u;
+    constexpr uint32_t kSceGsSyncV = 0x00203B80u;
+    constexpr int32_t kTicsGpOffset = -0x2EE8;       // the ticks before the T0 count
+    constexpr int32_t kFieldCountGpOffset = -0x2EF0; // fields since the start
     constexpr uint32_t kT0Count = 0x10000000u;
     uint32_t g_syncVParity = 0;
     uint64_t g_frameEndCycle = 0;
@@ -1129,12 +1128,8 @@ namespace
     // The game's fields per second (50 PAL, 60 NTSC; set by timerInit).
     int32_t fieldRate(uint8_t *rdram, uint32_t gp)
     {
-        const int32_t rate = *gpWord(rdram, gp, TMB_GP(-0x2BD0));
-#if defined(TMB_REGION_US)
+        const int32_t rate = *gpWord(rdram, gp, -0x2ED8);
         return rate > 0 ? rate : 60;
-#else
-        return rate > 0 ? rate : 50;
-#endif
     }
 
     // TMB_PROFILE_HITCH=<ms> (with PS2X_PROFILE and PS2X_PROFILE_GATED=1): the profiler samples only while the frame
@@ -1254,11 +1249,11 @@ namespace
     // and frame time (weapons, debris) split over the steps, at most TMB_SUBSTEPS (default 4, 1 disables) steps.
     // Update ends in a tail call and may be preempted, so each step returns through the dispatcher to
     // kSubstepReturn (padding between two functions, never executed), which starts the next one.
-    constexpr uint32_t kTheGameUpdate = TMB_ADDR(0x0012FBA8u);
-    constexpr uint32_t kSubstepReturn = TMB_ADDR(0x0012FBA4u);
-    constexpr int32_t kFieldsLastFrameGpOffset = TMB_GP(-0x2BF0);
-    constexpr int32_t kUpdateRateGpOffset = TMB_GP(-0x2BEC);
-    constexpr int32_t kFieldRateGpOffset = TMB_GP(-0x2BD0); // fields per second (50)
+    constexpr uint32_t kTheGameUpdate = 0x0012FE28u;
+    constexpr uint32_t kSubstepReturn = 0x0012FE24u;
+    constexpr int32_t kFieldsLastFrameGpOffset = -0x2EF8;
+    constexpr int32_t kUpdateRateGpOffset = -0x2EF4;
+    constexpr int32_t kFieldRateGpOffset = -0x2ED8; // fields per second (50)
     int32_t g_maxSubsteps = 4;
 
     struct Substeps
@@ -1285,7 +1280,7 @@ namespace
         SET_GPR_U32(ctx, 4, s.self);
         SET_GPR_U32(ctx, 31, kSubstepReturn);
         ctx->pc = kTheGameUpdate;
-        Update__7TheGame_0x12fba8(rdram, ctx, runtime);
+        Update__7TheGame_0x12fe28(rdram, ctx, runtime);
     }
 
     void substepReturn(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1411,7 +1406,7 @@ namespace
     {
         const uint32_t ra = getRegU32(ctx, 31);
         timelineEvent('P', ra);
-        sceGsSyncPath_0x204e28(rdram, ctx, runtime);
+        sceGsSyncPath_0x203c18(rdram, ctx, runtime);
         timelineEvent('p', ra);
     }
 
@@ -1419,7 +1414,7 @@ namespace
     {
         const uint32_t ra = getRegU32(ctx, 31);
         timelineEvent('V', ra);
-        sceGsSyncV_0x204d90(rdram, ctx, runtime);
+        sceGsSyncV_0x203b80(rdram, ctx, runtime);
         timelineEvent('v', ra);
     }
 
@@ -1446,14 +1441,14 @@ namespace
             const uint32_t vehicle = g_theGame + static_cast<uint32_t>(index) * 0x2D00u;
             float health = 0.0f;
             std::memcpy(&health, rdram + ((vehicle + 1012u) & 0x1FFFFFFu), 4);
-            if (vehicle == TMB_ADDR(0x00259C70u) || !(health > 0.0f))
+            if (vehicle == 0x00257B50u || !(health > 0.0f))
                 continue;
             R5900Context call = *ctx;
             SET_GPR_U32(&call, 4, vehicle);
             SET_GPR_U32(&call, 5, vehicle); // the hit point: only placement for the effects
             SET_GPR_U32(&call, 6, 10000u);
             SET_GPR_U32(&call, 7, 0u);
-            vehicleTakeHit__7VehicleP8_fvectorii_0x1ae070(rdram, &call, runtime);
+            vehicleTakeHit__7VehicleP8_fvectorii_0x1ad208(rdram, &call, runtime);
             ++killed;
         }
         if (killed)
@@ -1507,7 +1502,7 @@ namespace
         const int32_t steps = std::min(fields, g_maxSubsteps);
         if (steps <= 1 || s.steps != 0)
         {
-            Update__7TheGame_0x12fba8(rdram, ctx, runtime);
+            Update__7TheGame_0x12fe28(rdram, ctx, runtime);
             return;
         }
         s.step = 0;
@@ -1523,7 +1518,7 @@ namespace
 
     // TMB_TRACE_BLACKBOX=<file>: the player vehicle (0x259c70, 0x2200 bytes) at every collisCheckHdResults; when its
     // position goes past 50000 the last 64 frames are written to <file> (bring-up aid for the physics blow-ups).
-    constexpr uint32_t kPlayerVehicle = TMB_ADDR(0x00259C70u);
+    constexpr uint32_t kPlayerVehicle = 0x00257B50u;
     constexpr uint32_t kVehicleBytes = 0x2200u;
     constexpr uint32_t kBlackboxFrames = 64u;
     std::vector<uint8_t> g_blackbox;
@@ -1569,7 +1564,7 @@ namespace
                              g_blackboxNext);
             }
         }
-        collisCheckHdResults__7Vehicle_0x117ad8(rdram, ctx, runtime);
+        collisCheckHdResults__7Vehicle_0x117d48(rdram, ctx, runtime);
     }
 
     // TMB_FX_TEST=<seconds>: an effects test bench. In a match, every <seconds> one of the game's 87 particle effect
@@ -1581,20 +1576,20 @@ namespace
     // TMB_NO_AI=1 (testing): the computer's vehicles do nothing, so a player can drive around an arena undisturbed,
     // to look at it: Vehicle::aiUpdateInputs (each bot's pad, every frame) runs the game's own
     // aiUpdateFrozenInput instead (no throttle, no steering, no firing).
-    constexpr uint32_t kAiUpdateInputs = TMB_ADDR(0x00101480u);
-    constexpr uint32_t kAiUpdateFrozenInput = TMB_ADDR(0x001017C8u);
+    constexpr uint32_t kAiUpdateInputs = 0x001014A0u;
+    constexpr uint32_t kAiUpdateFrozenInput = 0x001017E8u;
 
     void aiUpdateInputsFrozen(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         ctx->pc = kAiUpdateFrozenInput;
-        aiUpdateFrozenInput__7Vehicle_0x1017c8(rdram, ctx, runtime);
+        aiUpdateFrozenInput__7Vehicle_0x1017e8(rdram, ctx, runtime);
     }
 
     // A multitap in pad port 0, as the game's own sceMtap library would find one (its IOP module is not run): four
     // players on that port's slots (the runtime's PSPadBackend: player N on the Nth gamepad or PS2X_PADN_SCRIPT),
     // which the game needs for its 3 and 4 player modes. TMB_MULTITAP=0: none.
-    constexpr uint32_t kMtapInit = TMB_ADDR(0x00207460u), kMtapPortOpen = TMB_ADDR(0x002076E0u),
-                       kMtapPortClose = TMB_ADDR(0x00207750u), kMtapGetConnection = TMB_ADDR(0x002077C0u);
+    constexpr uint32_t kMtapInit = 0x00206250u, kMtapPortOpen = 0x002064D0u,
+                       kMtapPortClose = 0x00206540u, kMtapGetConnection = 0x002065B0u;
     bool multitap()
     {
         static const bool s_on = []
@@ -1630,9 +1625,9 @@ namespace
         ctx->pc = getRegU32(ctx, 31);
     }
 
-    constexpr uint32_t kParticleMove = TMB_ADDR(0x001E6368u);
-    constexpr uint32_t kParticleCreateFx = TMB_ADDR(0x001E7820u);
-    constexpr uint32_t kFxTestReturn = TMB_ADDR(0x00100264u);
+    constexpr uint32_t kParticleMove = 0x001E5158u;
+    constexpr uint32_t kParticleCreateFx = 0x001E6610u;
+    constexpr uint32_t kFxTestReturn = 0x00100264u;
     constexpr uint32_t kVehiclePosition = 0x260u; // as TMB_TRACE_POS reads it
     constexpr int kFxTypes = 87;                  // particleInit's table: 0x57 entries
     const auto g_processStart = std::chrono::steady_clock::now();
@@ -1657,7 +1652,7 @@ namespace
             t.next = now + 5.0; // the match's first seconds without
         if (now < t.next || t.type >= kFxTypes)
         {
-            particleMove__Fv_0x1e6368(rdram, ctx, runtime);
+            particleMove__Fv_0x1e5158(rdram, ctx, runtime);
             return;
         }
         t.next = now + t.period;
@@ -1678,7 +1673,7 @@ namespace
         SET_GPR_U32(ctx, 31, kFxTestReturn);
         std::fprintf(stderr, "[tmb:fx] t=%.2f type %d at %.1f %.1f %.1f\n", now, type, target[0], target[1], target[2]);
         ctx->pc = kParticleCreateFx;
-        particleCreateFx__FP8_fvectorifPA3_ff_0x1e7820(rdram, ctx, runtime);
+        particleCreateFx__FP8_fvectorifPA3_ff_0x1e6610(rdram, ctx, runtime);
     }
 
     void fxTestReturn(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1687,7 +1682,7 @@ namespace
         SET_GPR_U32(ctx, 29, g_fxTest.sp);
         SET_GPR_U32(ctx, 31, g_fxTest.ra);
         ctx->pc = kParticleMove;
-        particleMove__Fv_0x1e6368(rdram, ctx, runtime);
+        particleMove__Fv_0x1e5158(rdram, ctx, runtime);
     }
 
     // With the native renderer (TMB_NATIVE=1), the GS stream (menus, HUD, 2D, movies, effects) goes to the fork's GS
@@ -1818,8 +1813,8 @@ namespace
                 g_timeline.startUpdate = static_cast<uint32_t>(std::max(1, std::atoi(start)));
             if (const char *seconds = std::getenv("TMB_TRACE_TIMELINE_SECONDS"); seconds && *seconds)
                 g_timeline.durationNs = static_cast<int64_t>(std::max(1.0, std::atof(seconds)) * 1e9);
-            runtime.registerFunction(TMB_ADDR(0x00204E28u), &sceGsSyncPathTimeline);
-            runtime.registerFunction(TMB_ADDR(0x00204D90u), &sceGsSyncVTimeline);
+            runtime.registerFunction(0x00203C18u, &sceGsSyncPathTimeline);
+            runtime.registerFunction(0x00203B80u, &sceGsSyncVTimeline);
         }
         runtime.registerFunction(kSubstepReturn, &substepReturn);
         runtime.registerFunction(kMtapInit, &mtapInit);
@@ -1849,7 +1844,7 @@ namespace
             if ((g_posTrace = std::fopen(path, "w")))
                 std::setvbuf(g_posTrace, nullptr, _IOLBF, 0);
         if (g_blackboxPath || g_posTrace)
-            runtime.registerFunction(TMB_ADDR(0x00117AD8u), &collisCheckHdResultsBlackbox);
+            runtime.registerFunction(0x00117D48u, &collisCheckHdResultsBlackbox);
         if (const char *period = std::getenv("TMB_TRACE_THREADS"); period && *period)
         {
             startThreadTrace(runtime, std::max(0.5, std::atof(period)));
@@ -1892,4 +1887,4 @@ namespace
     }
 }
 
-PS2_REGISTER_GAME_OVERRIDE(::tmb::region::kGameName, ::tmb::region::kExecutable, kTmbPalEntry, 0u, &applyTmb)
+PS2_REGISTER_GAME_OVERRIDE("Twisted Metal - Black (USA)", "SCUS_971.01", kTmbPalEntry, 0u, &applyTmb)

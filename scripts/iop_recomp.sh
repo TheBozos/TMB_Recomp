@@ -5,7 +5,7 @@
 # this first boots the game long enough for it to load its modules, with PS2X_IOP_DUMP_MODULES, then runs the fork's
 # tools/iop_recomp.py on the dumps. Like the rest of the generated code, the output is derived from the game: never
 # committed.
-#   [TMB_REGION=us|pal] scripts/iop_recomp.sh [seconds of boot, default 40]
+#   scripts/iop_recomp.sh [seconds of boot, default 40]
 source "$(dirname "$0")/common.sh"
 cd "$ROOT"
 SECONDS_TO_BOOT=${1:-40}

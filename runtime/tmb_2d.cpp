@@ -12,7 +12,6 @@
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
-#include "tmb_region.h"
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_texture_cache.h"
 #include "runtime/ps2_store_patch.h"
@@ -58,28 +57,16 @@ namespace tmb::twod
         std::shared_ptr<const ps2x::native::TextureCache::Texture> g_menuPicture;
         std::atomic<bool> g_imageReplaced{false}; // loadImage drew a picture instead of transferring it (this vblank)
 
-        constexpr uint32_t kFontBuildPrim = TMB_ADDR(0x001C5B28u);
+        constexpr uint32_t kFontBuildPrim = 0x001C4918u;
         // displayDialog (a match's pause, won / lost and results overlays): where its loop flushes the font, and its D2
         // kick of the darkening sprite that follows (inline; its offsets differ between the regions).
-#if TMB_REGION_US
         constexpr uint32_t kDialogFontReturn = 0x163940u, kDialogKick = 0x163a50u;
-#else
-        constexpr uint32_t kDialogFontReturn = 0x163798u, kDialogKick = 0x1638acu;
-#endif
-        constexpr uint32_t kFontDmaFontData = TMB_ADDR(0x001C4FE0u);
-#if TMB_REGION_US
+        constexpr uint32_t kFontDmaFontData = 0x001C3FB8u;
         constexpr uint32_t kFontRecords = 0x504540u, kFontRecordBytes = 0x20u;
         constexpr uint32_t kViews = 0x4dfcd0u;
         constexpr int32_t kGpNumViews = -0x322c;
         constexpr int32_t kGpCurView = -0x3228, kGpFontMode = -0x3034, kGpFontUpload = -0x3630, kGpFontCount = -0x303c,
                           kGpFontAt = -0x3038, kGpFontTagAt = -0x3030, kGpFontStart = -0x302c;
-#else
-        constexpr uint32_t kFontRecords = 0x50caf0u, kFontRecordBytes = 0x38u;
-        constexpr uint32_t kViews = 0x4e2cd0u;
-        constexpr int32_t kGpNumViews = -0x2f5c;
-        constexpr int32_t kGpCurView = -0x2f58, kGpFontMode = -0x2d28, kGpFontUpload = -0x3360, kGpFontCount = -0x2d30,
-                          kGpFontAt = -0x2d2c, kGpFontTagAt = -0x2d24, kGpFontStart = -0x2d20;
-#endif
 
         // The font's packet "sent" (fontDmaFontData) since the last publish: the frame's 2D is complete.
         std::atomic<bool> g_flushed{false};
@@ -121,7 +108,7 @@ namespace tmb::twod
         {
             if (!on())
             {
-                fontBuildPrim__FicP6QwData_0x1c5b28(rdram, ctx, runtime);
+                fontBuildPrim__FicP6QwData_0x1c4918(rdram, ctx, runtime);
                 return;
             }
             const uint32_t gp = noteGp(getRegU32(ctx, 28));
@@ -194,7 +181,7 @@ namespace tmb::twod
         {
             if (!on())
             {
-                fontDmaFontData__Fv_0x1c4fe0(rdram, ctx, runtime);
+                fontDmaFontData__Fv_0x1c3fb8(rdram, ctx, runtime);
                 return;
             }
             const uint32_t gp = noteGp(getRegU32(ctx, 28));
@@ -219,18 +206,12 @@ namespace tmb::twod
         // builders fill is never sent: each override leaves the Hud's qword count (Hud + 4) at 1, under the 2 that
         // Update__3Hudi needs to kick its DMA (whichever builder runs last on each path is overridden).
 
-        constexpr uint32_t kRadar = TMB_ADDR(0x0013EA28u), kHealthBar = TMB_ADDR(0x001419D8u), kSeparator = TMB_ADDR(0x0013E028u),
-                           kRearViewEdge = TMB_ADDR(0x0013E2C8u), kLaser = TMB_ADDR(0x001424C8u), k4pSeparator = TMB_ADDR(0x0013E720u);
-        constexpr uint32_t kTurbo4p = TMB_ADDR(0x00141220u), kEnergy4p = TMB_ADDR(0x00141790u), kHealth4p = TMB_ADDR(0x00141488u);
-#if TMB_REGION_US
+        constexpr uint32_t kRadar = 0x0013EB40u, kHealthBar = 0x00141AF0u, kSeparator = 0x0013E140u,
+                           kRearViewEdge = 0x0013E3E0u, kLaser = 0x001425B8u, k4pSeparator = 0x0013E838u;
+        constexpr uint32_t kTurbo4p = 0x00141338u, kEnergy4p = 0x001418A8u, kHealth4p = 0x001415A0u;
         constexpr int32_t kGpGame = -0x4154, kGpSettings = -0x4148, kGpRearLarge = -0x3224;
         constexpr int32_t kGpThreat[4] = {-0x38bc, -0x38f8, -0x37a4, -0x3760};
         constexpr uint32_t kSetTeams = 0x1a30c, kSetTeam = 0x1a320, kSetFade = 0x1a360, kAlphaConstants = 0x4e6e70u;
-#else
-        constexpr int32_t kGpGame = -0x4174, kGpSettings = -0x4168, kGpRearLarge = -0x2f54;
-        constexpr int32_t kGpThreat[4] = {-0x35e8, -0x3624, -0x34d0, -0x348c};
-        constexpr uint32_t kSetTeams = 0x1a274, kSetTeam = 0x1a288, kSetFade = 0x1a2cc, kAlphaConstants = 0x4edec0u;
-#endif
         constexpr uint32_t kVehicleBytes = 0x2d00;
 
         float flt(const uint8_t *rdram, uint32_t address)
@@ -315,11 +296,7 @@ namespace tmb::twod
         // mathfTransform3dTo2d(view, p, out): p plus the view's translation (viewGetWeTrans) through its world-to-screen
         // matrix (viewGetWorldToScreenMat; mathfMulVec4x4: each row's xyz dot the point, plus its w), divided by w:
         // out = (x / w, y / w, w, z / w).
-#if TMB_REGION_US
         constexpr uint32_t kViewTranslations = 0x4a1240u, kViewMatrices = 0x4e0230u;
-#else
-        constexpr uint32_t kViewTranslations = 0x4a4240u, kViewMatrices = 0x4e3230u;
-#endif
         void project(const uint8_t *rdram, uint32_t view, const float p[4], float out[4])
         {
             const uint32_t translation = kViewTranslations + view * 0xf0u, matrix = kViewMatrices + view * 64u;
@@ -494,7 +471,7 @@ namespace tmb::twod
             const uint32_t hud = getRegU32(ctx, 4);
             if (on())
                 radar(rdram, ctx, runtime, hud, getRegU32(ctx, 6));
-            BuildRadarStuff__3HudP6QwDatai_0x13ea28(rdram, ctx, runtime);
+            BuildRadarStuff__3HudP6QwDatai_0x13eb40(rdram, ctx, runtime);
             if (on())
                 setWord(rdram, hud + 4u, 1u);
         }
@@ -507,7 +484,7 @@ namespace tmb::twod
             const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
             const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
             const uint32_t gp = noteGp(getRegU32(ctx, 28));
-            BuildHealthBar__3HudP6QwDataiiiiP7Vehicle_0x1419d8(rdram, ctx, runtime);
+            BuildHealthBar__3HudP6QwDataiiiiP7Vehicle_0x141af0(rdram, ctx, runtime);
             if (!on())
                 return;
             const uint32_t game = word(rdram, gp + kGpGame);
@@ -539,7 +516,7 @@ namespace tmb::twod
         void separatorOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
-            BuildSeparator__3HudP6QwData_0x13e028(rdram, ctx, runtime);
+            BuildSeparator__3HudP6QwData_0x13e140(rdram, ctx, runtime);
             if (!on())
                 return;
             setWord(rdram, hud + 4u, 1u);
@@ -567,7 +544,7 @@ namespace tmb::twod
         void rearViewEdgeOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t hud = getRegU32(ctx, 4), viewIndex = getRegU32(ctx, 6);
-            BuildRearViewEdge__3HudP6QwDatai_0x13e2c8(rdram, ctx, runtime);
+            BuildRearViewEdge__3HudP6QwDatai_0x13e3e0(rdram, ctx, runtime);
             if (!on())
                 return;
             setWord(rdram, hud + 4u, 1u);
@@ -602,18 +579,14 @@ namespace tmb::twod
             m[2][1] = -sy * sz - cy * sx * cz;
             m[2][2] = cy * cx;
         }
-#if TMB_REGION_US
         constexpr uint32_t kLaserOffsets = 0x4e6ef0u; // {0.006, -7.05, 4.08}, then {0.016, 9.204, 1.649}
-#else
-        constexpr uint32_t kLaserOffsets = 0x4edf40u;
-#endif
 
         // BuildLaserStuff: the laser sight, a line from the gun (the car's frame by one offset, then its turret's angles
         // by another) to its target (car + 0x2438), both projected as mathfTransform3dTo2d; alpha 0x1a red.
         void laserOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
-            BuildLaserStuff__3HudP6QwData_0x1424c8(rdram, ctx, runtime);
+            BuildLaserStuff__3HudP6QwData_0x1425b8(rdram, ctx, runtime);
             if (!on())
                 return;
             setWord(rdram, hud + 4u, 1u);
@@ -652,7 +625,7 @@ namespace tmb::twod
             const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
             const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
-            build4PTurboBar__3HudP6QwDataiiii_0x141220(rdram, ctx, runtime);
+            build4PTurboBar__3HudP6QwDataiiii_0x141338(rdram, ctx, runtime);
             if (!on())
                 return;
             setWord(rdram, hud + 4u, 1u);
@@ -665,7 +638,7 @@ namespace tmb::twod
             const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
             const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
-            build4PEnergyBar__3HudP6QwDataiiii_0x141790(rdram, ctx, runtime);
+            build4PEnergyBar__3HudP6QwDataiiii_0x1418a8(rdram, ctx, runtime);
             if (!on())
                 return;
             setWord(rdram, hud + 4u, 1u);
@@ -681,7 +654,7 @@ namespace tmb::twod
             const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
             const int32_t x = static_cast<int32_t>(getRegU32(ctx, 6)), y = static_cast<int32_t>(getRegU32(ctx, 7));
             const int32_t w = static_cast<int32_t>(getRegU32(ctx, 8)), h = static_cast<int32_t>(getRegU32(ctx, 9));
-            build4PHealthBar__3HudP6QwDataiiii_0x141488(rdram, ctx, runtime);
+            build4PHealthBar__3HudP6QwDataiiii_0x1415a0(rdram, ctx, runtime);
             if (!on())
                 return;
             setWord(rdram, hud + 4u, 1u);
@@ -695,7 +668,7 @@ namespace tmb::twod
             hudSprite(x0, y0, x0 + w, y0 + fill, colour, true);
         }
 
-        constexpr uint32_t kChargeUp = TMB_ADDR(0x00140990u);
+        constexpr uint32_t kChargeUp = 0x00140AA8u;
 
         // BuildChargeUpBar(hud, packet): the charge (car + 0x220c of car + 0x2210) as a bar 4 pixels high, 108 long at
         // full charge, from 54 pixels left of the current view's centre, 10 to 14 pixels above its bottom edge; ABE, alpha
@@ -705,7 +678,7 @@ namespace tmb::twod
         void chargeUpOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
-            BuildChargeUpBar__3HudP6QwData_0x140990(rdram, ctx, runtime);
+            BuildChargeUpBar__3HudP6QwData_0x140aa8(rdram, ctx, runtime);
             if (!on())
                 return;
             setWord(rdram, hud + 4u, 1u);
@@ -722,7 +695,7 @@ namespace tmb::twod
 
         // in install():
 
-        constexpr uint32_t kOverheat = TMB_ADDR(0x00140CE0u);
+        constexpr uint32_t kOverheat = 0x00140DF8u;
 
         // BuildOverheatBar(hud, packet): a small lamp right of the current view's centre, its colour by the heat of the
         // car's weapon (car + 0x2220 of car + 0x2224, in percent): the game's own builder eases Hud + 0x5b0 (red) and
@@ -732,7 +705,7 @@ namespace tmb::twod
         void overheatOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t hud = getRegU32(ctx, 4), gp = noteGp(getRegU32(ctx, 28));
-            BuildOverheatBar__3HudP6QwData_0x140ce0(rdram, ctx, runtime);
+            BuildOverheatBar__3HudP6QwData_0x140df8(rdram, ctx, runtime);
             if (!on())
                 return;
             setWord(rdram, hud + 4u, 1u);
@@ -749,20 +722,16 @@ namespace tmb::twod
         void separator4pOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t hud = getRegU32(ctx, 4);
-            Build4pSeparater__3HudP6QwDatai_0x13e720(rdram, ctx, runtime);
+            Build4pSeparater__3HudP6QwDatai_0x13e838(rdram, ctx, runtime);
             if (on())
                 setWord(rdram, hud + 4u, 1u);
         }
 
         // ---- the loading bar (Shell::LoadLevelFiles): buildProgressBar and, on the loads without the shell, the vblank
         // callback that sends it between the load's steps; drawn and published here, as no game frame ends meanwhile ----
-        constexpr uint32_t kBuildProgressBar = TMB_ADDR(0x001FD4B8u), kBarVSync = TMB_ADDR(0x00203448u),
-                           kInformProgressBar = TMB_ADDR(0x001FDAE0u);
-#if TMB_REGION_US
+        constexpr uint32_t kBuildProgressBar = 0x001FC2A8u, kBarVSync = 0x00202238u,
+                           kInformProgressBar = 0x001FC8D0u;
         constexpr int32_t kGpBarMode = -0x3290, kGpBarFlip = -0x328c, kGpBarShown = -0x3280, kGpBarProgress = -0x327c;
-#else
-        constexpr int32_t kGpBarMode = -0x2fc0, kGpBarFlip = -0x2fbc, kGpBarShown = -0x2fb0, kGpBarProgress = -0x2fac;
-#endif
         std::atomic<uint32_t> g_barGp{0}; // the game's gp at buildProgressBar (the vblank callback's own may differ)
 
         // The bar over view 0 (initProgressBar's viewCreate: 0x11 on the first load after the shell, a frame view; 0x12
@@ -798,7 +767,7 @@ namespace tmb::twod
         {
             if (!on())
             {
-                buildProgressBar__FUi_0x1fd4b8(rdram, ctx, runtime);
+                buildProgressBar__FUi_0x1fc2a8(rdram, ctx, runtime);
                 return;
             }
             const uint32_t gp = noteGp(getRegU32(ctx, 28));
@@ -821,7 +790,7 @@ namespace tmb::twod
         void informProgressBarOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t gp = getRegU32(ctx, 28);
-            informProgressBar__Ff_0x1fdae0(rdram, ctx, runtime);
+            informProgressBar__Ff_0x1fc8d0(rdram, ctx, runtime);
             if (!on())
                 return;
             noteGp(gp);
@@ -832,12 +801,12 @@ namespace tmb::twod
 
         // finishShellLoop (a memory card save started from a match's overlay): the current view darkened by a quarter
         // (black, alpha 0x21, the font's (Cs - Cd) As + Cd), over the overlay's text; drawn instead of sent.
-        constexpr uint32_t kFinishShellLoop = TMB_ADDR(0x0019FC70u);
+        constexpr uint32_t kFinishShellLoop = 0x0019F790u;
         void finishShellLoopOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             if (!on())
             {
-                finishShellLoop__Fv_0x19fc70(rdram, ctx, runtime);
+                finishShellLoop__Fv_0x19f790(rdram, ctx, runtime);
                 return;
             }
             const View v = viewOf(rdram, word(rdram, getRegU32(ctx, 28) + kGpCurView));
@@ -865,16 +834,11 @@ namespace tmb::twod
 
         // ---- movies: the pictures the MPEG decoder hands to sceMpegGetPicture, shown under the 2D by loadImage (each
         // vblank while a movie plays) instead of the GS image transfers the game built of them ----
-        constexpr uint32_t kLoadImage = TMB_ADDR(0x001E0A48u);
+        constexpr uint32_t kLoadImage = 0x001DF838u;
         // handler_endimage's work (the GIF DMA end interrupt the transfer raised): with the picture still held (the flag at
         // gp + kImageHeld), voBufDecCount on the movie's picture buffer frees it for the decoder.
-#if TMB_REGION_US
         constexpr uint32_t kVoBufDecCount = 0x001FEF58u, kVoBuf = 0x004C4A18u;
         constexpr int32_t kImageHeld = -0x36d8;
-#else
-        constexpr uint32_t kVoBufDecCount = 0x00200168u, kVoBuf = 0x004C7A18u;
-        constexpr int32_t kImageHeld = -0x3408;
-#endif
 
         void moviePicture(uint32_t, uint32_t width, uint32_t height, const uint8_t *rgba)
         {
@@ -898,11 +862,7 @@ namespace tmb::twod
         // also shown under the overlay.
         void showOnCircuit2(const ps2x::native::TextureCache::Texture &picture)
         {
-#if TMB_REGION_US
             constexpr uint32_t kFrameWidth = 640u, kFrameHeight = 448u;
-#else
-            constexpr uint32_t kFrameWidth = 640u, kFrameHeight = 512u;
-#endif
             auto frame = std::make_shared<std::vector<uint32_t>>(static_cast<size_t>(kFrameWidth) * kFrameHeight, 0x80000000u);
             const uint32_t width = std::min(picture.width, kFrameWidth), height = std::min(picture.height, kFrameHeight);
             const uint32_t x0 = (kFrameWidth - width) / 2u, y0 = (kFrameHeight - height) / 2u;
@@ -926,14 +886,10 @@ namespace tmb::twod
             }
             if (!on() || !picture)
             {
-                loadImage__FPUi_0x1e0a48(rdram, ctx, runtime);
+                loadImage__FPUi_0x1df838(rdram, ctx, runtime);
                 return;
             }
-#if TMB_REGION_US
             constexpr float kFrameHeight = 448.0f;
-#else
-            constexpr float kFrameHeight = 512.0f;
-#endif
             ps2x::native::Screen screen;
             screen.originX = 2048.0f - 320.0f;
             screen.originY = 2048.0f - kFrameHeight * 0.5f;
@@ -959,11 +915,11 @@ namespace tmb::twod
         // interrupt, now never raised): the handler sets the held flag only after loadImage returns, so the picture
         // loadImage replaced is freed here (voBufDecCount: the buffer's count down by one), else the decoder could wait
         // for that buffer while the next picture waits for it (an intermittent hang in a movie).
-        constexpr uint32_t kVblankHandler = TMB_ADDR(0x001C2898u);
+        constexpr uint32_t kVblankHandler = 0x001C1890u;
         void vblankHandlerOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             g_imageReplaced.store(false, std::memory_order_relaxed);
-            vblankHandler__Fi_0x1c2898(rdram, ctx, runtime);
+            vblankHandler__Fi_0x1c1890(rdram, ctx, runtime);
             if (!g_imageReplaced.exchange(false, std::memory_order_relaxed))
                 return;
             const uint32_t held = getRegU32(ctx, 28) + static_cast<uint32_t>(kImageHeld);
@@ -982,7 +938,7 @@ namespace tmb::twod
             const uint32_t gp = g_barGp.load(std::memory_order_relaxed);
             if (!on() || gp == 0u)
             {
-                updateBarVSyncCallback__Fi_0x203448(rdram, ctx, runtime);
+                updateBarVSyncCallback__Fi_0x202238(rdram, ctx, runtime);
                 return;
             }
             setWord(rdram, gp + kGpBarFlip, word(rdram, gp + kGpBarFlip) ^ 1u);

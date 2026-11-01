@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Usage: [TMB_REGION=us|pal] scripts/extract_iso.sh <path-to-the-disc.iso>
-# Extracts the disc into game_us/ (USA, SCUS-97101, the default) or game/ (PAL, SCES-50360); the runtime mounts
+# Usage: scripts/extract_iso.sh <path-to-the-disc.iso>
+# Extracts the disc into game_us/ (USA, SCUS-97101); the runtime mounts
 # cdrom0: on the ELF's directory.
 source "$(dirname "$0")/common.sh"
 ISO="${1:-}"

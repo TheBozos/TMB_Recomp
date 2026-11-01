@@ -1013,3 +1013,21 @@ A program not translated is not run (no VU1, no interpreter): VU1 skips it and t
 DIRECT packets that only draw (in a match) are drawn natively from their GIF data by a `GifToNative` of their own.
 Still emulated: the GS front end for the menus, HUD and 2D.
 
+
+## 2026-11-01: the VIF1 stream no longer read
+
+The hier objects drawn from the mesh pack are submitted in the game's own order, which its calls give, instead of at
+their mark in the VIF1 stream: a view's opaque objects in traversal order (pktAddVu1ObjAsm), then its alpha ones by the
+depth-sorted list pktLinkAlphaObjAsm builds (bucket vf30.x / 8 + 1 of 129, the farthest first, a bucket's newest
+first), when the view's chain is complete: hier__Fi's at its hierCheckVifComplete (right before its kick, which
+hierDmaHandler does instead when VIF1 is busy), hier2p's (the split screen's second view of a pair) at hier2pFlushDma,
+a view hier__Fi does not kick itself (the shell's menus) at the frame's end. Hooks at hier__Fi's return were wrong: a
+recompiled function can return to the dispatcher before its end. The GS state of the draws (ALPHA_1, TEST_1,
+ZBUF_1.ZMSK) follows the objects in that order: the traversal's GS context block (s4) a header brings when it changed
+(a node's: its writes recorded offline from the NGP files into the pack, TMBMESH5; the default one, ctxGetDefaultGSCtx,
+from EE memory), then the strips' register blocks; objects not drawn still count their context. The skid marks' object
+(SkidMarks::draw fills skidBuffer each frame) is built from the marks themselves.
+`TMB_NATIVE_VIF=1` brings the adapter's VIF1 observer back (objects at their marks, the stream's GS state); with
+`TMB_NATIVE_MESHES_CHECK=1` too the draws stay in the game's order and `[tmb:order]` compares: Junkyard 1P 1.66 M
+objects, CITY 1P 1.53 M, 4P 0.41 M: 0 out of the stream's order, 0 materials differing, the skid marks' geometry equal
+to the stream's. By default no VIF1 observer is registered and the VU1 gate skips every program.

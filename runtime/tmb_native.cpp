@@ -3201,7 +3201,7 @@ namespace tmb::native
         {
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
             static uint32_t s_frames = 0;
-            if (++s_frames % 250u == 0u)
+            if (++s_frames % 250u == 0u && vifObserved()) // the stream's counts (none without the observer)
             {
                 const State &s = state();
                 std::fprintf(stderr, "[tmb:native] per 250 frames: %llu chains, %llu objects (%llu not native), %llu strips, %llu triangles, %llu textured batches, DIRECT %llu drawing / %llu state only, group %llu; matrix col3 (%.1f %.1f %.1f %.1f)\n",

@@ -52,6 +52,14 @@ namespace tmb::textures
     std::shared_ptr<const ps2x::native::TextureCache::Texture> lookup(uint64_t tex0, uint64_t texa);
 }
 
+namespace tmb::particles
+{
+    // TMB_NATIVE_PARTICLES_CHECK=1 (runtime/tmb_particles.cpp): the systems drawn natively are left to the game too, and
+    // what the translations below draw from their packets is compared with what tmb_particles computed from the structs.
+    bool checking();
+    void compare(uint32_t pc, const ps2x::native::Vertex *vertices, size_t count);
+}
+
 namespace tmb::native
 {
     namespace
@@ -1062,7 +1070,7 @@ namespace tmb::native
             const VuImage &vu = s.vu;
             if (!useMaterial(s, 0x218u, 0u, triangles, 0x5151u))
                 return;
-            int32_t count = static_cast<int32_t>(vu.w(0x218u, 3));
+            int32_t count = static_cast<int16_t>(vu.w(0x218u, 3) & 0xffffu); // ILW: 16 bits, bit 15 the attach flag
             float object[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
             if (count < 0)
             {
@@ -1168,7 +1176,7 @@ namespace tmb::native
                 for (int i = 0; i < 4; ++i)
                     out[i] = vu.f(at & 0x3ffu, i);
             };
-            int32_t list = static_cast<int32_t>(vu.w(top + 6u, 2));
+            int32_t list = static_cast<int16_t>(vu.w(top + 6u, 2) & 0xffffu); // ILW: 16 bits, bit 15 the attach flag
             float object[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
             if (list < 0)
             {
@@ -1418,7 +1426,7 @@ namespace tmb::native
                 flush(s, triangles);
                 s.sampleTarget = true;
             }
-            int32_t count = static_cast<int32_t>(vu.w(268, 0));
+            int32_t count = static_cast<int16_t>(vu.w(268, 0) & 0xffffu); // ILW: 16 bits, bit 15 the attach flag
             float object[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
             if (count < 0)
             {
@@ -1676,7 +1684,7 @@ namespace tmb::native
             const float(&c6)[4] = s.fxConst[2];
             const float(&c7)[4] = s.fxConst[3];
             const float guard = std::fabs(c6[3]);
-            int32_t count = static_cast<int32_t>(vu.w(296, 3));
+            int32_t count = static_cast<int16_t>(vu.w(296, 3) & 0xffffu); // ILW: 16 bits, bit 15 the attach flag
             float object[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
             if (count < 0)
             {
@@ -1799,7 +1807,7 @@ namespace tmb::native
             {
                 tagQw = top + 2u;
                 data = top + 3u;
-                const int32_t list = static_cast<int32_t>(vu.w(top, 3));
+                const int32_t list = static_cast<int16_t>(vu.w(top, 3) & 0xffffu); // ILW: 16 bits, bit 15 the attach flag
                 float object[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}};
                 if (list < 0)
                     for (int j = 0; j < 4; ++j)
@@ -2771,9 +2779,16 @@ namespace tmb::native
                                 s.mode = Mode::Beams;
                                 s.checkMine.clear();
                                 s.particleFrom = triangles.size();
-                                s.collecting = s.check != nullptr;
+                                s.collecting = s.check != nullptr || tmb::particles::checking();
                                 beams(s, triangles);
                                 s.collecting = false;
+                                if (tmb::particles::checking())
+                                {
+                                    std::vector<ps2x::native::Vertex> mine = s.checkMine;
+                                    mine.insert(mine.end(), triangles.begin() + static_cast<std::ptrdiff_t>(std::min(s.particleFrom, triangles.size())),
+                                                triangles.end());
+                                    tmb::particles::compare(pc, mine.data(), mine.size());
+                                }
                             }
                             else if (pc == 0x1198u)
                             {
@@ -2781,9 +2796,16 @@ namespace tmb::native
                                 s.mode = Mode::Lightning;
                                 s.checkMine.clear();
                                 s.particleFrom = triangles.size();
-                                s.collecting = s.check != nullptr;
+                                s.collecting = s.check != nullptr || tmb::particles::checking();
                                 lightning(s, triangles);
                                 s.collecting = false;
+                                if (tmb::particles::checking())
+                                {
+                                    std::vector<ps2x::native::Vertex> mine = s.checkMine;
+                                    mine.insert(mine.end(), triangles.begin() + static_cast<std::ptrdiff_t>(std::min(s.particleFrom, triangles.size())),
+                                                triangles.end());
+                                    tmb::particles::compare(pc, mine.data(), mine.size());
+                                }
                             }
                             else if (pc == 0x0a08u)
                             {
@@ -2791,9 +2813,16 @@ namespace tmb::native
                                 s.mode = Mode::HeatHaze;
                                 s.checkMine.clear();
                                 s.particleFrom = triangles.size();
-                                s.collecting = s.check != nullptr;
+                                s.collecting = s.check != nullptr || tmb::particles::checking();
                                 heatHaze(s, triangles);
                                 s.collecting = false;
+                                if (tmb::particles::checking())
+                                {
+                                    std::vector<ps2x::native::Vertex> mine = s.checkMine;
+                                    mine.insert(mine.end(), triangles.begin() + static_cast<std::ptrdiff_t>(std::min(s.particleFrom, triangles.size())),
+                                                triangles.end());
+                                    tmb::particles::compare(pc, mine.data(), mine.size());
+                                }
                             }
                             else if (pc == 0x0798u)
                             {
@@ -2801,7 +2830,7 @@ namespace tmb::native
                                 s.mode = Mode::TexParticles;
                                 s.checkMine.clear();
                                 s.particleFrom = triangles.size();
-                                s.collecting = s.check != nullptr;
+                                s.collecting = s.check != nullptr || tmb::particles::checking();
                                 texParticles(s, triangles, true);
                                 s.collecting = false;
                             }
@@ -2811,9 +2840,16 @@ namespace tmb::native
                                 s.mode = Mode::Trails;
                                 s.checkMine.clear();
                                 s.particleFrom = triangles.size();
-                                s.collecting = s.check != nullptr;
+                                s.collecting = s.check != nullptr || tmb::particles::checking();
                                 trails(s, triangles);
                                 s.collecting = false;
+                                if (tmb::particles::checking())
+                                {
+                                    std::vector<ps2x::native::Vertex> mine = s.checkMine;
+                                    mine.insert(mine.end(), triangles.begin() + static_cast<std::ptrdiff_t>(std::min(s.particleFrom, triangles.size())),
+                                                triangles.end());
+                                    tmb::particles::compare(pc, mine.data(), mine.size());
+                                }
                             }
                             else if (pc == 0x0118u)
                             {
@@ -2821,9 +2857,16 @@ namespace tmb::native
                                 s.mode = Mode::Streaks;
                                 s.checkMine.clear();
                                 s.particleFrom = triangles.size();
-                                s.collecting = s.check != nullptr;
+                                s.collecting = s.check != nullptr || tmb::particles::checking();
                                 streaks(s, triangles);
                                 s.collecting = false;
+                                if (tmb::particles::checking())
+                                {
+                                    std::vector<ps2x::native::Vertex> mine = s.checkMine;
+                                    mine.insert(mine.end(), triangles.begin() + static_cast<std::ptrdiff_t>(std::min(s.particleFrom, triangles.size())),
+                                                triangles.end());
+                                    tmb::particles::compare(pc, mine.data(), mine.size());
+                                }
                             }
                             else if (pc == 0x2338u)
                             {
@@ -2831,7 +2874,7 @@ namespace tmb::native
                                 s.mode = Mode::LensFlares;
                                 s.checkMine.clear();
                                 s.particleFrom = triangles.size();
-                                s.collecting = s.check != nullptr;
+                                s.collecting = s.check != nullptr || tmb::particles::checking();
                                 lensFlares(s, triangles);
                                 s.collecting = false;
                             }
@@ -2841,7 +2884,7 @@ namespace tmb::native
                                 s.mode = Mode::Particles;
                                 s.checkMine.clear();
                                 s.particleFrom = triangles.size();
-                                s.collecting = s.check != nullptr;
+                                s.collecting = s.check != nullptr || tmb::particles::checking();
                                 particles(s, triangles, true);
                                 s.collecting = false;
                             }

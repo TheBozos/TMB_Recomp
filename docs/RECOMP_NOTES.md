@@ -1800,3 +1800,79 @@ push or pull request), and every release has a changelog.
   zip with `game/SCUS_971.01` (ELF) and an ISO9660 image: refused with each reason; `--publish-only --dry-run` printed
   the gh command; 0.1.1-test without `--allow-missing-changelog`: refused before the export; a tampered pin
   (version, hash) refused.
+
+## Frame rates above 60: frames drawn between the game's (2026-11-02)
+
+The game's logic stays at 60 Hz (TheGame::Update once per NTSC field: physics counts in fields, see "falls"). For
+120 / 144 / 165 / 240 Hz monitors the window can run on its own clock and draw, at each present, the game's two latest
+frames blended by where that clock lies between them: one game frame (about 17 ms) of extra latency. Off by default:
+"60 (the game's)" keeps the present loop as it was (it follows each published frame once, `followFrames`, no vsync).
+
+- **The option**: F2, Video, "Frame rate": "60 (the game's)" or "Match the monitor (<n> Hz), smoothed" (vsync on,
+  `glfwSwapInterval(1)` through raylib's `FLAG_VSYNC_HINT`, only in that mode; if presents run over 1.5 times the
+  monitor's refresh for 2 s, vsync is taken as not honoured and the window's own timer at the refresh takes over).
+  `video.ini` `frame_rate = game | monitor | <n>`, `PS2X_FRAME_RATE` over it; `<n>` is a set rate without vsync (for
+  measuring on a 60 Hz monitor). `PS2X_NATIVE_INTERPOLATE=1` (`PS2X_PRESENT_FPS=<n>`) is the older name for it.
+  Applies at once (`ps2_video::apply` -> `Renderer::setFrameRate`). Interpolation needs the native renderer's own
+  frame (`presentsAlone`, no stream draws); otherwise frames show as they come.
+- **The clock** (`Renderer::endFrame`, `pickInterpolated`): each published frame gets a place on a smoothed clock
+  (the publishing interval averaged, each frame's time pulled 10% toward its real publishing time, so frames published
+  a few ms early or late are still evenly spaced; restarted after a pause over 250 ms or a hitch over 4 intervals: no
+  blending across a load). The window draws the time `now - (interval + recent lateness + 2 ms)`: the pair of frames
+  around it from the last six, and how far between. Past the newest frame it holds the newest (counted as a held
+  present).
+- **Objects** (`setKey(key, base)`, `setParts(camera, object)`): TMB's mesh hook keys an object by its file and
+  offset, its instance (s7) and its count among the frame's alike ones; the base is the key without that count. Its
+  matrix is given as camera (VU 9-12, the view's projection, z row scaled by the object's depth factor) times object
+  (VU 0-3: object to camera, the camera's turn included); `PS2X_INTERP_CHECK=1` checks the product against the matrix
+  (1.4 M batches, worst relative error 2e-7). Between two frames: the camera part linearly, the object's rotation by
+  slerp with its column scales and translation linearly (no shrinking on a fast turn); an object turning over 90
+  degrees a frame (a spinning wheel: the shortest arc would turn it backwards) keeps the newer turn with its place
+  interpolated; a teleport (a camera-space step over half its distance) and objects without a match (spawned) are
+  drawn as the newer frame has them; objects gone from the newer frame are not drawn.
+- **Matching** (`matchFrames`, once per pair of frames, not per present): an object alone of its kind in its view (a
+  split screen's view: its clip) is matched to its previous self. The count among alike objects (the same scenery
+  model placed many times, cars' parts without an instance) changes whenever one of them is culled, so matching by
+  key slid barrels and posts toward their neighbours: alike objects are matched to the nearest of the previous
+  frame's, either where it was or moved by the camera's move (estimated per view from the unique objects: D = A' A^-1
+  of the one most others agree with), whichever tells them apart better; when the second nearest is within twice the
+  nearest's distance (a row of alike objects passing about one spacing a frame) it is drawn as the newer frame has it
+  (1 to 2 objects a frame in a 4-player match). A view where 60% of the matched objects teleported or moved over 7.5%
+  of the width is a camera cut: drawn as the newer frame.
+- **Particles and sprites** (`drawTracked`): screen-space triangles with an id each; a triangle with the same id in
+  the previous frame has its corners blended (a centroid move over 30% of the width: not). TMB's particles (sprites,
+  textured sprites, lines) are (view, system, index) per quad; the mesh pack's sprites and ribbons (key, batch,
+  triangle). Not tracked: sprines, stripes, arcs, kites, rain and snow, the lens flares (drawn as the newer frame).
+- **HUD, menus' 2D, movies**: unchanged (the overlay is the latest the game published; movies are backdrops).
+- **Cost**: a frame is uploaded once (its tracked triangles again when blended); per present the matrices of the
+  keyed objects are blended on the CPU (the matching is per frame pair).
+
+Measured on this PC (1P Junkyard Challenge match, `arena.sh`'s script; 4P split screen, `main4p.sh`'s with player 1
+driving; 640 x 448 window unless said), `PS2X_PRESENT_STATS=1`:
+
+| Run | Presents / s | Game frames / s | Objects interpolated | present() |
+|---|---|---|---|---|
+| Default (60, follow frames), final build | 60 | 59.4 | - | 0-1 of 600 frames not shown in a match (25-50 around a 24-picture capture, which stops the loop to write PNGs) |
+| `PS2X_FRAME_RATE=144`, 1P | 141-144 | 59.0-59.5 | 96-100% of keyed batches, particles' triangles 85-99% | 1.2-3.5 ms average, 7 ms max |
+| `PS2X_FRAME_RATE=144`, 4P | 141-143 | 59.0-59.5 | 98% | 2.6-3.2 ms average |
+| `monitor` (60 Hz here: vsync) | 60.0-60.8 | 59.5 | 98-99% | (includes the vsync wait) |
+| `PS2X_FRAME_RATE=1000`, 1P | 400-650 | 59.0-59.5 | 97-99% | 1.4-2.4 ms: the whole loop 1.5-2.5 ms a present |
+| `PS2X_FRAME_RATE=1000`, 1P, 1920 x 1080 | 190-270 | 59.4-59.9 | 96-99% | 3.4-5.2 ms average: 3.7-5.2 ms a present |
+| `PS2X_FRAME_RATE=144`, 1P, 1920 x 1080 | 142-143 (130 in one 2 s window) | 58.9-59.4 | 97-99% | 3.7-5.0 ms average, 7.7 max |
+
+Held presents (the clock past the newest frame) 0-2 per 2 s in a match; longest still picture 0 ms in a match (50-80 ms
+in the menus, where the game's own frames come unevenly); longest gap between presents 7.6-8 ms at 144 (35-50 ms once
+every few seconds: the window captures). The game's 60 does not drop with 600 presents a second.
+
+Smoothness (`PS2X_CAPTURE_SEQUENCE=24`, the `[interp-trace]` positions of the five objects that moved most, followed
+from frame to frame through their match; `trace_stats.py` in the session's scratchpad): at 144 the presents are
+7.0 ms apart (6.9-7.6), alpha steps by 0.42 each present, the traced objects move monotonically (no direction
+reversal), the step from one present to the next varies by 1-6% from its neighbours' (unevenness 0.01-0.06; a
+60 Hz present moves the same object 2.4 times as far per picture). The 4P row of alike objects passing a spacing a
+frame showed the one artifact found (the nearest match is the wrong one: the row ran backwards between frames) until
+the ambiguity rule.
+
+Known artifacts: the objects drawn as the newer frame (teleports, ambiguous alike ones, cuts) and the untracked effects
+(sprines, stripes, arcs, kites, rain and snow, lens flares) move at 60 against the rest; the HUD is 60 Hz; anything
+the game moves without a key (rain, the screen-space programs of the VIF path) is 60 Hz; a camera cut detected late
+(fewer than 60% of the objects moved) blends one frame across it.

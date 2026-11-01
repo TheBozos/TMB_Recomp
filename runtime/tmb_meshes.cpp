@@ -267,6 +267,7 @@ namespace tmb::meshes
             bool valid = false;
             uint32_t file = 0, offset = 0, poolFrom = 0, pc = 0;
             float screen[16] = {}, clip[16] = {};
+            float object[16] = {}; // its object-to-camera matrix (VU 0-3), for interpolation's parts
             uint32_t pointLights[11][4] = {};
         } g_previous;
 
@@ -1318,14 +1319,18 @@ namespace tmb::meshes
             drawn.offset = offset;
             // The setup's matrix: this object's, or (a resume) the one before it, which 0xc78 keeps (it runs 0x1700's
             // setup again, which makes it anew).
-            float screen[16], clip[16];
+            float screen[16], clip[16], object[16];
             if (resume && drawPc != 0x1700u)
             {
                 std::memcpy(screen, previous.screen, sizeof(screen));
                 std::memcpy(clip, previous.clip, sizeof(clip));
+                std::memcpy(object, previous.object, sizeof(object));
             }
             else
             {
+                for (int j = 0; j < 4; ++j)
+                    for (int i = 0; i < 4; ++i)
+                        object[j * 4 + i] = g_vu.f(j, i);
                 tmb::vu1::objectToScreen(g_vu, screen, false);
                 for (int j = 0; j < 4; ++j)
                     for (int k = 0; k < 4; ++k)
@@ -1335,6 +1340,18 @@ namespace tmb::meshes
             buildStrips(ee, obj, fileBase, *it, drawPc, drawn, screen, it->kind == 4u ? bones : 0u);
             std::memcpy(drawn.clip, clip, sizeof(clip));
             drawn.hasClip = !drawn.screenSpace && it->kind != 4u; // (the skinned programs: not modelled)
+            // For interpolation (Renderer::setParts): the matrix as camera (VU 9-12, the view's projection, its z row
+            // scaled by the object's depth factor as buildStrips scales the matrix's) times the object (VU 0-3: object to
+            // camera, the camera's turn included), interpolated apart so a turning object or camera keeps its shape.
+            if (!drawn.screenSpace)
+            {
+                const bool depthScaled = drawPc != 0x0070u;
+                for (int i = 0; i < 4; ++i)
+                    for (int k = 0; k < 4; ++k)
+                        drawn.partCamera[i * 4 + k] = g_vu.f(9 + i, k) * (k == 2 && depthScaled ? g_vu.f(4, 2) : 1.0f);
+                std::memcpy(drawn.partObject, object, sizeof(object));
+                drawn.hasParts = true;
+            }
             g_stats.skid += skid ? 1u : 0u;
             if (opaque)
             {
@@ -1345,11 +1362,30 @@ namespace tmb::meshes
                 g_previous.pc = drawPc;
                 std::memcpy(g_previous.screen, screen, sizeof(screen));
                 std::memcpy(g_previous.clip, clip, sizeof(clip));
+                std::memcpy(g_previous.object, object, sizeof(object));
                 std::memcpy(g_previous.pointLights, &g_vu.words[165u * 4u], sizeof(g_previous.pointLights));
             }
-            const uint64_t hash = (static_cast<uint64_t>(fileIndex) << 32 | offset) * 0x9e3779b97f4a7c15ull;
+            // Its key for interpolation (Renderer::setKey): the object (file, offset) and its instance (two cars of one model
+            // apart), with how many had both before it this frame (a model placed several times, the views of a split
+            // screen); the renderer matches alike ones by where they are (the key's base), since that count changes as they
+            // are culled.
+            const uint64_t hash = ((static_cast<uint64_t>(fileIndex) << 32 | offset) * 0x9e3779b97f4a7c15ull) ^ (static_cast<uint64_t>(inst) * 0xc4ceb9fe1a85ec53ull);
             const uint32_t occurrence = g_keysThisFrame[hash]++;
             drawn.key = (hash ^ (static_cast<uint64_t>(occurrence) * 0xc2b2ae3d27d4eb4full)) | 1u;
+            drawn.keyBase = hash | 1u; // alike objects (the same model without an instance of its own): matched by place
+            // PS2X_INTERP_LOG=1: each key the first time it is made (what the renderer's jump lines name).
+            static const bool s_logKeys = std::getenv("PS2X_INTERP_LOG") != nullptr;
+            if (s_logKeys)
+            {
+                static std::unordered_map<uint64_t, bool> s_seen;
+                if (!s_seen[drawn.key] && s_seen.size() < 20000u)
+                {
+                    s_seen[drawn.key] = true;
+                    std::fprintf(stderr, "[interp-key] %016llx obj %#x file %u offset %#x inst %#x occurrence %u setup %#x%s\n",
+                                 static_cast<unsigned long long>(drawn.key), obj, fileIndex, offset, inst, occurrence, drawPc,
+                                 opaque ? "" : " alpha");
+                }
+            }
             for (uint32_t q = 0; q < 22u; ++q)
                 for (int k = 0; k < 4; ++k)
                     drawn.check[q][k] = g_vu.w(q, k);

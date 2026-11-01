@@ -44,7 +44,9 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
     renderer presents the frame at 2x (`PS2X_GS_SCALE`);
   - sound: the recompiled 989snd's libsd calls on the fork's native mixer, the SPU2 absent (`TMB_NATIVE_AUDIO=0`
     brings it back);
-  - still the fork's model: the IOP kernel layer (interrupts, timers, SIF) under the recompiled IOP modules.
+  - the IOP: no hardware model and no interpreted instruction (`[iop:hw]`); its kernel services answered natively.
+  - the settings window (F2): controls, video (resolution, windowed / fullscreen / borderless, render scale), cheats;
+    the window shows each game frame once (no periodic stutter).
 - **Controls.** Rebindable to keys, controllers and the mouse: F2 in the game, saved to `input.ini`.
 - **Known gaps.** Not checked yet: every arena and story level to the endings. Widescreen and frame rates above the
   PS2's are not started (the game's update steps in whole fields).
@@ -67,9 +69,11 @@ Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the 
 
 ## Next steps
 
-1. The IOP kernel layer (interrupts, timers, SIF DMA) under the recompiled IOP modules: native mechanisms at their API.
-2. Every arena and story level to the endings, fixing what shows up (the owner's reports first).
-3. Widescreen; frame rates above the PS2's (interpolating between game updates).
+1. Story levels 2-8 to the endings, fixing what shows up (the owner's reports first); every Challenge arena is checked
+   (the Cheats tab's Unlock everything, `TMB_UNLOCK_ALL=1`, opens the locked ones).
+2. Widescreen; frame rates above the PS2's (interpolating between game updates).
+3. Later, a bigger project: the PS2-shaped software layer the recompiled code still runs in (guest threads, DMA kicks,
+   the IOP modules' RPC) replaced by the game's systems as PC code.
 
 ## Working conventions
 

@@ -1,5 +1,4 @@
-// Game-specific runtime setup for Twisted Metal: Black (USA, SCUS-97101, and PAL, SCES-50360: the region's addresses
-// come from tmb_region.h).
+// Game-specific runtime setup for Twisted Metal: Black (USA, SCUS-97101: the addresses are its executable's).
 
 #include "game_overrides.h"
 #include "ps2_runtime.h"
@@ -69,6 +68,13 @@ namespace tmb::textures
 namespace tmb::twod
 {
     void install(PS2Runtime &runtime);
+}
+
+namespace tmb::cheats
+{
+    void install(PS2Runtime &runtime);
+    void setTheGame(uint32_t game);
+    void onFrame(uint8_t *rdram);
 }
 
 namespace tmb::meshes
@@ -1000,76 +1006,7 @@ namespace
         runtime->noteGameFrame(); // the fps overlay
         g_lastMatchFrameNoted.store(hitchClock(), std::memory_order_relaxed);
         noteVblankHoldFrame(runtime); // TMB_VBLANK_HOLD: the frame's processing is done
-        // TMB_PLAYER_HEALTH_CAP=<x> (testing): the player car's health (vehicle 0x259c70, float at +1012; +1008 is
-        // what gameCheckPlayerHealth sets it to) held at most x, so a few hits end a life: the game-over
-        // screens within minutes of play.
-        static const float s_healthCap = []
-        {
-            const char *value = std::getenv("TMB_PLAYER_HEALTH_CAP");
-            return value && *value ? static_cast<float>(std::atof(value)) : -1.0f;
-        }();
-        // TMB_ENEMY_HEALTH_CAP=<x> (testing): every vehicle but the player's held at most x health, so a scripted run
-        // can kill its way through story mode. The vehicles are TheGame's array (TheGame::GetVehicleFromName, 0x130bc8):
-        // vehicle i at TheGame + i * 0x2D00, their count at TheGame + 0x1B3DB4; TheGame is `this` of TheGame::Update.
-        static const float s_enemyCap = []
-        {
-            const char *value = std::getenv("TMB_ENEMY_HEALTH_CAP");
-            return value && *value ? static_cast<float>(std::atof(value)) : -1.0f;
-        }();
-        if (s_enemyCap >= 0.0f && g_theGame != 0u)
-        {
-            int32_t count = 0;
-            std::memcpy(&count, rdram + ((g_theGame + 0x001B3DB4u) & 0x1FFFFFFu), 4);
-            static uint32_t s_enemyFrames = 0;
-            const bool log = ++s_enemyFrames % 500u == 0u;
-            std::string line;
-            for (int32_t index = 0; index < std::min(count, 64); ++index)
-            {
-                const uint32_t vehicle = g_theGame + static_cast<uint32_t>(index) * 0x2D00u;
-                float health = 0.0f;
-                std::memcpy(&health, rdram + ((vehicle + 1012u) & 0x1FFFFFFu), 4);
-                if (log)
-                {
-                    char text[48];
-                    std::snprintf(text, sizeof(text), " %x:%.0f", vehicle, health);
-                    line += text;
-                }
-                if (vehicle != 0x00257B50u && health > s_enemyCap)
-                {
-                    health = s_enemyCap;
-                    std::memcpy(rdram + ((vehicle + 1012u) & 0x1FFFFFFu), &health, 4);
-                }
-            }
-            if (log)
-                std::fprintf(stderr, "[tmb:enemies] TheGame %x, %d vehicles:%s\n", g_theGame, count, line.c_str());
-        }
-        // TMB_PLAYER_GOD=1 (testing): the player car's health (float at +1012) back to the highest value seen every
-        // frame, so it never dies (story-mode walkthroughs). Health only falls during a life; a new car starts full.
-        static const bool s_playerGod = std::getenv("TMB_PLAYER_GOD") != nullptr;
-        if (s_playerGod)
-        {
-            static float s_best = 0.0f;
-            float health = 0.0f;
-            std::memcpy(&health, rdram + 0x00257B50u + 1012u, 4);
-            if (health > s_best && health < 10000.0f)
-                s_best = health;
-            else if (health < s_best && health > -10000.0f)
-                std::memcpy(rdram + 0x00257B50u + 1012u, &s_best, 4);
-        }
-        if (s_healthCap >= 0.0f)
-        {
-            float health = 0.0f, maximum = 0.0f;
-            std::memcpy(&health, rdram + 0x00257B50u + 1012u, 4);
-            std::memcpy(&maximum, rdram + 0x00257B50u + 1008u, 4);
-            static uint32_t s_frames = 0;
-            if (++s_frames % 250u == 0u)
-                std::fprintf(stderr, "[tmb:health] %.1f of %.1f\n", health, maximum);
-            if (health > s_healthCap)
-            {
-                health = s_healthCap;
-                std::memcpy(rdram + 0x00257B50u + 1012u, &health, 4);
-            }
-        }
+        tmb::cheats::onFrame(rdram); // the Cheats tab (runtime/tmb_cheats.cpp)
         // PS2X_PROFILE_GATED=1: the profiler samples while frames take two vblanks or more (busy scenes; they come
         // in stretches, so the frame after a slow one is mostly slow too), or, with TMB_PROFILE_FAST_FRAMES=1,
         // while they take one: a profile of each kind from the same build.
@@ -1478,7 +1415,8 @@ namespace
 
     void theGameUpdateOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        g_theGame = getRegU32(ctx, 4); // TMB_ENEMY_HEALTH_CAP, TMB_KILL_ENEMIES
+        g_theGame = getRegU32(ctx, 4); // TMB_KILL_ENEMIES, the cheats
+        tmb::cheats::setTheGame(g_theGame);
         if (g_substeps.steps == 0)
         {
             killEnemies(rdram, ctx, runtime);
@@ -1573,18 +1511,6 @@ namespace
     // path (TMB_NATIVE=0) and on the native one, the same effects come at about the same moments, to compare. The call
     // is made at particleMove's entry (once a frame, the game's own place for particles) and returns to kFxTestReturn
     // (padding before a function, never executed), which then runs particleMove as it was called.
-    // TMB_NO_AI=1 (testing): the computer's vehicles do nothing, so a player can drive around an arena undisturbed,
-    // to look at it: Vehicle::aiUpdateInputs (each bot's pad, every frame) runs the game's own
-    // aiUpdateFrozenInput instead (no throttle, no steering, no firing).
-    constexpr uint32_t kAiUpdateInputs = 0x001014A0u;
-    constexpr uint32_t kAiUpdateFrozenInput = 0x001017E8u;
-
-    void aiUpdateInputsFrozen(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
-    {
-        ctx->pc = kAiUpdateFrozenInput;
-        aiUpdateFrozenInput__7Vehicle_0x1017e8(rdram, ctx, runtime);
-    }
-
     // A multitap in pad port 0, as the game's own sceMtap library would find one (its IOP module is not run): four
     // players on that port's slots (the runtime's PSPadBackend: player N on the Nth gamepad or PS2X_PADN_SCRIPT),
     // which the game needs for its 3 and 4 player modes. TMB_MULTITAP=0: none.
@@ -1830,8 +1756,7 @@ namespace
         runtime.registerFunction(kMtapPortOpen, &mtapPortOpen);
         runtime.registerFunction(kMtapPortClose, &mtapPortClose);
         runtime.registerFunction(kMtapGetConnection, &mtapGetConnection);
-        if (const char *noAi = std::getenv("TMB_NO_AI"); noAi && *noAi == '1')
-            runtime.registerFunction(kAiUpdateInputs, &aiUpdateInputsFrozen);
+        tmb::cheats::install(runtime); // TMB_NO_AI, infinite health / ammo / energy, weak enemies (runtime/tmb_cheats.cpp)
         if (const char *fx = std::getenv("TMB_FX_TEST"); fx && *fx)
         {
             g_fxTest.period = std::max(0.5, std::atof(fx));

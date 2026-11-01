@@ -68,8 +68,10 @@ path (`scripts/run_native.sh`, at twice the PS2's resolution) a match holds 57.7
 | Every VU1 program translated (menus, 3D, beams, chrome and water, particles, flares, trails, heat haze, lightning): no VU1 sandbox | ✅ |
 | No GS emulation: no GS front end, no GS memory, no GS packet read; the native renderer draws and presents the frame (`runtime/native/native_display.h` for the display's field and mode) | ✅ |
 | Multi-player split screen, 2 to 4 players (a multitap on port 0: players 1-4 on their own controllers; `PS2X_PAD2_SCRIPT` to `PS2X_PAD4_SCRIPT` for scripted players) | ✅ |
-| Every arena and story level to the endings | 🔧 |
-| Higher internal resolution (`PS2X_GS_SCALE`, 2x by default) | ✅ |
+| Every Challenge arena played (all of them; the ones a fresh save keeps locked through the Cheats tab's Unlock everything) | ✅ |
+| Settings window (F2): controls, video (resolution, windowed / fullscreen / borderless, render scale) and cheats, all switched while playing | ✅ |
+| Every story level to the endings (level 1 of 8 checked) | 🔧 |
+| Higher internal resolution (2x by default; the Video tab's render scale, `PS2X_RENDER_SCALE`) | ✅ |
 | Widescreen, frame rates above the PS2's | ⏳ |
 
 **Native port** (no PS2 hardware emulation left, not even a small part: the shared goal of the fork's ports). Native
@@ -220,7 +222,24 @@ key positions):
 | Key | What it does |
 |---|---|
 | F1 | Runtime debugger |
-| F2 | Controls: rebind every PS2 button and stick direction, per player, to keys, controller buttons, sticks and triggers, mouse buttons, the wheel or mouse movement (sensitivity, invert Y, cursor capture). Saved to `input.ini` in the disc folder (`game_us/input.ini`; `PS2X_INPUT_CONFIG=<file>` for another place). |
+| F2 | Settings. Controls: rebind every PS2 button and stick direction, per player, to keys, controller buttons, sticks and triggers, mouse buttons, the wheel or mouse movement (sensitivity, invert Y, cursor capture). Saved to `input.ini` in the disc folder (`game_us/input.ini`; `PS2X_INPUT_CONFIG=<file>` for another place). Video: the resolution (common 4:3 and 16:9 sizes up to the monitor's, and the monitor's own), windowed, fullscreen (the monitor switched to that resolution) or borderless window (the monitor's size), and the render scale (the 3D at 50 % to 200 % of the window's resolution; 200 % is supersampled); Apply changes them at once, Apply and save writes `video.ini` next to `input.ini` (`PS2X_VIDEO_CONFIG=<file>` for another place), read when the window opens. The picture stays 4:3, centred with bars, whatever the window's shape. |
+| F11, Alt+Enter | Between the window and full screen (the last full-screen mode chosen, borderless by default) |
+
+### Cheats
+
+The Cheats tab of the settings window (F2) switches them while playing, each at once, in a match (one player or split
+screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
+
+| Cheat | | Variable |
+|---|---|---|
+| Unlock everything | every level (Freeway, Prison Passage, Skyscrapers, Minion's Stadium...), every vehicle (Yellow Jacket, Axel, Warthog, Manslaughter, Minion...) and every movie, opened in the menus; switched off, put back; saving while it is on keeps them on the card | `TMB_UNLOCK_ALL=1` |
+| Infinite health | per player: the car's health held at its maximum (the game's own, as its health bar shows it) | `TMB_PLAYER_GOD=<players>` |
+| Infinite ammo | per player: pickup weapons and the special are not spent (the HUD's counts stay) | `TMB_INFINITE_AMMO=<players>` |
+| Infinite energy | per player: the energy bar (freeze, mines, shield...) held full | `TMB_INFINITE_ENERGY=<players>` |
+| No AI | the computer's cars do nothing | `TMB_NO_AI=1` |
+| Weak enemies | the computer's cars held at most this much health (a slider, 1 to 300) | `TMB_ENEMY_HEALTH_CAP=<x>` |
+
+`<players>`: digits 1 to 4 (`12`: players 1 and 2), any other value but `0` every player.
 
 <details>
 <summary><b>Runtime and diagnostic options</b></summary>
@@ -241,10 +260,11 @@ key positions):
 | `TMB_NATIVE_PARTICLES=0` | The particles back on the game's own packets (`TMB_NATIVE_PARTICLE_TYPES=1,2,3`: which types are native; `TMB_NATIVE_PARTICLES_TOGGLE=<s>`: alternate, for an A/B) |
 | `TMB_NATIVE_FRAMES=0` | Frames on the emulated vblanks instead of the PC clock |
 | `PS2X_GS_SCALE=<n>` | With `TMB_NATIVE=1`: the internal resolution, n times the PS2's each way (1 to 4, default 2) |
-| `PS2X_WINDOW_SIZE=<w>x<h>` | The window's size when it opens |
+| `PS2X_WINDOW_SIZE=<w>x<h>`, `PS2X_WINDOW_MODE=windowed\|fullscreen\|borderless`, `PS2X_RENDER_SCALE=<x>` | The window's size, mode and render scale when it opens, over `video.ini` (F2, Video) |
 | `TMB_NATIVE_VU1=1` | VU1 runs the translated programs too (the GS frame then has everything, to compare) |
 | `TMB_NATIVE_VU1_PCS=<pc,...>` | Diagnostic: leave those setups on VU1 (a `PS2X_VU1_RECORD` reference for a translation) |
 | `TMB_NATIVE_CHECK=<n>` | Diagnostic: run VU1's own program beside each translation (an interpreter, off in play) and log where they differ |
+| `PS2X_PRESENT_STATS=1` | Every 600 presents: the game frames not shown and the waits that timed out (the window shows each frame the game publishes once, on the game's clock: no periodic stutter) |
 | `TMB_LIVE_TOGGLES=<file>` | Diagnostic: words read from the file every 60 frames while the game runs, for the 3D at the hooks: `nodepth`, `nofog`, `noclip`, `flat` (each object in a colour of its own), `opaque`, `noatest`, `notex`, `noguard` (no clip volume), `dump` (one frame's objects, materials and triangles to the log) |
 | F9 (with `PS2X_CAPTURE_WINDOW_DIR`) | Start / stop a burst of window captures, ten a second (`burst_<ms>.png`) |
 | `PS2X_NATIVE_VIEW=only` | Show the native frame alone, without the GS one under it |
@@ -259,11 +279,11 @@ key positions):
 | `PS2X_VU1_RECORD=<file>` | Record VU1 microprogram runs for `ps2_vu1_replay` / `build/game/tmb_vu1_replay` (with the compiled microcode; the default fast VU1 path differs in cycle counts only, `TMB_VU1_EXACT=1 scripts/recomp.sh` for the exact one) |
 | `PS2X_VU_AOT=0` | Interpret the VU1 microcode instead of running the compiled one |
 | `TMB_VBLANK_HOLD=<ms>` | With `TMB_NATIVE_FRAMES=0`: hold the vblank up to <ms> while a match frame finishes (default 6; 0 off); `TMB_VBLANK_HOLD_AB=1` compares on/off in one run |
-| `TMB_ENEMY_HEALTH_CAP=<x>` | Testing: hold the opponents' health at most x (a scripted run can win its matches) |
+| `TMB_UNLOCK_ALL=1`, `TMB_ENEMY_HEALTH_CAP=<x>`, `TMB_NO_AI=1`, `TMB_PLAYER_GOD`, `TMB_INFINITE_AMMO`, `TMB_INFINITE_ENERGY` | The cheats at launch (Cheats above; the F2 tab changes them) |
+| `TMB_CHEATS_LOG=1`, `TMB_CHEATS_TOGGLE=<s>` | Testing: every 250 frames each player's health, energy and weapon counts, and each weapon the players spend (`[tmb:cheats]`); every cheat switched on and off every <s> seconds; `PS2X_SETTINGS_OPEN=Cheats` opens the settings window on that tab (any tab: Controls, Video) |
 | `TMB_KILL_ENEMIES=<s>` | Testing: every <s> seconds every opponent alive takes a killing hit through the game's own damage function (the kill counts; scripted story runs) |
 | `TMB_AB=<hold\|slice\|lag\|holdlimit\|fill>` | In-run A/B of an experiment, on and off every 100 vblanks, real-time fps and game speed per mode |
 | `TMB_PLAYER_HEALTH_CAP=<x>` | Testing: hold the player car's health at most x (game over within minutes of play) |
-| `TMB_PLAYER_GOD=1` | Testing: the player car's health goes back to its highest value every frame (story walkthroughs) |
 | `PS2X_VU_LIFTED=0` | Run the compiled microcode instead of the loops lifted to native code (the rain, `runtime/vu1`) |
 | `PS2X_VU1_RECORD_PC=<pc>` | With `PS2X_VU1_RECORD`: only the microprogram runs starting at that pc |
 | `TMB_MAX_FRAME_MS=<ms>` | Longest frame weapons and debris move over (default 40; slow motion below 25 fps) |

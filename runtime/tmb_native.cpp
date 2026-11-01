@@ -2807,6 +2807,13 @@ namespace tmb::native
                                 s.collecting = s.check != nullptr || tmb::particles::checking();
                                 lensFlares(s, triangles);
                                 s.collecting = false;
+                                if (tmb::particles::checking()) // the flares drawn from the game's list (tmb_particles.cpp)
+                                {
+                                    std::vector<ps2x::native::Vertex> mine = s.checkMine;
+                                    mine.insert(mine.end(), triangles.begin() + static_cast<std::ptrdiff_t>(std::min(s.particleFrom, triangles.size())),
+                                                triangles.end());
+                                    tmb::particles::compare(pc, mine.data(), mine.size());
+                                }
                             }
                             else if (pc == 0x0390u)
                             {
@@ -3215,6 +3222,29 @@ namespace tmb::native
                     std::memcpy(rdram + at, &z32, 4);
                 }
             }
+    }
+
+    // The lens flares drawn natively (runtime/tmb_particles.cpp lensFlareTest): the 4 x 4 GS Z samples at a field
+    // pixel (x0, y0 as the game's StoreImage would take them: the screen's VRAM rectangle, wrapping at 2048), from the
+    // native frame's depth as patchFlareDepth gives them; a sample not read yet stays 0 (far: the flare shows). False
+    // when the native depth is off (TMB_NATIVE_FLARE_DEPTH=0, outside a match).
+    bool flareDepthBlock(uint32_t x0, uint32_t y0, uint32_t z[16])
+    {
+        std::fill(z, z + 16, 0u);
+        if (!flareDepthNative())
+            return false;
+        ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+        renderer.wantDepth();
+        const ps2x::native::Screen view = screen();
+        for (uint32_t y = 0; y < 4u; ++y)
+            for (uint32_t x = 0; x < 4u; ++x)
+            {
+                uint32_t sample = 0;
+                if (renderer.depthAt(view.originX + static_cast<float>((x0 + x) & 0x7ffu) + 0.5f,
+                                     view.originY + static_cast<float>((y0 + y) & 0x7ffu) + 0.5f, sample))
+                    z[y * 4u + x] = std::min<uint32_t>(sample, 0xffffffu);
+            }
+        return true;
     }
 
     // The end of a frame's real-time processing (a match frame): publish what was submitted, start the next frame.

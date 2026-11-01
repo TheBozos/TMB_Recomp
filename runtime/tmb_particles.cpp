@@ -5,7 +5,8 @@
 // culls each against the view's frustum (its emitter at +0x2c80 in camera space, a sphere of radius +0x2c8c), sorts the
 // survivors far to near (camera depth less the system's bias at +0x2e54), and for each one appends its texture uploads
 // (texmParticleTexture) and a DMA CALL of the packet its builder made in particlePrepDraw; that packet runs one of the
-// effects image's VU1 programs (sprite 0x390, textured sprite 0x798, ...). Then the lens flares, and the chain goes to
+// effects image's VU1 programs (sprite 0x390, textured sprite 0x798, ...). Then the lens flares (the lights on screen
+// and their Z read back from the GS, their visibility, the flare packet's CALL: VU1 0x2338), and the chain goes to
 // VIF1 from its head (0x741f00: the effects microcode, the GS context, the effects constants' MSCALF 0x0).
 //
 // The override does the walk, the cull, the sort and the lens flares' list itself (the same arithmetic), then:
@@ -21,6 +22,13 @@
 // stream, after the 3D and before what follows; inside it, all the native systems come first (far to near), then the
 // game's own (far to near), then the lens flares.
 //
+// The lens flares (section "The lens flares"): particleDraw's tail still calls particleLensFlareTestZbuffer and
+// particleLensFlareRender, replaced while the override's particleDraw runs: the game's arithmetic on its flare list
+// (the lights' screen points, the cull, the random numbers, the visibility, the debounce), the Z samples from the native
+// frame's depth (Renderer::depthAt, no GS readback), the groups from lensFlarePacketInit's tables and the textures by
+// id; the sprites drawn there, in the chain's group after the native systems (the game's own systems, if any, follow
+// them now). No flare packet is built or called.
+//
 // State: ALPHA_1 from the system (+0x2e58); TEX0 from the type's texture slot (the table at 0x6879c0, texture id at
 // 0x687dc0, the texture itself from the native texture pack by that id); TEST_1 0x7000d (alpha greater than 0, depth
 // greater or equal), ZBUF_1 masked (particles never write depth), TEX1 bilinear and TEXA 0x80: defaultContextInit's
@@ -33,8 +41,9 @@
 // type 3, the stripes' texture scroll, the arcs' colours and sphere state); everything else is computed from the
 // struct and the game's tables as the builders compute it. The bit that attaches a system's matrix is bit 15 of the
 // count word (VU1 reads it with ILW, 16 bits, and branches on its sign; loadMatrixIfNecessary sets it exactly when
-// +0x2d6c is not null), so the matrix is applied whenever the system has one. Left to the game: the lens flares
-// (particleLensFlareRender's packet, drawn by the adapter's 0x2338 translation).
+// +0x2d6c is not null), so the matrix is applied whenever the system has one. Left to the game: the other types and,
+// with TMB_NATIVE_PARTICLES_FLARES=0, the lens flares (particleLensFlareRender's packet, drawn by
+// the adapter's 0x2338 translation).
 //
 // TMB_NATIVE_PARTICLES_CHECK=1 (a diagnostic): nothing drawn here; types 1, 4, 6 (not on a sphere), 7 and 8 computed and
 // compared with what runtime/tmb_native.cpp's translations draw from the same systems' packets.
@@ -42,6 +51,7 @@
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
+#include "ps2_runtime_macros.h"
 #include "tmb_region.h"
 #include "runtime/native/native_renderer.h"
 #include "runtime/native/native_texture_cache.h"
@@ -63,6 +73,8 @@ namespace tmb::native
     bool enabled();
     bool effectsInStream();
     uint64_t nextStreamGroup();
+    bool flareDepthNative();
+    bool flareDepthBlock(uint32_t x0, uint32_t y0, uint32_t z[16]);
 }
 
 namespace tmb::textures
@@ -127,6 +139,18 @@ namespace tmb::particles
         {
             electricArcPacketUpdate__FiPUiP8_fvectorPA3_fT2_0x1e2670(rdram, ctx, runtime);
         }
+        // The lens flares: particleDraw's tail calls particleLensFlareTestZbuffer(view) (the lights on screen, their Z
+        // samples read back) and particleLensFlareRender(chain, view) (their visibility, lensFlarePacketBuild, the
+        // groups' texture uploads, the CALL of the flare packet). The views' tables they read (viewGetWeTrans,
+        // viewGetWorldToScreenMat), the Z samples' buffer (4 x 4 words per light) and the lights' debounce table
+        // (32 bytes per light id, 8 per view); lensFlarePacketInit's group tables (18 groups: R, G, B bytes, the
+        // texture types, the steps along the line, the sizes, the size factors, the UV extents' indexes).
+        constexpr uint32_t kLensTest = 0x1dfe00u, kLensRender = 0x1e01c8u;
+        constexpr uint32_t kWeTrans = 0x4a1240u, kWorldToScreen = 0x4e0230u, kLensSamples = 0x7435c0u, kLensDebounce = 0x743460u;
+        constexpr uint32_t kFlareColours = 0x4f2ff0u, kFlareTypes = 0x4f3028u, kFlareSteps = 0x4f3040u, kFlareSizes = 0x4f3088u,
+                           kFlareWeights = 0x4f30d0u, kFlareUvs = 0x4f3118u;
+        void gameLensTest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { particleLensFlareTestZbuffer__Fi_0x1dfe00(rdram, ctx, runtime); }
+        void gameLensRender(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { particleLensFlareRender__FP6QwDatai_0x1e01c8(rdram, ctx, runtime); }
 #else
         // PAL (SCES-50360): dropped (US only); the addresses would be particleDraw 0x1ea750, systems 0x690500, nodes
         // 0x74b580, type textures 0x68f880, slots 0x68ffc0 / 0x6903c0, gp offsets 0x308 higher. Not installed.
@@ -149,6 +173,11 @@ namespace tmb::particles
         void gamePrecipCreate(uint8_t *, R5900Context *, PS2Runtime *) {}
         void gameArcBuild(uint8_t *, R5900Context *, PS2Runtime *) {}
         void gameArcUpdate(uint8_t *, R5900Context *, PS2Runtime *) {}
+        constexpr uint32_t kLensTest = 0u, kLensRender = 0u;
+        constexpr uint32_t kWeTrans = 0u, kWorldToScreen = 0u, kLensSamples = 0u, kLensDebounce = 0u;
+        constexpr uint32_t kFlareColours = 0u, kFlareTypes = 0u, kFlareSteps = 0u, kFlareSizes = 0u, kFlareWeights = 0u, kFlareUvs = 0u;
+        void gameLensTest(uint8_t *, R5900Context *, PS2Runtime *) {}
+        void gameLensRender(uint8_t *, R5900Context *, PS2Runtime *) {}
 #endif
 
         // _ParticleType
@@ -176,6 +205,8 @@ namespace tmb::particles
             int precip = -1;          // TMB_NATIVE_PARTICLES_PRECIP: the precipitation forced (0 snow, 1 rain), its level
             float precipLevel = 0.0f;
             double toggle = 0.0;
+            bool flares = true;       // TMB_NATIVE_PARTICLES_FLARES=0: the lens flares left to the game's packet
+            bool toggleFlares = false; // TMB_NATIVE_PARTICLES_TOGGLE_FLARES=1: the toggle alternates the flares alone
         };
 
         const Settings &settings();
@@ -231,6 +262,13 @@ namespace tmb::particles
                 // in one run; the native periods mark the screen's top-left corner with a small magenta square).
                 if (const char *toggle = std::getenv("TMB_NATIVE_PARTICLES_TOGGLE"); toggle && *toggle)
                     s.toggle = std::strtod(toggle, nullptr);
+                // TMB_NATIVE_PARTICLES_FLARES=0: the lens flares through the game's own path (particleLensFlareTestZbuffer,
+                // particleLensFlareRender, its packet drawn by the adapter's 0x2338 translation); with
+                // TMB_NATIVE_PARTICLES_TOGGLE_FLARES=1 the toggle above alternates only them (the other types stay native).
+                const char *flares = std::getenv("TMB_NATIVE_PARTICLES_FLARES");
+                s.flares = !(flares && *flares == '0');
+                const char *toggleFlares = std::getenv("TMB_NATIVE_PARTICLES_TOGGLE_FLARES");
+                s.toggleFlares = toggleFlares && *toggleFlares == '1';
                 return s;
             }();
             return s_settings;
@@ -351,6 +389,7 @@ namespace tmb::particles
         struct Stats
         {
             uint64_t frames = 0, nativeSystems = 0, nativeSprites = 0, gameSystems = 0, culled = 0, missingTextures = 0, sphereArcs = 0;
+            uint64_t flareLights = 0, flareSprites = 0;
             uint64_t byType[16] = {};
         } g_stats;
 
@@ -1782,6 +1821,296 @@ namespace tmb::particles
             put32(rdram, countAt, static_cast<uint32_t>(count + 1));
         }
 
+        // ---- The lens flares (VU1 0x2338), drawn here from the flare list ----
+        //
+        // The list (gp-0x2f20 per view parity, gp-0x2f28 its count; 48 bytes per light, filled by addLensFlare and the
+        // hierarchy's lights) is the game's; particleDraw's tail keeps calling the two functions below, which are
+        // replaced while the particles are drawn here (g_flaresNative): the game's arithmetic on the list, the same
+        // writes to it, its random numbers drawn, and in place of the GS Z readback the native frame's depth, and in
+        // place of lensFlarePacketBuild, the texture uploads and the packet's CALL, the flares drawn now, as
+        // runtime/tmb_native.cpp lensFlares() draws them from VU memory (checked there against VU1).
+
+        bool g_flaresNative = false; // inside particleDrawOverride's own particleDraw, with the flares drawn here
+
+        // fptoui (the game's soft float to unsigned): truncated, 0 under 1 (and for NaN), saturated.
+        uint32_t fptoui(float value)
+        {
+            if (!(value >= 1.0f))
+                return 0u;
+            return value >= 4294967296.0f ? 0xffffffffu : static_cast<uint32_t>(value);
+        }
+
+        uint64_t nextSeed(uint64_t seed) { return seed * 0x41c64e6dull + 0x3039u; }
+
+        // The game's float arithmetic for the flares' (the checks compare them bit for bit): the FPU's (add.s ...
+        // truncated, a zero divisor giving the largest float) and VU0's (macro mode: the host's rounding), each
+        // operation on its own (no fused multiply-add).
+        float fpuAdd(float a, float b) { return ps2_fadd(a, b); }
+        float fpuSub(float a, float b) { return ps2_fsub(a, b); }
+        float fpuMul(float a, float b) { return ps2_fmul(a, b); }
+        float fpuDiv(float a, float b) { return ps2_fdiv(a, b); }
+        float vuAdd(float a, float b) { return _mm_cvtss_f32(ps2_vadd(_mm_set_ss(a), _mm_set_ss(b))); }
+        float vuMul(float a, float b) { return _mm_cvtss_f32(ps2_vmul(_mm_set_ss(a), _mm_set_ss(b))); }
+
+        // particleLensFlareTestZbuffer(view): each light through mathfTransform3dTo2d (its position plus the view's
+        // viewGetWeTrans, times viewGetWorldToScreenMat's rows, over w); the ones inside the view (viewGetCenter -+
+        // viewGetWH / 2) and not behind the camera (w >= 1) kept in place at the list's front (screen x, y, z / w, then
+        // w, or 100 when the light's flags have bit 7), the others dropped from the count; two random numbers per light,
+        // a third per kept one (the game's LCG, nothing else of them used). The 4 x 4 Z samples the game reads back from
+        // (x - 2, y) of the field (its StoreImages' TRXPOS: x - 0x6c2, y - 0x790) go in the samples' buffer, from the
+        // native frame's depth. Returns the count left (particleDraw adds it to its kick count).
+        int32_t lensFlareTest(uint8_t *rdram, uint32_t gp, uint32_t view)
+        {
+            const uint32_t parity = view & 1u;
+            const uint32_t countAt = gp + static_cast<uint32_t>(kGpLensCounts) + parity * 4u;
+            const uint32_t list = u32(rdram, gp + static_cast<uint32_t>(kGpLensLists) + parity * 4u);
+            const uint32_t viewport = u32(rdram, kViews + view * 16u + 4u);
+            const int32_t cx = static_cast<int32_t>(u32(rdram, viewport + 0x18u)), cy = static_cast<int32_t>(u32(rdram, viewport + 0x1cu));
+            const int32_t halfW = static_cast<int32_t>(u16(rdram, viewport + 4u)) >> 1, halfH = static_cast<int32_t>(u16(rdram, viewport + 6u)) >> 1;
+            const float xMin = static_cast<float>(cx - halfW), xMax = static_cast<float>(cx + halfW);
+            const float yMin = static_cast<float>(cy - halfH), yMax = static_cast<float>(cy + halfH);
+            const uint32_t weTrans = kWeTrans + view * 0xf0u, matrix = kWorldToScreen + view * 64u;
+            float m[4][4];
+            for (int j = 0; j < 4; ++j)
+                for (int k = 0; k < 4; ++k)
+                    m[j][k] = f32(rdram, matrix + 16u * j + 4u * k);
+            int32_t count = static_cast<int32_t>(u32(rdram, countAt));
+            const int32_t lights = count;
+            uint64_t seed = u64(rdram, gp + static_cast<uint32_t>(kGpSeed));
+            uint32_t out = list, kept = 0;
+            for (int32_t i = 0; i < lights; ++i)
+            {
+                const uint32_t in = list + static_cast<uint32_t>(i) * 0x30u;
+                seed = nextSeed(nextSeed(seed));
+                float p[3], t[4][3];
+                for (uint32_t k = 0; k < 3u; ++k)
+                    p[k] = fpuAdd(f32(rdram, in + 4u * k), f32(rdram, weTrans + 4u * k));
+                for (int j = 0; j < 4; ++j)
+                    for (int k = 0; k < 3; ++k)
+                        t[j][k] = vuMul(m[j][k], p[k]);
+                // mathfMulVec4x4: row j's xyz . p + its w, summed in its VU0 order.
+                const float r[4] = {vuAdd(t[0][0], vuAdd(t[0][1], vuAdd(t[0][2], m[0][3]))),
+                                    vuAdd(t[1][1], vuAdd(t[1][2], vuAdd(m[1][3], t[1][0]))),
+                                    vuAdd(t[2][2], vuAdd(m[2][3], vuAdd(t[2][0], t[2][1]))),
+                                    vuAdd(m[3][3], vuAdd(t[3][0], vuAdd(t[3][1], t[3][2])))};
+                const float q = fpuDiv(1.0f, r[3]);
+                const float x = fpuMul(r[0], q), y = fpuMul(r[1], q), z = fpuMul(r[2], q), w = r[3];
+                if (!(xMin < x) || !(x < xMax) || !(yMin < y) || !(y < yMax) || !(1.0f <= w))
+                {
+                    put32(rdram, countAt, static_cast<uint32_t>(--count));
+                    continue;
+                }
+                const bool fixed = (u8(rdram, in + 0x10u) >> 7) != 0u;
+                putF(rdram, out, x);
+                putF(rdram, out + 4u, y);
+                putF(rdram, out + 8u, z);
+                putF(rdram, out + 0x14u, fixed ? 100.0f : w);
+                seed = nextSeed(seed);
+                if (out != in)
+                {
+                    put32(rdram, out + 0xcu, u32(rdram, in + 0xcu));
+                    put32(rdram, out + 0x10u, u32(rdram, in + 0x10u));
+                    for (uint32_t at = 0x18u; at < 0x30u; at += 4u)
+                        put32(rdram, out + at, u32(rdram, in + at));
+                }
+                uint32_t samples[16];
+                tmb::native::flareDepthBlock((fptoui(x) - 0x6c2u) & 0x7ffu, (fptoui(y) - 0x790u) & 0x7ffu, samples);
+                for (uint32_t k = 0; k < 16u; ++k)
+                    put32(rdram, kLensSamples + kept * 64u + 4u * k, samples[k]);
+                ++kept;
+                out += 0x30u;
+            }
+            put64(rdram, gp + static_cast<uint32_t>(kGpSeed), seed);
+            return count;
+        }
+
+        // particleLensFlareRender's loop over the kept lights: each one's visibility from its Z samples (a sample
+        // shows the light when its Z is not above the light's): with bit 7 of its flags, all 16 against the light's
+        // z / w times 1.03125 (plus 1), else the middle 2 x 2 against the view's Z of w less the light's depth term
+        // (at least 1.5; viewGetZBuffParams: b + a w' over w'); its visibility (+0x2c) times the fraction that shows, its
+        // screen point moved to their centroid; averaged with the frame before through the debounce table when it has
+        // a light id (+0xc); hidden (flags' low byte 0) under 1 / 256.
+        void lensFlareVisibility(uint8_t *rdram, uint32_t list, int32_t count, uint32_t view)
+        {
+            const float zA = f32(rdram, kViewTable2 + view * 64u + 0x28u), zB = f32(rdram, kViewTable2 + view * 64u + 0x2cu);
+            for (int32_t j = 0; j < count; ++j)
+            {
+                const uint32_t element = list + static_cast<uint32_t>(j) * 0x30u, samples = kLensSamples + static_cast<uint32_t>(j) * 64u;
+                const bool all = (u8(rdram, element + 0x10u) >> 7) != 0u;
+                uint32_t limit;
+                uint32_t first, last;
+                if (all)
+                {
+                    limit = fptoui(fpuMul(f32(rdram, element + 8u), 1.03125f)) + 1u;
+                    first = 0u;
+                    last = 4u;
+                }
+                else
+                {
+                    const float term = f32(rdram, element + 0x10u), w = f32(rdram, element + 0x14u);
+                    const float depth = 1.5f < term ? fpuSub(w, term) : fpuSub(w, 1.5f);
+                    limit = fptoui(fpuDiv(fpuAdd(zB, fpuMul(zA, depth)), depth));
+                    first = 1u;
+                    last = 3u;
+                }
+                float shown = 0.0f;
+                uint32_t sumX = 0, sumY = 0;
+                for (uint32_t row = first; row < last; ++row)
+                    for (uint32_t column = first; column < last; ++column)
+                        if (!(limit < (u32(rdram, samples + (row * 4u + column) * 4u) & 0xffffffu)))
+                        {
+                            shown = fpuAdd(shown, 1.0f);
+                            sumX += column;
+                            sumY += row;
+                        }
+                const float share = all ? 0.0625f : 0.25f, offset = all ? 2.0f : 1.0f;
+                float visibility = fpuMul(f32(rdram, element + 0x2cu), fpuMul(shown, share));
+                putF(rdram, element + 0x2cu, visibility);
+                putF(rdram, element, fpuAdd(f32(rdram, element), fpuSub(fpuDiv(static_cast<float>(sumX), shown), offset)));
+                putF(rdram, element + 4u, fpuAdd(f32(rdram, element + 4u), fpuSub(fpuDiv(static_cast<float>(sumY), shown), offset)));
+                const int32_t id = static_cast<int32_t>(u32(rdram, element + 0xcu));
+                if (id != 0 && id < 0x7ff)
+                {
+                    const uint32_t entry = kLensDebounce + view * 8u + static_cast<uint32_t>(id) * 32u;
+                    const float before = visibility;
+                    visibility = fpuMul(fpuAdd(f32(rdram, entry + 4u), before), 0.5f);
+                    putF(rdram, element + 0x2cu, visibility);
+                    putF(rdram, entry + 4u, before);
+                }
+                if (static_cast<double>(visibility) < 1.0 / 256.0)
+                    put8(rdram, element + 0x10u, 0u);
+            }
+        }
+
+        // The flares' 18 groups, from lensFlarePacketInit's tables: the texture (its type's slot: TEX0 and id), the step
+        // along the line from the view's centre to the light, the size (its float's low two bits replaced by the UV
+        // extent's index: 31.5, 63.5 or 127.5 texels, the size of the packet's output buffers' w), the colour and the
+        // size factor.
+        struct FlareGroup
+        {
+            uint64_t tex0 = 0;
+            uint32_t id = 0;
+            float step = 0.0f, size = 0.0f, extent = 0.0f;
+            float colour[4] = {};
+        };
+
+        FlareGroup flareGroup(const uint8_t *rdram, uint32_t g)
+        {
+            FlareGroup group;
+            const uint32_t typeTexture = kTypeTextures + u8(rdram, kFlareTypes + g) * 8u;
+            const uint32_t slot = u16(rdram, typeTexture + 2u);
+            group.tex0 = u64(rdram, kSlotTex0 + slot * 8u);
+            group.id = u16(rdram, kSlotIds + slot * 2u);
+            group.step = f32(rdram, kFlareSteps + 4u * g);
+            const uint32_t sizeBits = (u32(rdram, kFlareSizes + 4u * g) & ~3u) | u8(rdram, kFlareUvs + g);
+            std::memcpy(&group.size, &sizeBits, 4);
+            const float extents[4] = {31.5f, 63.5f, 127.5f, 0.0f};
+            group.extent = extents[sizeBits & 3u];
+            for (uint32_t k = 0; k < 3u; ++k)
+                group.colour[k] = static_cast<float>(u8(rdram, kFlareColours + 0x12u * k + g));
+            group.colour[3] = f32(rdram, kFlareWeights + 4u * g);
+            return group;
+        }
+
+        // The program's sprites (runtime/tmb_native.cpp lensFlares, its inputs from the list: element j's screen point at
+        // +0, its flags at +0x10 and three terms at +0x14, its colour at +0x20 and visibility at +0x2c; the view's centre
+        // from viewGetCenter). Each light's scale and visibility, then per group one sprite per drawn light on the line
+        // from the centre through it: the first group sized by the light's scale (alpha 192), the others at their own
+        // size (alpha 128, colours times the visibility, at most 32); a light whose colour comes out under 1 left out of
+        // the groups after. Added (ALPHA 0x48), not fogged, Z the farthest over everything (no depth written).
+        void drawLensFlares(const uint8_t *rdram, uint32_t list, int32_t count, uint32_t view)
+        {
+            if (count <= 0)
+                return;
+            const uint32_t viewport = u32(rdram, kViews + view * 16u + 4u);
+            const float centre[2] = {static_cast<float>(static_cast<int32_t>(u32(rdram, viewport + 0x18u))),
+                                     static_cast<float>(static_cast<int32_t>(u32(rdram, viewport + 0x1cu)))};
+            const uint32_t items = static_cast<uint32_t>(count);
+            std::vector<uint8_t> drawn(items);
+            std::vector<float> scale(items), seen(items);
+            for (uint32_t j = 0; j < items; ++j)
+            {
+                const uint32_t element = list + j * 0x30u;
+                const uint32_t flags = u32(rdram, element + 0x10u);
+                const float a = f32(rdram, element + 0x14u), b = f32(rdram, element + 0x18u), c = f32(rdram, element + 0x1cu);
+                float visibility = f32(rdram, element + 0x2cu), size = 0.0f;
+                bool show = (flags & 1u) != 0u;
+                if (show)
+                {
+                    const float root = std::sqrt(std::fabs(visibility));
+                    const float z = ((flags & 16u) ? std::fabs(b) : std::max(b, 0.0f)) + (c - 1.0f);
+                    visibility = visibility / a / a;
+                    size = root / a;
+                    if (flags & 8u)
+                    {
+                        size = size * z / c;
+                        const float scaled = visibility * z;
+                        visibility = scaled / c;
+                        show = scaled > 0.0f;
+                    }
+                }
+                drawn[j] = show ? 1u : 0u;
+                scale[j] = size;
+                seen[j] = visibility;
+                ++g_stats.flareLights;
+            }
+            Material base;
+            base.texa = kTexa;
+            base.blend = blendFor(0x48u);
+            const uint32_t atst = (kTest >> 1) & 7u, aref = (kTest >> 4) & 0xffu;
+            base.alphaTest = atst == 6u || aref > 0u;
+            base.alphaRef = static_cast<uint8_t>(atst == 6u ? aref : aref - 1u);
+            base.depthTest = true;
+            base.depthWrite = false;
+            base.fog = false;
+            Batch batch;
+            for (uint32_t g = 0; g < 18u; ++g)
+            {
+                const FlareGroup group = flareGroup(rdram, g);
+                useTexture(batch, base, rdram, group.id, group.tex0);
+                const uint32_t width = 1u << ((group.tex0 >> 26) & 0xfu), height = 1u << ((group.tex0 >> 30) & 0xfu);
+                const float sizeX = group.size, sizeY = group.size * 0.5f;
+                for (uint32_t j = 0; j < items; ++j)
+                {
+                    if (!drawn[j])
+                        continue;
+                    const uint32_t element = list + j * 0x30u;
+                    const float w = scale[j] * group.colour[3], weight = group.colour[3] * seen[j];
+                    float rgb[3];
+                    for (uint32_t i = 0; i < 3u; ++i)
+                        rgb[i] = group.colour[i] * f32(rdram, element + 0x20u + 4u * i) * (g == 0u ? 1.0f : weight);
+                    const float x = centre[0] + (f32(rdram, element) - centre[0]) * group.step;
+                    const float y = centre[1] + (f32(rdram, element + 4u) - centre[1]) * group.step;
+                    const float dx = g == 0u ? sizeX * w : sizeX, dy = g == 0u ? sizeY * w : sizeY;
+                    const float limit = g == 0u ? 255.0f : 32.0f;
+                    uint32_t rgba = (g == 0u ? 192u : 128u) << 24;
+                    for (uint32_t i = 0; i < 3u; ++i)
+                    {
+                        const float value = std::min(rgb[i], limit);
+                        rgba |= (value > 0.0f ? (value >= 255.0f ? 255u : static_cast<uint32_t>(value)) : 0u) << (8u * i);
+                    }
+                    if (rgb[0] < 1.0f && rgb[1] < 1.0f && rgb[2] < 1.0f)
+                        drawn[j] = 0u; // left out of the next groups
+                    const float xs[4] = {x + dx, x - dx, x + dx, x - dx}, ys[4] = {y + dy, y + dy, y - dy, y - dy};
+                    const float us[4] = {0.5f, group.extent, 0.5f, group.extent}, vs[4] = {0.5f, 0.5f, group.extent, group.extent};
+                    Vertex corner[4];
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        corner[i].x = xs[i];
+                        corner[i].y = ys[i];
+                        corner[i].z = 16777215.0f;
+                        corner[i].u = us[i] / static_cast<float>(width);
+                        corner[i].v = vs[i] / static_cast<float>(height);
+                        corner[i].rgba = rgba;
+                        corner[i].fog = 0.0f;
+                    }
+                    pushQuad(batch, corner);
+                    ++g_stats.flareSprites;
+                }
+            }
+            flush(batch);
+        }
+
         // TMB_NATIVE_PARTICLES_CHECK: per program, the systems computed here in chain order, waiting for the
         // adapter's translation of their packets (the game's CALLs come in the same sorted order).
         struct Captured
@@ -1876,6 +2205,182 @@ namespace tmb::particles
                              static_cast<unsigned long long>(st.colourOff), st.maxColour, static_cast<unsigned long long>(st.uvOff), st.maxUv);
         }
 
+        // TMB_NATIVE_PARTICLES_CHECK=1 with the flares: the game's two functions run (their packet translated by the
+        // adapter), and the ones here on the same input before them, their results compared byte for byte (the list,
+        // its counts, the random seed, the Z samples, the debounce table), then the game's kept; the sprites here
+        // from the game's list compared with the adapter's 0x2338 translation (compareCaptured).
+        bool g_flaresCheck = false;
+        struct FlareCheckStats
+        {
+            uint64_t calls = 0, differ = 0, unfinished = 0;
+        };
+        FlareCheckStats g_flareCheck[2]; // the test, the render
+
+        // The guest memory the flare functions write: the list (0x4a lights), the counts and seed, the samples and the
+        // debounce table (the light ids are small: their entries sit below the samples).
+        struct FlareMemory
+        {
+            std::vector<uint8_t> list, tables;
+            uint32_t counts[2] = {}, listAt = 0;
+            uint64_t seed = 0;
+        };
+        constexpr uint32_t kFlareTablesSize = (kLensSamples - kLensDebounce) + 0x4au * 64u;
+
+        FlareMemory saveFlares(const uint8_t *rdram, uint32_t gp, uint32_t view)
+        {
+            FlareMemory m;
+            m.listAt = u32(rdram, gp + static_cast<uint32_t>(kGpLensLists) + (view & 1u) * 4u);
+            m.list.assign(rdram + (m.listAt & 0x1ffffffu), rdram + (m.listAt & 0x1ffffffu) + 0x4au * 0x30u);
+            m.tables.assign(rdram + kLensDebounce, rdram + kLensDebounce + kFlareTablesSize);
+            for (uint32_t k = 0; k < 2u; ++k)
+                m.counts[k] = u32(rdram, gp + static_cast<uint32_t>(kGpLensCounts) + 4u * k);
+            m.seed = u64(rdram, gp + static_cast<uint32_t>(kGpSeed));
+            return m;
+        }
+
+        void restoreFlares(uint8_t *rdram, uint32_t gp, const FlareMemory &m)
+        {
+            std::memcpy(rdram + (m.listAt & 0x1ffffffu), m.list.data(), m.list.size());
+            std::memcpy(rdram + kLensDebounce, m.tables.data(), m.tables.size());
+            for (uint32_t k = 0; k < 2u; ++k)
+                put32(rdram, gp + static_cast<uint32_t>(kGpLensCounts) + 4u * k, m.counts[k]);
+            put64(rdram, gp + static_cast<uint32_t>(kGpSeed), m.seed);
+        }
+
+        void compareFlares(int which, const FlareMemory &mine, const FlareMemory &game, int32_t mineResult, int32_t gameResult)
+        {
+            FlareCheckStats &st = g_flareCheck[which];
+            ++st.calls;
+            const char *name = which == 0 ? "test" : "render";
+            size_t at = 0;
+            const char *where = nullptr;
+            if (mineResult != gameResult)
+                where = "result";
+            else if (std::memcmp(mine.counts, game.counts, sizeof(mine.counts)) != 0)
+                where = "count";
+            else if (mine.seed != game.seed)
+                where = "seed";
+            else
+            {
+                const size_t used = std::min(static_cast<size_t>(std::max(gameResult, 0)) * 0x30u, mine.list.size());
+                while (at < used && mine.list[at] == game.list[at])
+                    ++at;
+                if (at < used)
+                    where = "list";
+                else
+                {
+                    at = 0;
+                    while (at < mine.tables.size() && mine.tables[at] == game.tables[at])
+                        ++at;
+                    if (at < mine.tables.size())
+                        where = "tables";
+                }
+            }
+            if (where)
+            {
+                ++st.differ;
+                static uint32_t s_logged = 0;
+                if (s_logged++ < 20u)
+                {
+                    uint32_t a = 0, b = 0;
+                    const bool inList = where[0] == 'l';
+                    const std::vector<uint8_t> &x = inList ? mine.list : mine.tables, &y = inList ? game.list : game.tables;
+                    if ((inList || where[0] == 't') && (at & ~size_t{3}) + 4u <= x.size())
+                    {
+                        std::memcpy(&a, &x[at & ~size_t{3}], 4);
+                        std::memcpy(&b, &y[at & ~size_t{3}], 4);
+                    }
+                    std::fprintf(stderr, "[tmb:particles] flare check %s: differs (%s, offset %#zx: here %#x, game %#x; results %d, %d)\n", name,
+                                 where, at, a, b, mineResult, gameResult);
+                }
+            }
+            if ((st.calls & (st.calls - 1u)) == 0u || st.calls % 1000u == 0u)
+                std::fprintf(stderr, "[tmb:particles] flare check %s: %llu calls, %llu differ (%llu more not compared: the game's left midway)\n",
+                             name, static_cast<unsigned long long>(st.calls), static_cast<unsigned long long>(st.differ),
+                             static_cast<unsigned long long>(st.unfinished));
+        }
+
+        void lensTestOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (g_flaresCheck)
+            {
+                const uint32_t gp = getRegU32(ctx, 28), view = getRegU32(ctx, 4);
+                const FlareMemory before = saveFlares(rdram, gp, view);
+                const int32_t mineResult = lensFlareTest(rdram, gp, view);
+                const FlareMemory mine = saveFlares(rdram, gp, view);
+                restoreFlares(rdram, gp, before);
+                const uint32_t ra = getRegU32(ctx, 31);
+                ctx->pc = kLensTest;
+                gameLensTest(rdram, ctx, runtime);
+                if (ctx->pc != ra) // left midway (its DMA wait, a GS readback): compared only when it ran through
+                    ++g_flareCheck[0].unfinished;
+                else
+                    compareFlares(0, mine, saveFlares(rdram, gp, view), mineResult, static_cast<int32_t>(getRegU32(ctx, 2)));
+                return;
+            }
+            if (!g_flaresNative)
+            {
+                ctx->pc = kLensTest;
+                gameLensTest(rdram, ctx, runtime);
+                return;
+            }
+            setReg(ctx, 2, static_cast<uint32_t>(lensFlareTest(rdram, getRegU32(ctx, 28), getRegU32(ctx, 4))));
+            ctx->pc = getRegU32(ctx, 31);
+        }
+
+        // particleLensFlareRender(chain, view) natively: the visibility, then the sprites in the particle chain's group
+        // (after the native systems); the chain comes back as it went in (no texture upload, no packet, no CALL).
+        void lensRenderOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (g_flaresCheck)
+            {
+                const uint32_t view = getRegU32(ctx, 5), gp = getRegU32(ctx, 28);
+                const int32_t count = static_cast<int32_t>(u32(rdram, gp + static_cast<uint32_t>(kGpLensCounts) + (view & 1u) * 4u));
+                const FlareMemory before = saveFlares(rdram, gp, view);
+                if (count > 0)
+                    lensFlareVisibility(rdram, before.listAt, count, view);
+                const FlareMemory mine = saveFlares(rdram, gp, view);
+                restoreFlares(rdram, gp, before);
+                const uint32_t ra = getRegU32(ctx, 31);
+                ctx->pc = kLensRender;
+                gameLensRender(rdram, ctx, runtime);
+                if (ctx->pc != ra)
+                    ++g_flareCheck[1].unfinished;
+                else
+                    compareFlares(1, mine, saveFlares(rdram, gp, view), count, count);
+                if (count > 0 && ctx->pc == ra) // the sprites from the game's list, for the adapter's translation of its packet
+                {
+                    Captured captured;
+                    captured.ps = before.listAt;
+                    g_capture = &captured.vertices;
+                    drawLensFlares(rdram, before.listAt, count, view);
+                    g_capture = nullptr;
+                    g_checkQueue[0x2338u].push_back(std::move(captured));
+                }
+                return;
+            }
+            if (!g_flaresNative)
+            {
+                ctx->pc = kLensRender;
+                gameLensRender(rdram, ctx, runtime);
+                return;
+            }
+            const uint32_t chain = getRegU32(ctx, 4), view = getRegU32(ctx, 5), gp = getRegU32(ctx, 28);
+            const uint32_t parity = view & 1u;
+            const int32_t count = static_cast<int32_t>(u32(rdram, gp + static_cast<uint32_t>(kGpLensCounts) + parity * 4u));
+            const uint32_t list = u32(rdram, gp + static_cast<uint32_t>(kGpLensLists) + parity * 4u);
+            if (count > 0)
+            {
+                lensFlareVisibility(rdram, list, count, view);
+                ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+                renderer.beginGroup(tmb::native::nextStreamGroup());
+                renderer.setKey(0);
+                drawLensFlares(rdram, list, count, view);
+            }
+            setReg(ctx, 2, chain);
+            ctx->pc = getRegU32(ctx, 31);
+        }
+
         struct Sorted
         {
             float key;
@@ -1885,13 +2390,18 @@ namespace tmb::particles
         void particleDrawOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             const uint32_t view = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
-            if (!settings().on || !tmb::native::effectsInStream() || u32(rdram, gp + static_cast<uint32_t>(kGpColours)) == 0u ||
-                toggledOff())
+            const bool toggledAll = toggledOff() && !settings().toggleFlares;
+            if (!settings().on || !tmb::native::effectsInStream() || u32(rdram, gp + static_cast<uint32_t>(kGpColours)) == 0u || toggledAll)
             {
+                g_flaresNative = false;
                 ctx->pc = kParticleDraw;
                 gameParticleDraw(rdram, ctx, runtime);
                 return;
             }
+            // The lens flares here too unless left to the game (the check, TMB_NATIVE_PARTICLES_FLARES=0, the flares' toggle
+            // period, the native depth off: their GS readback then).
+            const bool flaresNative = settings().flares && !settings().check && !(settings().toggleFlares && toggledOff()) &&
+                                      tmb::native::flareDepthNative();
 
             // The frustum (viewGetWH, viewGetFov): the half extents' slopes and the sphere test's factors.
             const uint32_t viewport = u32(rdram, kViews + view * 16u + 4u);
@@ -2001,7 +2511,9 @@ namespace tmb::particles
                 left.push_back(entry);
             }
 
-            if (settings().toggle > 0.0) // the A/B's mark of a native period: a magenta square at the top-left corner
+            // The A/B's mark of a native period: a magenta square at the top-left corner (with the flares' toggle: when they
+            // are drawn here).
+            if (settings().toggle > 0.0 && (!settings().toggleFlares || flaresNative))
             {
                 if (!drewNative)
                 {
@@ -2056,9 +2568,10 @@ namespace tmb::particles
 
             if (settings().log && ++g_stats.frames % 300u == 0u)
             {
-                std::fprintf(stderr, "[tmb:particles] per 300 draws: %llu systems native (%llu sprites, %llu arcs on a sphere), %llu left to the game, %llu culled, %llu missing textures; by type:",
+                std::fprintf(stderr, "[tmb:particles] per 300 draws: %llu systems native (%llu sprites, %llu arcs on a sphere), %llu flare lights (%llu sprites), %llu left to the game, %llu culled, %llu missing textures; by type:",
                              static_cast<unsigned long long>(g_stats.nativeSystems), static_cast<unsigned long long>(g_stats.nativeSprites),
-                             static_cast<unsigned long long>(g_stats.sphereArcs),
+                             static_cast<unsigned long long>(g_stats.sphereArcs), static_cast<unsigned long long>(g_stats.flareLights),
+                             static_cast<unsigned long long>(g_stats.flareSprites),
                              static_cast<unsigned long long>(g_stats.gameSystems), static_cast<unsigned long long>(g_stats.culled),
                              static_cast<unsigned long long>(g_stats.missingTextures));
                 for (int t = 0; t < 16; ++t)
@@ -2069,7 +2582,10 @@ namespace tmb::particles
                 g_stats = Stats{};
                 g_stats.frames = frames;
             }
+            g_flaresNative = flaresNative; // its tail's lensTestOverride and lensRenderOverride
+            g_flaresCheck = settings().check && settings().flares && tmb::native::flareDepthNative();
             gameParticleDraw(rdram, ctx, runtime);
+            g_flaresNative = g_flaresCheck = false;
         }
     }
 
@@ -2093,6 +2609,8 @@ namespace tmb::particles
         runtime.registerFunction(kStripeBuild, &stripeBuildOverride);
         runtime.registerFunction(kArcBuild, &arcBuildOverride);
         runtime.registerFunction(kArcUpdate, &arcUpdateOverride);
+        runtime.registerFunction(kLensTest, &lensTestOverride);
+        runtime.registerFunction(kLensRender, &lensRenderOverride);
         std::fprintf(stderr, "[tmb:particles] native particles on (types mask %#x)\n", settings().types);
     }
 }

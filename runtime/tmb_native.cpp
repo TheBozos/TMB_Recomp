@@ -534,54 +534,25 @@ namespace tmb::native
                     s.pool[i * 3u + k] = s.vu.f(181 + i, k);
         }
 
-        // The draws that follow clipped to the view the game draws now (a split screen's: the GS scissor's cut). The
-        // first draw of each view in a frame clears it to the fog colour (fogUpdate's; viewGetBgColor's until it is
-        // known), as the GS frame was before its objects: where nothing is drawn (a sky left to the fog) it shows.
+        // The draws that follow clipped to the view the game draws now (a split screen's: the GS scissor's cut).
+        void viewClip()
+        {
+            float clip[4];
+            if (g_rdram && tmb::twod::viewClip(g_rdram, clip))
+                ps2x::native::Renderer::instance().setClip(clip[0], clip[1], clip[2], clip[3]);
+            else
+                ps2x::native::Renderer::instance().clearClip();
+        }
+
+        // What the native frame starts from, as the GS frame was cleared before the views drew: the fog colour in a
+        // match (where nothing is drawn, a sky left to the fog, it shows; viewGetBgColor's until fogUpdate's is known),
+        // black in the menus.
 #if TMB_REGION_US
         constexpr uint32_t kBgColour = 0x004E04F0u;
 #else
         constexpr uint32_t kBgColour = 0x004E34F0u;
 #endif
-        float g_viewCleared[4] = {0, 0, 0, 0}; // the view last cleared this frame (reset by publish)
-        void viewClip()
-        {
-            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
-            float clip[4];
-            if (!g_rdram || !tmb::twod::viewClip(g_rdram, clip))
-            {
-                renderer.clearClip();
-                return;
-            }
-            renderer.setClip(clip[0], clip[1], clip[2], clip[3]);
-            if (!renderer.presentsAlone() || std::memcmp(clip, g_viewCleared, sizeof(clip)) == 0 || menusNative())
-                return;
-            std::memcpy(g_viewCleared, clip, sizeof(clip));
-            uint32_t background;
-            std::memcpy(&background, g_rdram + kBgColour, 4);
-            static uint32_t s_logged = 0;
-            static const bool s_logViews = std::getenv("TMB_NATIVE_LOG_VIEWS") != nullptr;
-            if (s_logViews && s_logged++ < 400u)
-                std::fprintf(stderr, "[tmb:native] view clear %.0f %.0f %.0f %.0f (%llu)\n", clip[0], clip[1], clip[2], clip[3],
-                             0ull);
-            else if (!s_logViews && s_logged++ < 4u)
-                std::fprintf(stderr, "[tmb:native] view clear: background %06x, fog %06x\n", background & 0xffffffu, gameFogColour(0u));
-            const uint32_t colour = gameFogColour(background & 0xffffffu) | 0x80000000u;
-            ps2x::native::Vertex corner[4];
-            for (int i = 0; i < 4; ++i)
-            {
-                corner[i].x = (i & 1) ? clip[2] : clip[0];
-                corner[i].y = (i & 2) ? clip[3] : clip[1];
-                corner[i].rgba = colour;
-            }
-            const ps2x::native::Vertex quad[6] = {corner[0], corner[1], corner[2], corner[1], corner[3], corner[2]};
-            static constexpr float kScreenSpace[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-            ps2x::native::Material material;
-            material.blend = ps2x::native::Material::Blend::Opaque;
-            material.depthTest = false;
-            material.depthWrite = false;
-            renderer.setKey(0);
-            renderer.draw(material, kScreenSpace, quad, 6u, nullptr);
-        }
+        uint32_t frameClearColour();
 
         void flush(State &s, std::vector<ps2x::native::Vertex> &triangles);
 
@@ -2006,6 +1977,33 @@ namespace tmb::native
                 s.particleFrom = 0;
             }
             s.flushed = true;
+            // The microprograms' guard band: a triangle with a vertex behind the camera or past the GS's coordinate space
+            // (0 to 4096) is dropped whole, never sent (one that reached the GS would wrap across the screen).
+            const bool screenSpaceMode = s.mode == Mode::Sprite || s.mode == Mode::Rain || s.mode == Mode::Ribbon || s.mode == Mode::Particles ||
+                                         s.mode == Mode::LensFlares || s.mode == Mode::Streaks || s.mode == Mode::Trails ||
+                                         s.mode == Mode::TexParticles || s.mode == Mode::HeatHaze || s.mode == Mode::Lightning || s.mode == Mode::Beams;
+            if (!screenSpaceMode && !triangles.empty())
+            {
+                const float *m = s.matrix;
+                const auto inside = [m](const ps2x::native::Vertex &v)
+                {
+                    const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
+                    if (!(w > 0.0f))
+                        return false;
+                    const float x = (m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12]) / w, y = (m[1] * v.x + m[5] * v.y + m[9] * v.z + m[13]) / w;
+                    return x >= 0.0f && x < 4096.0f && y >= 0.0f && y < 4096.0f;
+                };
+                size_t kept = 0;
+                for (size_t t = 0; t + 2u < triangles.size(); t += 3u)
+                    if (inside(triangles[t]) && inside(triangles[t + 1u]) && inside(triangles[t + 2u]))
+                    {
+                        if (kept != t)
+                            std::copy(triangles.begin() + static_cast<std::ptrdiff_t>(t), triangles.begin() + static_cast<std::ptrdiff_t>(t + 3u),
+                                      triangles.begin() + static_cast<std::ptrdiff_t>(kept));
+                        kept += 3u;
+                    }
+                triangles.resize(kept);
+            }
             if (triangles.empty())
                 return;
             g_stats.triangles += triangles.size() / 3u;
@@ -3079,6 +3077,15 @@ namespace tmb::native
 
     namespace
     {
+        uint32_t frameClearColour()
+        {
+            if (!g_rdram || menusNative())
+                return 0u;
+            uint32_t background;
+            std::memcpy(&background, g_rdram + kBgColour, 4);
+            return gameFogColour(background & 0xffffffu);
+        }
+
         // Publishes what was submitted and starts the next frame.
         void publish()
         {
@@ -3098,7 +3105,7 @@ namespace tmb::native
             renderer.endFrame();
             renderer.beginFrame(screen());
             state().keysThisFrame.clear();
-            std::memset(g_viewCleared, 0, sizeof(g_viewCleared));
+            renderer.setClearColour(frameClearColour());
             tmb::meshes::endFrame();
         }
     }

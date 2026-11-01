@@ -1,5 +1,5 @@
-// TMB's rigid 3D objects drawn natively from the mesh pack at their per-object hook (runtime/tmb_meshes.cpp), handed
-// to the adapter (runtime/tmb_native.cpp) at their place in the frame.
+// TMB's 3D objects drawn natively from the mesh pack at their per-object hook (runtime/tmb_meshes.cpp), handed to the
+// adapter (runtime/tmb_native.cpp) at their place in the frame.
 #pragma once
 
 #include "ps2_runtime.h"
@@ -31,13 +31,16 @@ namespace tmb::meshes
     struct Drawn
     {
         uint32_t setupPc = 0;
+        uint32_t resumes = 0; // a resume (setupPc 0xc78): the setup it goes on with, which the stream's must be
         float matrix[16] = {}; // object to GS screen (columns), the z row times the depth factor
+        bool screenSpace = false; // sprites and ribbons: their vertices in screen space (matrix: the setup's, unscaled)
         uint64_t key = 0;      // Renderer::setKey
         std::vector<Batch> batches;
         uint32_t check[24][4] = {}; // VU 0-21 as the hook built them (TMB_NATIVE_MESHES_CHECK: the adapter compares)
         uint32_t frame = 0;
         uint32_t object = 0, file = 0, offset = 0;
-        // TMB_NATIVE_MESHES_CHECK: each strip's vertices before triangles (the adapter compares its own translation).
+        // TMB_NATIVE_MESHES_CHECK: each strip's vertices before triangles (sprites and ribbons: its triangles; the
+        // adapter compares its own translation).
         std::vector<std::vector<ps2x::native::Vertex>> checkStrips;
     };
 

@@ -33,13 +33,18 @@ What it reads:
   so the object drawn before is the nearest earlier object with a pool in the file: its last pool is this object's.
   The tool checks, through the .PTR pointers, that the nearest node holding both lists the pool object first, and
   that every index is inside that pool.
-- skinned objects (+0x64 != 0) use their own packet (no DMA tag; STCYCL 1,3 then V4-32 / V4-8 / V2-16 at 181-183,
-  MSCALF 6, then per strip the tag @0, V3-32 @4, S-16 indices @17, V4-8 @18, V2-16 @19): which lanes hold bone
-  indices and weights is not known yet (the runtime CALLs a per-instance chain, not this packet), so they are
-  recorded with kind "skinned", their header fields and no strips.
+- skinned objects (+0x64 != 0) use their own packet (no DMA tag: the per-instance chain the header CALLs, at
+  (*(inst + 0x18))[obj + 0x68], REFs the bone matrices, unpacked at TOP + 4k for bone k, then this packet, then RETs).
+  STCYCL 1,3, then per pool: S-32 @180 its size, V4-32 @181 the positions (w: weight 0 as an integer, / 65536),
+  V4-8 @182 the normal bytes and bone 0's offset (w), V4-16 @183 weight 1, bone 1, weight 2, bone 2 (two bones:
+  V2-16, weight 1 and bone 1), all unsigned; MSCALF 4 / 6 / 8 its vertex pass (three, two, one bones: 0x20, 0x30,
+  0x40); then per strip V4-32 @0 (a texture header in w: an A+D tag, the strip's GIF tag then at @4; else the GIF tag
+  itself), V3-32 @4, S-16 @17 the pool offsets (3 per vertex), V4-8 @18 colours, V2-16 @19 s, t, FLUSH, MSCNT. The
+  packet comes in sections, each closed by STCYCL 4,4 and NOPs to the quadword (the chain sends the bones again
+  before each); the next starts with its pool's S-32 @180. A bone offset is 4 quadwords per bone: bone = offset / 4.
 
 The pack, all little-endian:
-  "TMBMESH2", u32 file count, then per file:
+  "TMBMESH3", u32 file count, then per file:
     u16 name length, name (upper case, no directory, e.g. "JUNKYARD.NGP"), u32 image size (inflated), u32 image CRC32,
     u32 object count, then per object (sorted by offset):
       u32 offset (obj - 0x980000 in the image), u32 kind (0 rigid, 1 pool-less, 2 sprite, 3 ribbon, 4 skinned),
@@ -51,6 +56,9 @@ The pack, all little-endian:
         data: the runtime reads the positions there, where a game that moves a mesh's vertices writes them;
         0xffffffff when they are not in one piece), u32 its first position, u32 its position count,
       u32 parameter count, then per parameter u32 the index of the strip it comes before, f32[4],
+      u32 skin vertex count (skinned: one per position, else 0), then per skin vertex 20 bytes: u8 bones (the vertex
+        pass's: 1, 2, 3), u8 normal x, y, z (n = 1 - b / 128), u8 bone 0, 1, 2 (the matrix index), u8 pad, i32 weight
+        0, 1, 2 (/ 65536; one bone: unweighted),
       u32 strip count, then per strip:
         u16 prim (GIF PRIM, 11 bits), u16 gif flags (bit 0 PRE, bit 1 EOP), u32 material header (GIF tag word 3),
         i32 texture slot ((w3 - 1) / 3, -1 = keep the current texture), u32 vertex count, then per vertex 16 bytes:
@@ -214,6 +222,7 @@ class Mesh:
         self.aux = []  # per position (x, y, z, 0) from a pool's @373 block, or zeros
         self.params = []  # (index of the strip it precedes, (f32 x4)): batches with only a V4-32 @0 qword
         self.strips = []  # (prim, gif flags, material header, slot, [(pos index, nx, ny, nz, vflags, rgba, s, t)])
+        self.skin = []  # skinned: per position (bones, (nx, ny, nz), (bone 0, 1, 2), (weight 0, 1, 2))
 
 
 def decode_strips(image, obj, inherited_pool):
@@ -259,13 +268,118 @@ def decode_strips(image, obj, inherited_pool):
     return pools, strips, problems
 
 
+SKIN_PASSES = {4: 3, 6: 2, 8: 1}  # MSCALF imm (0x20, 0x30, 0x40) -> bones per vertex
+
+
+def skinned_packet(image, obj):
+    """A skinned object's packet: [(at, cmd, num, imm, payload)] from obj+4. It comes in sections (the chain REFs
+    each after the bones again: the bones go to the TOP buffer the section's vertex pass runs on), each closed by
+    STCYCL 4,4 (and NOPs to the quadword); the next one starts with its pool's size (S-32 @180)."""
+    at = u32(image, obj + 4) - LINK
+    codes = []
+    while True:
+        for code in vif_codes(image, at, min(len(image), at + 0x40000)):
+            if code[1] == 0x01 and code[3] == 0x0404:
+                at = (code[0] + 4 + 15) & ~15  # STCYCL 4,4, then NOPs to the quadword
+                break
+            codes.append(code)
+        else:
+            raise ValueError(f'skinned packet of {obj:#x} does not end')
+        if at + 8 > len(image) or u32(image, at) != 0x600100b4:
+            return codes
+
+
+def decode_skinned(image, mesh, obj):
+    """Fill a skinned mesh: its pools (positions and skin vertices) and strips. Returns the problems."""
+    problems = []
+    pool_base, pool_size, pool = None, 0, {}
+    strip = {}
+    for at, cmd, num, imm, payload in skinned_packet(image, obj):
+        addr, usn = imm & 0x3ff, (imm >> 14) & 1
+        if cmd == 0x01:
+            if imm != 0x0103:
+                problems.append(f'STCYCL {imm:#x}')
+        elif cmd >= 0x60:
+            fmt = cmd & 0xf
+            if addr == 180 and fmt == 0:
+                pool = {'size': u32(image, payload)}
+            elif addr == 181 and fmt == 12:
+                pool['pos'] = [struct.unpack_from('<3fi', image, payload + 16 * i) for i in range(num)]
+            elif addr == 182 and fmt == 14 and usn:
+                pool['nb'] = [tuple(image[payload + 4 * i:payload + 4 * i + 4]) for i in range(num)]
+            elif addr == 183 and fmt == 13 and usn:
+                pool['wb'] = [struct.unpack_from('<4H', image, payload + 8 * i) for i in range(num)]
+            elif addr == 183 and fmt == 5 and usn:
+                pool['wb'] = [struct.unpack_from('<2H', image, payload + 4 * i) + (0, 0) for i in range(num)]
+            elif addr == 0 and fmt == 12 and num == 1:
+                strip['tag0'] = struct.unpack_from('<4I', image, payload)
+            elif addr == 4 and fmt == 8 and num == 1:
+                strip['tag4'] = struct.unpack_from('<3I', image, payload)
+            elif addr == 17 and fmt == 1 and usn:
+                strip['offsets'] = [u16(image, payload + 2 * i) for i in range(num)]
+            elif addr == 18 and fmt == 14 and usn:
+                strip['colours'] = [tuple(image[payload + 4 * i:payload + 4 * i + 4]) for i in range(num)]
+            elif addr == 19 and fmt == 5 and not usn:
+                strip['uvs'] = [struct.unpack_from('<2h', image, payload + 4 * i) for i in range(num)]
+            else:
+                problems.append(f'UNPACK {UNPACK_FORMATS.get(fmt, "?")} n={num} @{addr} usn {usn}')
+        elif cmd == 0x15:  # MSCALF: the vertex pass over the pool
+            bones = SKIN_PASSES.get(imm)
+            n = pool.get('size', -1)
+            if bones is None or not all(len(pool.get(k, ())) == n for k in ('pos', 'nb', 'wb')):
+                problems.append(f'pool: MSCALF {imm:#x}, size {n}, {[len(pool.get(k, ())) for k in ("pos", "nb", "wb")]}')
+                pool_base = None
+                continue
+            pool_base, pool_size = len(mesh.positions), n
+            for (x, y, z, w0), (nx, ny, nz, b0), (w1, b1, w2, b2) in zip(pool['pos'], pool['nb'], pool['wb']):
+                offsets = (b0, b1, b2)[:bones]
+                if any(o % 4 for o in offsets):
+                    problems.append(f'bone offset {offsets} not a matrix')
+                mesh.positions.append((x, y, z, 0.0))
+                mesh.aux.append((0.0, 0.0, 0.0, 0.0))
+                ids = [o // 4 for o in offsets] + [0] * (3 - bones)
+                weights = (w0, w1, w2) if bones == 3 else (w0, w1, 0) if bones == 2 else (0, 0, 0)
+                mesh.skin.append((bones, (nx, ny, nz), tuple(ids), weights))
+            pool = {}
+        elif cmd == 0x17:  # MSCNT: one strip
+            needed = ('tag0', 'tag4', 'offsets', 'colours', 'uvs') if strip.get('tag0', (0, 0, 0, 0))[3] else                 ('tag0', 'offsets', 'colours', 'uvs')
+            if pool_base is None or any(k not in strip for k in needed):
+                problems.append('skinned strip without its pool / tag / offsets / colours / uvs')
+                strip = {}
+                continue
+            header = strip['tag0'][3]
+            tag = strip['tag4'] if header else strip['tag0'][:3]
+            n = len(strip['offsets'])
+            if (tag[0] & 0x7fff) != n or len(strip['colours']) != n or len(strip['uvs']) != n or tag[2] != 0x412:
+                problems.append(f'skinned strip: NLOOP {tag[0] & 0x7fff}, {n} offsets, regs {tag[2]:#x}')
+                strip = {}
+                continue
+            vertices = []
+            for offset, rgba, (s_, t_) in zip(strip['offsets'], strip['colours'], strip['uvs']):
+                offset &= 0x7fff
+                if offset % 3 or offset // 3 >= pool_size:
+                    problems.append(f'skinned strip: pool offset {offset} (pool {pool_size})')
+                    break
+                vertices.append((pool_base + offset // 3, 0, 0, 0, 0, rgba, s_, t_))
+            else:
+                prim = (tag[1] >> 15) & 0x7ff
+                gif_flags = ((tag[1] >> 14) & 1) | (((tag[0] >> 15) & 1) << 1)
+                mesh.strips.append((prim, gif_flags, header, (header - 1) // 3 if header else -1, vertices))
+            strip = {}
+        elif cmd in (0x00, 0x10, 0x11, 0x13):
+            pass
+        else:
+            problems.append(f'VIF cmd {cmd:#x}')
+    return problems
+
+
 def build_mesh(image, obj, kind, inherited_pool):
     flags = struct.unpack_from('<Q', image, obj + 8)[0]
     sphere = struct.unpack_from('<4f', image, obj + 0x10)
     textures = (u16(image, obj + 0x5a),) + struct.unpack_from('<5H', image, obj + 0x50)
     mesh = Mesh(obj, kind, flags, sphere, textures)
     if kind == SKINNED:
-        return mesh, []
+        return mesh, decode_skinned(image, mesh, obj)
     pools, strips, problems = decode_strips(image, obj, inherited_pool)
     pool_base = {}  # the pools this object uses, in order of first use, then inline positions
     for strip, pool in strips:
@@ -410,7 +524,7 @@ def convert_file(path):
 
 def write_pack(out_path, files):
     with open(out_path, 'wb') as out:
-        out.write(b'TMBMESH2')
+        out.write(b'TMBMESH3')
         out.write(struct.pack('<I', len(files)))
         for name, image, meshes in files:
             encoded = name.encode()
@@ -427,6 +541,8 @@ def write_pack(out_path, files):
                 out.write(b''.join(struct.pack('<III', *src) for src in m.sources))
                 out.write(struct.pack('<I', len(m.params)))
                 out.write(b''.join(struct.pack('<I4f', i, *q) for i, q in m.params))
+                out.write(struct.pack('<I', len(m.skin)))
+                out.write(b''.join(struct.pack('<8B3i', bones, *normal, *ids, 0, *weights) for bones, normal, ids, weights in m.skin))
                 out.write(struct.pack('<I', len(m.strips)))
                 for prim, gif_flags, w3, slot, vertices in m.strips:
                     out.write(struct.pack('<HHIiI', prim, gif_flags, w3, slot, len(vertices)))
@@ -460,6 +576,8 @@ def dump(game, name, offset):
           f'ntex {m.textures[0]}, textures {list(m.textures[1:1 + m.textures[0]])}')
     if m.pool_from != 0xffffffff:
         print(f'  pool from object {m.pool_from:#x}')
+    for i, (bones, normal, ids, weights) in enumerate(m.skin[:400]):
+        print(f'  skin [{i:4}] {bones} bones {ids[:bones]} weights {[w / 65536 for w in weights[:bones]]} n {normal}')
     print(f'  {len(m.positions)} positions, {len(m.strips)} strips, '
           f'{sum(len(s[4]) for s in m.strips)} vertices')
     params = dict(m.params)

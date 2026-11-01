@@ -358,6 +358,7 @@ namespace tmb::native
             // A skinned pass's pool: 3 quadwords per vertex, the strips index it by quadword offset (181 + offset);
             // per offset / 3, the blended position and normal.
             std::vector<float> skinPositions, skinNormals;
+            float skinMatrices[48] = {}; // the bones of the vertex being blended
             uint32_t setupPc = 0;
             // Objects keyed this frame (Renderer::setKey): their own data's hash -> how many so far, so identical
             // objects (two of the same barrel) keep their own key, by their order.
@@ -368,9 +369,8 @@ namespace tmb::native
             uint32_t fogColour = 0;        // FOGCOL as the stream's DIRECT packets set it (before the game's own is known)
             uint32_t prim = 0;             // PRIM as the stream's DIRECT and header A+D set it (a tag without PRE draws with it)
             uint64_t lastTex0 = 0;         // the last TEX0_1 the GS got (DIRECT or A+D): a packet without one draws with it
-            float reflect[3] = {};         // 0x1db8's alpha terms (its setup's TOP .yzw: base, slope, floor)
-            bool water = false;            // 0x1db8 with all three 0: the water variant (0x2208)
-            bool reflectParams = false;    // 0x1db8's next MSCNT is its parameter step (0xf50 -> 0x1de0), not a strip
+            tmb::vu1::Reflection reflection; // 0x1db8's alpha terms (its parameter step's TOP .yzw), the water variant
+            bool reflectParams = false;    // 0x1db8's next MSCNT is its parameter step (0xf50 -> 0x1de8), not a strip
             float fxConst[4][4] = {};      // the effects image's VU 4-7 as its 0x0 loads them (vf29, vf27, vf28, vf31)
             float fxMatrix[16] = {};       // 0x390's screen matrix (L_0038): VU 0-3, times the batch's own when TOP.w < 0
             uint32_t fxNext = 0;           // the next particle's position (read downwards, across the MSCNTs)
@@ -486,9 +486,6 @@ namespace tmb::native
             keyObject(s, count, count * 3u);
             s.skinPositions.assign(static_cast<size_t>(count) * 3u, 0.0f);
             s.skinNormals.assign(static_cast<size_t>(count) * 3u, 0.0f);
-            float weightScale;
-            const uint32_t weightBits = 0x377ffff6u; // the program's 1/65536
-            std::memcpy(&weightScale, &weightBits, 4);
             for (uint32_t i = 0; i < count; ++i)
             {
                 const uint32_t b = 181u + 3u * i;
@@ -496,19 +493,19 @@ namespace tmb::native
                 const float n[3] = {1.0f - static_cast<float>(vu.w(b + 1, 0)) / 128.0f, 1.0f - static_cast<float>(vu.w(b + 1, 1)) / 128.0f,
                                     1.0f - static_cast<float>(vu.w(b + 1, 2)) / 128.0f};
                 const uint32_t offset[3] = {vu.w(b + 1, 3), vu.w(b + 2, 1), vu.w(b + 2, 3)};
-                const float weight[3] = {bones == 1 ? 1.0f : static_cast<float>(static_cast<int32_t>(vu.w(b, 3))) * weightScale,
-                                         static_cast<float>(static_cast<int32_t>(vu.w(b + 2, 0))) * weightScale,
-                                         static_cast<float>(static_cast<int32_t>(vu.w(b + 2, 2))) * weightScale};
-                float *outP = &s.skinPositions[i * 3u], *outN = &s.skinNormals[i * 3u];
-                for (int bone = 0; bone < bones; ++bone)
+                const float weight[3] = {bones == 1 ? 1.0f : tmb::vu1::skinWeight(static_cast<int32_t>(vu.w(b, 3))),
+                                         tmb::vu1::skinWeight(static_cast<int32_t>(vu.w(b + 2, 0))),
+                                         tmb::vu1::skinWeight(static_cast<int32_t>(vu.w(b + 2, 2)))};
+                const float *matrix[3];
+                for (int bone = 0; bone < 3; ++bone)
                 {
-                    const uint32_t m = s.top + (offset[bone] & 0x3ffu);
-                    for (int k = 0; k < 3; ++k)
-                    {
-                        outP[k] += (vu.f(m, k) * p[0] + vu.f(m + 1, k) * p[1] + vu.f(m + 2, k) * p[2] + vu.f(m + 3, k)) * weight[bone];
-                        outN[k] += (vu.f(m, k) * n[0] + vu.f(m + 1, k) * n[1] + vu.f(m + 2, k) * n[2]) * weight[bone];
-                    }
+                    float *m = &s.skinMatrices[static_cast<size_t>(bone) * 16u];
+                    for (uint32_t c = 0; c < 4u; ++c)
+                        for (int k = 0; k < 4; ++k)
+                            m[c * 4u + k] = bone < bones ? vu.f(s.top + (offset[bone] & 0x3ffu) + c, k) : 0.0f;
+                    matrix[bone] = m;
                 }
+                tmb::vu1::skinVertex(bones, matrix, weight, p, n, &s.skinPositions[i * 3u], &s.skinNormals[i * 3u]);
             }
         }
 
@@ -526,6 +523,9 @@ namespace tmb::native
 
         void vertexPass(State &s)
         {
+            // 0x1db8: the MSCNT after each of its vertex passes is the parameter step (the pass ends with JR vi13,
+            // which the setup set to 0x1de8), the second pool's too.
+            s.reflectParams = s.mode == Mode::Reflective;
             const uint32_t count = s.vu.w(180, 3) & 0xffffu;
             keyObject(s, count, count);
             s.pool.resize(static_cast<size_t>(count) * 3u);
@@ -665,11 +665,9 @@ namespace tmb::native
             return true;
         }
 
-        // One sprite of the 0x3000 program (its loop at 0x3030, re-entered at 0x3260): a centre (VU top+1, the size in
-        // w), a colour (top+2, scaled like the scaled mode) and four corners' texture coordinates (top+3..6, 4.12). The
-        // centre goes to the screen as (M * p) / w; the quad around it is 608 x 304 pixels per unit of size and of 1/w
-        // (square on TMB's 640 x 256 field), corners (+x -y), (-x -y), (+x +y), (-x +y). Its vertices are in screen
-        // space, drawn with an identity matrix.
+        // One sprite of the 0x3000 program (tmb::vu1::spriteQuad): its centre at TOP + 1 (the size in w), its colour at
+        // TOP + 2 and its corners' texture coordinates at TOP + 3..6. Its vertices are in screen space, drawn with an
+        // identity matrix.
         void sprite(State &s, std::vector<ps2x::native::Vertex> &triangles)
         {
             ++g_stats.strips;
@@ -677,31 +675,15 @@ namespace tmb::native
             if (!useMaterial(s, top, s.vu.w(top, 3), triangles))
                 return;
             const VuImage &vu = s.vu;
-            const float p[3] = {vu.f(top + 1, 0), vu.f(top + 1, 1), vu.f(top + 1, 2)}, size = vu.f(top + 1, 3);
-            float c[4];
-            for (int k = 0; k < 4; ++k)
-                c[k] = s.matrix[k] * p[0] + s.matrix[4 + k] * p[1] + s.matrix[8 + k] * p[2] + s.matrix[12 + k];
-            if (c[3] <= 0.0f)
-                return; // behind the camera (VU1 culls it by its clip test)
-            const float q = 1.0f / c[3];
-            const float x = c[0] * q, y = c[1] * q, z = c[2] * q * vu.f(4, 2);
-            const float hx = 608.0f * size * q, hy = 304.0f * size * q;
-            float rgba[4];
-            for (int k = 0; k < 4; ++k)
-                rgba[k] = static_cast<float>(vu.w(top + 2, k)) * vu.f(5, k) + vu.f(20, k);
-            const uint32_t colour = clampByte(rgba[0]) | (clampByte(rgba[1]) << 8) | (clampByte(rgba[2]) << 16) | (clampByte(rgba[3]) << 24);
-            const float corner[4][2] = {{x + hx, y - hy}, {x - hx, y - hy}, {x + hx, y + hy}, {x - hx, y + hy}};
-            ps2x::native::Vertex quad[4];
+            const float p[4] = {vu.f(top + 1, 0), vu.f(top + 1, 1), vu.f(top + 1, 2), vu.f(top + 1, 3)};
+            const uint32_t rgba[4] = {vu.w(top + 2, 0), vu.w(top + 2, 1), vu.w(top + 2, 2), vu.w(top + 2, 3)};
+            int32_t st[4][2];
             for (int i = 0; i < 4; ++i)
-            {
-                quad[i].x = corner[i][0];
-                quad[i].y = corner[i][1];
-                quad[i].z = z;
-                quad[i].u = static_cast<float>(static_cast<int32_t>(vu.w(top + 3 + i, 0))) / 4096.0f;
-                quad[i].v = static_cast<float>(static_cast<int32_t>(vu.w(top + 3 + i, 1))) / 4096.0f;
-                quad[i].rgba = colour;
-                quad[i].fog = fogFactor(vu, q);
-            }
+                for (int k = 0; k < 2; ++k)
+                    st[i][k] = static_cast<int32_t>(vu.w(top + 3 + i, k));
+            ps2x::native::Vertex quad[4];
+            if (!tmb::vu1::spriteQuad(vu, s.matrix, p, rgba, st, quad))
+                return;
             const int order[6] = {0, 1, 2, 1, 2, 3};
             for (int i : order)
                 triangles.push_back(quad[i]);
@@ -740,15 +722,8 @@ namespace tmb::native
                 out.x = pos[0];
                 out.y = pos[1];
                 out.z = pos[2];
-                float d[3], c[4];
-                for (int i = 0; i < 3; ++i)
-                    d[i] = std::max(0.0f, vu.f(6, i) * n[0] + vu.f(7, i) * n[1] + vu.f(8, i) * n[2]);
-                for (int k2 = 0; k2 < 3; ++k2)
-                    c[k2] = static_cast<float>(vu.w(q + 1, k2)) * (lit ? vu.f(17, k2) * d[0] + vu.f(18, k2) * d[1] + vu.f(19, k2) * d[2] : 1.0f) *
-                                vu.f(5, k2) +
-                            vu.f(20, k2);
-                c[3] = static_cast<float>(vu.w(q + 1, 3)) * vu.f(5, 3) + vu.f(20, 3);
-                out.rgba = clampByte(c[0]) | (clampByte(c[1]) << 8) | (clampByte(c[2]) << 16) | (clampByte(c[3]) << 24);
+                const uint32_t rgba[4] = {vu.w(q + 1, 0), vu.w(q + 1, 1), vu.w(q + 1, 2), vu.w(q + 1, 3)};
+                out.rgba = tmb::vu1::skinShade(vu, lit, n, rgba);
                 out.u = static_cast<float>(static_cast<int32_t>(vu.w(q + 2, 0))) / 4096.0f + vu.f(4, 0);
                 out.v = static_cast<float>(static_cast<int32_t>(vu.w(q + 2, 1))) / 4096.0f + vu.f(4, 1);
                 const float w = s.matrix[3] * pos[0] + s.matrix[7] * pos[1] + s.matrix[11] * pos[2] + s.matrix[15];
@@ -765,121 +740,37 @@ namespace tmb::native
             }
         }
 
-        // A beam or trail (0x3270, its MSCNTs from 0x3290): N points from TOP (N in the tag at TOP, the header in its
-        // w). Point k is projected through the object's matrix (screen = M p, q = 1 / w) and widened on screen to two
-        // vertices, x + r and x - r with r = 608 p.w q, x and y held to 0..4095; their texture coordinates (4.12, plus
-        // VU 4.xy, over Q) and colours (times VU 5, plus VU 20, at most 255) come in pairs from TOP. Fog as the strips
-        // (VU 4.w + VU 21.x + VU 21.w q, 0 to VU 21.y). Both vertices of a point take ADC (no triangle) when the point
-        // is outside the clip volume (VU 13-16 x VU 0-3, the setup's last vf13-16, on p with y - 2: CLIP) or every other point (the count left,
-        // N - 1 - k, odd): the strip is drawn as separate segments. The loop is software-pipelined: the reads below
-        // follow it (point k + 1 read while k is written, 3 or 6 quadwords on by the parity).
+        // A beam or trail (0x3270, its MSCNTs from 0x3290: tmb::vu1::ribbonStrip), from VU memory at TOP.
         void ribbon(State &s, std::vector<ps2x::native::Vertex> &triangles)
         {
             ++g_stats.strips;
-            const VuImage &vu = s.vu;
             const uint32_t top = s.top;
-            if (!useMaterial(s, top, vu.w(top, 3), triangles))
+            if (!useMaterial(s, top, s.vu.w(top, 3), triangles))
                 return;
-            const uint32_t count = vu.w(top, 0) & 0x7fffu;
-            float clip[16];
-            for (int j = 0; j < 4; ++j)
-                for (int k = 0; k < 4; ++k)
-                    clip[j * 4 + k] = vu.f(13, k) * vu.f(j, 0) + vu.f(14, k) * vu.f(j, 1) + vu.f(15, k) * vu.f(j, 2) + vu.f(16, k) * vu.f(j, 3);
-            const auto colourAt = [&](uint32_t qw)
-            {
-                float c[4];
-                for (int k = 0; k < 4; ++k)
-                    c[k] = std::min(static_cast<float>(static_cast<int32_t>(vu.w(qw, k))) * vu.f(5, k) + vu.f(20, k), 255.0f);
-                return clampByte(c[0]) | (clampByte(c[1]) << 8) | (clampByte(c[2]) << 16) | (clampByte(c[3]) << 24);
-            };
-            const auto uvAt = [&](uint32_t qw, ps2x::native::Vertex &out)
-            {
-                const float q = static_cast<float>(static_cast<int32_t>(vu.w(qw, 2))) / 4096.0f;
-                const float sOff = static_cast<float>(static_cast<int32_t>(vu.w(qw, 0))) / 4096.0f + vu.f(4, 0);
-                const float tOff = static_cast<float>(static_cast<int32_t>(vu.w(qw, 1))) / 4096.0f + vu.f(4, 1);
-                out.u = q != 0.0f ? sOff / q : sOff;
-                out.v = q != 0.0f ? tOff / q : tOff;
-            };
-            std::vector<ps2x::native::Vertex> strip;
-            std::vector<bool> adc;
-            strip.reserve(count * 2u);
-            adc.reserve(count * 2u);
-            uint32_t position = top + 1u, next = top + 4u;
-            for (uint32_t k = 0; k < count; ++k)
-            {
-                const uint32_t parity = (count - 1u - k) & 1u;
-                const float p[4] = {vu.f(position, 0), vu.f(position, 1), vu.f(position, 2), vu.f(position, 3)};
-                position = next;
-                next += parity ? 3u : 6u;
-                float c[4], cc[4];
-                for (int i = 0; i < 4; ++i)
-                {
-                    c[i] = s.matrix[i] * p[0] + s.matrix[4 + i] * p[1] + s.matrix[8 + i] * p[2] + s.matrix[12 + i];
-                    cc[i] = clip[i] * p[0] + clip[4 + i] * (p[1] - 2.0f) + clip[8 + i] * p[2] + clip[12 + i];
-                }
-                const float q = 1.0f / c[3];
-                const float aw = std::fabs(cc[3]);
-                const bool clipped = std::fabs(cc[0]) > aw || std::fabs(cc[1]) > aw || std::fabs(cc[2]) > aw;
-                const float x = c[0] * q, y = std::min(std::max(c[1] * q, 0.0f), 4095.0f), z = c[2] * q * vu.f(4, 2);
-                const float r = p[3] * q * 608.0f;
-                const float fog = std::min(std::max(vu.f(4, 3) + vu.f(21, 0) + vu.f(21, 3) * q, 0.0f), vu.f(21, 1)) / 255.0f;
-                ps2x::native::Vertex a, b;
-                a.x = std::min(std::max(x + r, 0.0f), 4095.0f);
-                b.x = std::min(std::max(x - r, 0.0f), 4095.0f);
-                a.y = b.y = y;
-                a.z = b.z = z;
-                a.fog = b.fog = fog;
-                uvAt(top + 3u + 6u * k, a);
-                uvAt(top + 6u + 6u * k, b);
-                a.rgba = colourAt(k == 0u ? top + 2u : top + 6u * k - 1u);
-                b.rgba = colourAt(top + 6u * k + (k == 0u ? 5u : 2u));
-                strip.push_back(a);
-                strip.push_back(b);
-                adc.push_back(clipped || parity != 0u);
-                adc.push_back(clipped || parity != 0u);
-            }
-            for (size_t i = 2; i < strip.size(); ++i)
-            {
-                if (adc[i])
-                    continue;
-                triangles.push_back(strip[i - 2]);
-                triangles.push_back(strip[i - 1]);
-                triangles.push_back(strip[i]);
-            }
+            const VuImage &vu = s.vu;
+            tmb::vu1::ribbonStrip<ps2x::native::Vertex>(
+                vu, s.matrix, [&](uint32_t r, uint32_t words[4]) { std::memcpy(words, &vu.words[((top + r) & 0x3ffu) * 4u], 16); }, triangles);
         }
 
-        // A reflective strip (0x1db8, its MSCNTs from 0x1ec8, the water's from 0x2248): the strips' layout (vertex k at
-        // TOP + 1 + 3k: normal, pool index in w; colour; texture coordinates, rewritten here), positions from the pool.
-        // The first MSCNT after the vertex pass only reads the alpha terms (parameter step). Then for each vertex:
-        // the eye vector e = (p + R^T t) / w (VU 0-2 the object's rotation, VU 3 its translation, w the screen matrix's,
-        // which the vertex pass leaves in the pool's w as 1 / w) is reflected about the
-        // normal n = 1.00787 - b / 127 (the water's first bent by a wave: n.xy += 0.125 (s - s^3) - 0.03125, s = 2 frac(VU
-        // 21.z + p.xy (0.019, 0.021)) - 1): r = e - 2 (e.n) n. The texture coordinates are 0.5 + 0.414 r taken to the
-        // world (VU 0-2) along x and z (the water's x and y), Q 1. Alpha times max(base + slope (e.n), floor) (the water's
-        // 1, 2, 0.1875), then the colour times VU 5 plus VU 20. VU1 also cuts triangles that cross the clip volume
-        // (0x26e0); the GPU clips them here.
+        // A reflective strip (0x1db8, its MSCNTs from 0x1ec8, the water's from 0x2248: tmb::vu1::reflectVertex): the
+        // strips' layout (vertex k at TOP + 1 + 3k: normal, pool index in w; colour; texture coordinates, rewritten),
+        // positions from the pool. The MSCNT after each vertex pass is the parameter step (0xf50 -> 0x1de8): it only
+        // reads the alpha terms.
         void reflectiveStrip(State &s, std::vector<ps2x::native::Vertex> &triangles)
         {
             const VuImage &vu = s.vu;
             const uint32_t top = s.top;
             if (s.reflectParams)
             {
-                // The MSCNT after the vertex pass: the alpha terms from its TOP (.yzw), all three 0 for the water.
                 s.reflectParams = false;
-                for (int k = 0; k < 3; ++k)
-                    s.reflect[k] = vu.f(top, 1 + k);
-                s.water = s.reflect[0] + s.reflect[1] + s.reflect[2] == 0.0f; // FSAND 0x001 after their sum (0x1e58)
+                const float terms[3] = {vu.f(top, 1), vu.f(top, 2), vu.f(top, 3)};
+                s.reflection = tmb::vu1::reflection(terms);
                 return;
             }
             ++g_stats.strips;
             if (!useMaterial(s, top, vu.w(top, 3), triangles))
                 return;
             const uint32_t nloop = vu.w(top, 0) & 0x7fffu;
-            float eyeOffset[3];
-            for (int j = 0; j < 3; ++j)
-                eyeOffset[j] = vu.f(j, 0) * vu.f(3, 0) + vu.f(j, 1) * vu.f(3, 1) + vu.f(j, 2) * vu.f(3, 2);
-            const int vAxis = s.water ? 1 : 2;
-            const float base = s.water ? 1.0f : s.reflect[0], slope = s.water ? 2.0f : s.reflect[1], floor = s.water ? 0.1875f : s.reflect[2];
             std::vector<ps2x::native::Vertex> strip;
             strip.reserve(nloop);
             for (uint32_t v = 0; v < nloop; ++v)
@@ -893,47 +784,10 @@ namespace tmb::native
                     strip.back().rgba = 0xdeadu;
                     continue;
                 }
-                const float *pos = &s.pool[index * 3u];
-                out.x = pos[0];
-                out.y = pos[1];
-                out.z = pos[2];
-                // The vertex pass left 1 / w (the screen matrix's) in the pool's w (0xf18): e is scaled by it.
-                const float w = s.matrix[3] * pos[0] + s.matrix[7] * pos[1] + s.matrix[11] * pos[2] + s.matrix[15];
-                const float depthQ = w != 0.0f ? 1.0f / w : 0.0f;
-                float n[3], e[3];
-                for (int k = 0; k < 3; ++k)
-                {
-                    n[k] = 1.00787f - static_cast<float>(static_cast<int32_t>(vu.w(q, k))) * 0.00787402f;
-                    e[k] = (pos[k] + eyeOffset[k]) * depthQ;
-                }
-                if (s.water)
-                {
-                    const float scale[2] = {0.019f, 0.021f};
-                    for (int k = 0; k < 2; ++k)
-                    {
-                        const float x = vu.f(21, 2) + pos[k] * scale[k];
-                        const float wave = 2.0f * (x - 0.5f) - 2.0f * std::trunc(x);
-                        n[k] += 0.125f * (wave - wave * wave * wave) - 0.03125f;
-                    }
-                }
-                const float d = e[0] * n[0] + e[1] * n[1] + e[2] * n[2];
-                float r[3];
-                for (int k = 0; k < 3; ++k)
-                    r[k] = e[k] - 2.0f * d * n[k];
-                out.u = 0.5f + 0.414062f * (vu.f(0, 0) * r[0] + vu.f(1, 0) * r[1] + vu.f(2, 0) * r[2]);
-                out.v = 0.5f + 0.414062f * (vu.f(0, vAxis) * r[0] + vu.f(1, vAxis) * r[1] + vu.f(2, vAxis) * r[2]);
-                const float fade = std::max(base + slope * d, floor);
-                float c[4];
-                for (int k = 0; k < 4; ++k)
-                {
-                    float value = static_cast<float>(static_cast<int32_t>(vu.w(q + 1, k)));
-                    if (k == 3)
-                        value *= fade;
-                    c[k] = std::min(value * vu.f(5, k) + vu.f(20, k), 255.0f);
-                }
-                out.rgba = clampByte(c[0]) | (clampByte(c[1]) << 8) | (clampByte(c[2]) << 16) | (clampByte(c[3]) << 24);
-                // The setup put VU 21.z where the vertex pass's fog takes VU 21.x (ADDz.x vf18 at 0x1dc8).
-                out.fog = w > 0.0f ? std::min(std::max(vu.f(4, 3) + vu.f(21, 2) + vu.f(21, 3) / w, 0.0f), vu.f(21, 1)) / 255.0f : 0.0f;
+                const int32_t normal[3] = {static_cast<int32_t>(vu.w(q, 0)), static_cast<int32_t>(vu.w(q, 1)), static_cast<int32_t>(vu.w(q, 2))};
+                const int32_t rgba[4] = {static_cast<int32_t>(vu.w(q + 1, 0)), static_cast<int32_t>(vu.w(q + 1, 1)), static_cast<int32_t>(vu.w(q + 1, 2)),
+                                         static_cast<int32_t>(vu.w(q + 1, 3))};
+                tmb::vu1::reflectVertex(vu, s.matrix, s.reflection, &s.pool[index * 3u], normal, rgba, out);
                 strip.push_back(out);
             }
             for (size_t i = 2; i < strip.size(); ++i)
@@ -1945,6 +1799,59 @@ namespace tmb::native
             }
         }
 
+        // Sprites, ribbons, skinned and environment-mapped strips: the strip's triangles as this adapter translates
+        // them (into a list of its own: nothing drawn), against the pack's (sprites and ribbons in screen space).
+        void compareHookTriangles(State &s)
+        {
+            if (s.hookObject == 0u)
+                return;
+            HookCheck &c = g_hookCheck;
+            std::vector<ps2x::native::Vertex> mine;
+            if (s.mode == Mode::Reflective && s.reflectParams)
+            {
+                reflectiveStrip(s, mine); // the parameter step: no strip
+                return;
+            }
+            const size_t k = s.hookStrip++;
+            ++c.strips;
+            if (s.mode == Mode::Reflective)
+                reflectiveStrip(s, mine);
+            else if (s.mode == Mode::Sprite)
+                sprite(s, mine);
+            else if (s.mode == Mode::Ribbon)
+                ribbon(s, mine);
+            else
+                skinnedStrip(s, mine, s.mode == Mode::SkinDirectional);
+            if (k >= s.hookStrips.size() || s.hookStrips[k].size() != mine.size())
+            {
+                c.differs = true;
+                ++c.stripCountDiffs;
+                static uint32_t s_logged = 0;
+                if (s_logged++ < 20u)
+                    std::fprintf(stderr, "[tmb:mesh] geometry: object %#x strip %zu (mode %d): pack %zu vertices, stream %zu\n", s.hookObject, k,
+                                 static_cast<int>(s.mode), k < s.hookStrips.size() ? s.hookStrips[k].size() : 0u, mine.size());
+                return;
+            }
+            const std::vector<ps2x::native::Vertex> &theirs = s.hookStrips[k];
+            for (size_t v = 0; v < mine.size(); ++v)
+            {
+                ++c.vertices;
+                const ps2x::native::Vertex &a = theirs[v], &b = mine[v];
+                const bool same = a.x == b.x && a.y == b.y && a.z == b.z && a.rgba == b.rgba && a.u == b.u && a.v == b.v && a.fog == b.fog;
+                if (!same)
+                {
+                    ++c.vertexDiffs;
+                    c.differs = true;
+                    static uint32_t s_logged = 0;
+                    if (s_logged++ < 20u)
+                        std::fprintf(stderr, "[tmb:mesh] geometry: object %#x strip %zu vertex %zu (mode %d): pack (%g %g %g) %08x uv %g %g fog %g, "
+                                             "stream (%g %g %g) %08x uv %g %g fog %g\n",
+                                     s.hookObject, k, v, static_cast<int>(s.mode), a.x, a.y, a.z, a.rgba, a.u, a.v, a.fog, b.x, b.y, b.z, b.rgba, b.u, b.v,
+                                     b.fog);
+                }
+            }
+        }
+
         void endHookCheck(State &s)
         {
             HookCheck &c = g_hookCheck;
@@ -1974,7 +1881,11 @@ namespace tmb::native
                 return;
             if (s.suppress)
             {
-                compareHookStrip(s);
+                if (s.mode == Mode::Sprite || s.mode == Mode::Ribbon || s.mode == Mode::SkinDirectional || s.mode == Mode::SkinUnlit ||
+                    s.mode == Mode::Reflective)
+                    compareHookTriangles(s);
+                else
+                    compareHookStrip(s);
                 return;
             }
             if (s.mode == Mode::Particles)
@@ -2217,7 +2128,7 @@ namespace tmb::native
                 for (uint32_t q = 0; q < 22u; ++q)
                     for (int k = 0; k < 4; ++k)
                     {
-                        if (q >= 6u && q <= 8u && drawn.setupPc != 0x0ce8u)
+                        if (q >= 6u && q <= 8u && (drawn.resumes ? drawn.resumes : drawn.setupPc) != 0x0ce8u && drawn.setupPc != 0x0070u)
                             break; // the light directions: only the directional setup reads them
                         float a, b;
                         std::memcpy(&a, &drawn.check[q][k], 4);
@@ -2233,10 +2144,25 @@ namespace tmb::native
                             break;
                         }
                     }
+                // The object-to-screen matrix the draws use, against the setup's here (a resume keeps the one before).
+                static uint64_t s_matrices = 0;
+                for (int i = 0; i < 16; ++i)
+                    if (!(std::fabs(drawn.matrix[i] - s.matrix[i]) <= 1e-4f * std::max(1.0f, std::fabs(s.matrix[i]))))
+                    {
+                        differs = true;
+                        ++s_matrices;
+                        static uint32_t s_logged = 0;
+                        if (s_logged++ < 20u)
+                            std::fprintf(stderr, "[tmb:mesh] check: object %#x (setup %#x, resumes %#x) matrix [%d]: hook %g, stream %g\n", drawn.object,
+                                         drawn.setupPc, drawn.resumes, i, drawn.matrix[i], s.matrix[i]);
+                        break;
+                    }
                 s_differing += differs ? 1u : 0u;
                 if (s_objects % 20000u == 0u)
                 {
                     std::string list;
+                    if (s_matrices)
+                        list += " matrix:" + std::to_string(s_matrices);
                     for (uint32_t q = 0; q < 22u; ++q)
                         if (s_qwords[q])
                             list += " VU" + std::to_string(q) + ":" + std::to_string(s_qwords[q]);
@@ -2245,7 +2171,8 @@ namespace tmb::native
                 }
             }
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
-            renderer.setKey(drawn.key);
+            renderer.setKey(drawn.screenSpace ? 0u : drawn.key); // sprites: screen space, not interpolated
+            static const float kScreenSpace[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
             for (const tmb::meshes::Batch &batch : drawn.batches)
             {
                 if (batch.setsAlpha)
@@ -2275,7 +2202,7 @@ namespace tmb::native
                 if (batch.fogged)
                     s.fogColour = gameFogColour(s.fogColour);
                 material.fogColour = s.fogColour;
-                renderer.draw(material, drawn.matrix, batch.vertices.data(), static_cast<uint32_t>(batch.vertices.size()),
+                renderer.draw(material, drawn.screenSpace ? kScreenSpace : drawn.matrix, batch.vertices.data(), static_cast<uint32_t>(batch.vertices.size()),
                               material.textured ? batch.texture : nullptr);
             }
         }
@@ -2900,6 +2827,25 @@ namespace tmb::native
                                     setup(s, 0x1700u);
                                 else
                                     resumeSetup(s);
+                                // A pool-less object the mesh pack path drew, when the setup it goes on with is the
+                                // one the stream has here.
+                                tmb::meshes::Drawn drawn;
+                                const bool taken = mark != 0u && tmb::meshes::take(mark, drawn);
+                                if (taken && !(drawn.setupPc == 0x0c78u && drawn.resumes == s.setupPc))
+                                {
+                                    static uint32_t s_logged = 0;
+                                    if (s_logged++ < 20u)
+                                        std::fprintf(stderr, "[tmb:mesh] object %#x: a resume of setup %#x, the stream's is %#x: translated here\n", drawn.object,
+                                                     drawn.resumes, s.setupPc);
+                                }
+                                else if (taken)
+                                {
+                                    submitDrawn(s, drawn);
+                                    s.suppress = true;
+                                    s.hookObject = drawn.checkStrips.empty() ? 0u : drawn.object;
+                                    s.hookStrips = std::move(drawn.checkStrips);
+                                    s.hookStrip = 0;
+                                }
                             }
                             else
                             {

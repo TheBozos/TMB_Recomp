@@ -23,6 +23,15 @@ The kit (tmb_build uses it when it sits in <TMB_Recomp>/kit or next to the TMB_R
   kit_manifest.json   versions, sources, hashes, licenses, sizes
 
 Steps (--only <step> runs one): toolchain, python, deps, ffmpeg, tools, manifest; then --zip.
+
+The toolchain's MSYS2 packages are pinned in tools/build_kit_packages.json (committed): the packages the kit is made of
+and every package they depend on, each with its exact version, its file on repo.msys2.org and that file's SHA-256. The
+toolchain step refuses an MSYS2 whose installed versions differ, so a kit made here and one made by the release
+workflow (.github/workflows/release.yml) hold the same files.
+  python tools/make_build_kit.py --install-packages [--msys <root>]   download the pinned files (repo.msys2.org, SHA-256
+                                checked, cached in --downloads) and install exactly them with MSYS2's pacman -U
+  python tools/make_build_kit.py --pin-packages [--msys <root>]       write the pins from the installed MSYS2 (after an
+                                MSYS2 update, to move the kit to new versions; commit the file and make a new kit)
 Standard library only.
 """
 import argparse
@@ -89,8 +98,19 @@ DEP_PRUNE = {
 }
 
 # ---- the toolchain ----
-MSYS_PACKAGES = ['gcc', 'libgcc', 'binutils', 'crt', 'headers', 'winpthreads', 'libwinpthread',
-                 'windows-default-manifest', 'cmake', 'ninja']
+# The MSYS2 UCRT64 packages, pinned (see the docstring): 'roots' are the packages the kit is made of, 'packages' them
+# and their dependencies, at exact versions with their files' SHA-256.
+PINS_FILE = os.path.join(ROOT, 'tools', 'build_kit_packages.json')
+MSYS2_REPO = 'https://repo.msys2.org/mingw/ucrt64/'
+PKG_PREFIX = 'mingw-w64-ucrt-x86_64-'
+
+
+def load_pins():
+    with open(PINS_FILE, encoding='utf-8') as f:
+        return json.load(f)
+
+
+MSYS_PACKAGES = load_pins()['roots']
 KEEP_BIN = {
     'gcc', 'g++', 'c++', 'cc', 'cpp', 'gcc-ar', 'gcc-nm', 'gcc-ranlib',                      # gcc
     'ar', 'as', 'ld', 'ld.bfd', 'nm', 'objcopy', 'objdump', 'ranlib', 'strip', 'windres',  # binutils
@@ -255,7 +275,9 @@ class Msys:
             self.pkgs[name] = {
                 'package': fields['NAME'][0], 'version': fields['VERSION'][0],
                 'base': fields.get('BASE', [''])[0], 'license': ' '.join(fields.get('LICENSE', [])),
-                'url': fields.get('URL', [''])[0], 'files': [f[len('ucrt64/'):] for f in files]}
+                'url': fields.get('URL', [''])[0], 'files': [f[len('ucrt64/'):] for f in files],
+                'depends': [re.split(r'[<>=]', x, maxsplit=1)[0] for x in fields.get('DEPENDS', []) if x],
+                'provides': [re.split(r'[<>=]', x, maxsplit=1)[0] for x in fields.get('PROVIDES', []) if x]}
         self.owner = {}
         for name, p in self.pkgs.items():
             for f in p['files']:
@@ -273,6 +295,144 @@ class Msys:
                 elif line and key:
                     out[key].append(line)
         return out
+
+
+    def closure(self, roots):
+        """The roots and every package they depend on (by name or by what a package provides), sorted."""
+        by_name = {p['package']: n for n, p in self.pkgs.items()}
+        for n, p in self.pkgs.items():
+            for v in p['provides']:
+                by_name.setdefault(v, n)
+        out, queue, missing = set(), list(roots), []
+        while queue:
+            n = queue.pop()
+            if n in out:
+                continue
+            if n not in self.pkgs:
+                missing.append(n)
+                continue
+            out.add(n)
+            for d in self.pkgs[n]['depends']:
+                if d in by_name:
+                    queue.append(by_name[d])
+                else:
+                    missing.append(d)
+        if missing:
+            raise KitError('not installed in MSYS2 UCRT64 (needed by the kit): %s' % ', '.join(sorted(set(missing))))
+        return sorted(out)
+
+
+def package_file(package, version):
+    return '%s-%s-any.pkg.tar.zst' % (package, version.replace(':', '~'))
+
+
+def fetch_package(entry, cache, repos):
+    """A pinned package file in the cache, downloaded when missing or different; its SHA-256 checked."""
+    os.makedirs(cache, exist_ok=True)
+    path = os.path.join(cache, entry['file'])
+    if os.path.isfile(path) and sha256_file(path) == entry['sha256']:
+        return path
+    errors = []
+    for repo in repos:
+        url = repo + entry['file']
+        tmp = path + '.part'
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'TMB_Recomp-make_build_kit'})
+            with urllib.request.urlopen(req, timeout=120) as r, open(tmp, 'wb') as f:
+                shutil.copyfileobj(r, f, 1 << 20)
+        except Exception as e:  # noqa: BLE001 (the next mirror)
+            errors.append('%s: %s' % (url, e))
+            continue
+        digest = sha256_file(tmp)
+        if digest != entry['sha256']:
+            os.remove(tmp)
+            errors.append('%s: SHA-256 %s, pinned %s' % (url, digest, entry['sha256']))
+            continue
+        os.replace(tmp, path)
+        log('  %s' % entry['file'])
+        return path
+    raise KitError('the pinned %s could not be downloaded:\n  %s' % (entry['file'], '\n  '.join(errors)))
+
+
+def pin_packages(args):
+    """tools/build_kit_packages.json from the installed MSYS2: the roots and their dependencies, with the SHA-256 of
+    each package's file (pacman's cache, else downloaded from repo.msys2.org)."""
+    m = Msys(args.msys)
+    old = load_pins() if os.path.isfile(PINS_FILE) else {}
+    roots = old.get('roots', MSYS_PACKAGES)
+    cache = os.path.join(os.path.abspath(args.downloads or 'build/kit-downloads'), 'msys2-packages')
+    pac_cache = os.path.join(m.root, 'var', 'cache', 'pacman', 'pkg')
+    entries = []
+    for n in m.closure(roots):
+        info = m.pkgs[n]
+        f = package_file(info['package'], info['version'])
+        local = os.path.join(pac_cache, f)
+        if os.path.isfile(local):
+            digest = sha256_file(local)
+        else:
+            os.makedirs(cache, exist_ok=True)
+            dest = os.path.join(cache, f)
+            if not os.path.isfile(dest):
+                log('  downloading %s' % f)
+                with urllib.request.urlopen(MSYS2_REPO + f, timeout=120) as r, open(dest + '.part', 'wb') as out:
+                    shutil.copyfileobj(r, out, 1 << 20)
+                os.replace(dest + '.part', dest)
+            digest = sha256_file(dest)
+        entries.append({'name': n, 'package': info['package'], 'version': info['version'], 'file': f,
+                        'sha256': digest})
+    pins = {
+        'comment': 'The MSYS2 UCRT64 packages of the build kit, pinned: tools/make_build_kit.py refuses an MSYS2 with '
+                   'other versions; --install-packages installs exactly these; --pin-packages rewrites this file '
+                   'from the installed MSYS2. roots: the packages the kit is made of; packages: them and their '
+                   'dependencies.',
+        'repositories': old.get('repositories', [MSYS2_REPO, 'https://mirror.msys2.org/mingw/ucrt64/']),
+        'roots': roots,
+        'packages': entries,
+    }
+    with open(PINS_FILE, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(pins, f, indent=1)
+        f.write('\n')
+    log('%s: %d packages (%d roots)' % (PINS_FILE, len(entries), len(roots)))
+
+
+def install_packages(args):
+    """The pinned package files downloaded (SHA-256 checked) and installed with MSYS2's own pacman -U, so the MSYS2
+    the kit is made from holds exactly the pinned versions (the release workflow's first step; also here)."""
+    pins = load_pins()
+    root = os.path.abspath(args.msys)
+    bash = os.path.join(root, 'usr', 'bin', 'bash.exe')
+    if not os.path.isfile(bash):
+        raise KitError('no MSYS2 in %s (--msys)' % root)
+    cache = os.path.join(os.path.abspath(args.downloads or 'build/kit-downloads'), 'msys2-packages')
+    files = [fetch_package(e, cache, pins['repositories']) for e in pins['packages']]
+    log('  %d pinned packages in %s, SHA-256 checked' % (len(files), cache))
+
+    def posix(path):
+        drive, rest = os.path.splitdrive(os.path.abspath(path))
+        return '/' + drive.rstrip(':').lower() + rest.replace('\\', '/')
+    flags = '--print --print-format "%n %v"' if args.install_dry_run else '--noconfirm --needed'
+    env = dict(os.environ, MSYSTEM='MSYS', CHERE_INVOKING='1')
+    # From the cache folder with bare file names: the command line stays short (Windows' limit).
+    out = run([bash, '-lc', 'cd "$1" && shift && pacman -U %s "$@"' % flags, 'bash', posix(cache)] +
+              [os.path.basename(f) for f in files], env=env)
+    if args.install_dry_run:
+        log(out.strip())
+        return
+    m = Msys(root)
+    wrong = check_pins(m, pins)
+    if wrong:
+        raise KitError('after pacman -U, still not the pinned versions: %s' % ', '.join(wrong))
+    log('  installed: the pinned versions of %d packages' % len(files))
+
+
+def check_pins(m, pins):
+    """The pinned packages installed at other versions (or not at all), as 'name version (pinned x)' strings."""
+    wrong = []
+    for e in pins['packages']:
+        have = m.pkgs.get(e['name'], {}).get('version')
+        if have != e['version']:
+            wrong.append('%s %s (pinned %s)' % (e['name'], have or 'not installed', e['version']))
+    return wrong
 
 
 # ---- steps ----
@@ -317,10 +477,13 @@ class Kit:
     def step_toolchain(self):
         m = self.msys
         rmtree(self.toolchain)
-        missing = [p for p in MSYS_PACKAGES if p not in m.pkgs]
-        if missing:
-            raise KitError('MSYS2 UCRT64 packages not installed: %s (pacman -S %s)'
-                           % (', '.join(missing), ' '.join('mingw-w64-ucrt-x86_64-' + p for p in missing)))
+        pins = load_pins()
+        wrong = check_pins(m, pins)
+        if wrong:
+            raise KitError('MSYS2 does not hold the pinned packages (tools/build_kit_packages.json): %s. Install them '
+                           '(make_build_kit.py --install-packages), or move the pins to this MSYS2 '
+                           '(--pin-packages) and commit them' % ', '.join(wrong[:12]))
+        pinned = {e['name']: e for e in pins['packages']}
         copied, dropped = {}, 0
         for pkg in MSYS_PACKAGES:
             for rel in m.pkgs[pkg]['files']:
@@ -357,6 +520,10 @@ class Kit:
                     extra.add(copied[rel.lower()])
                 queue.append(os.path.join(self.toolchain, rel))
         used = sorted(set(copied.values()))
+        unpinned = [p for p in used if p not in pinned]
+        if unpinned:
+            raise KitError('the kit holds files of packages that are not pinned: %s (--pin-packages)'
+                           % ', '.join(unpinned))
         lic = self.licenses_dir('toolchain')
         for pkg in used:
             d = os.path.join(m.prefix, 'share', 'licenses', pkg)
@@ -364,8 +531,10 @@ class Kit:
                 shutil.copytree(d, os.path.join(lic, pkg))
         size, nfiles = dir_size(self.toolchain)
         info = {
-            'msys2_packages': {p: {k: m.pkgs[p][k] for k in ('package', 'version', 'base', 'license', 'url')}
+            'msys2_packages': {p: dict({k: m.pkgs[p][k] for k in ('package', 'version', 'base', 'license', 'url')},
+                                      file=pinned[p]['file'], sha256=pinned[p]['sha256'])
                                for p in used if p in m.pkgs},
+            'pins': 'tools/build_kit_packages.json',
             'dropped_bytes': dropped, 'bytes': size, 'files': nfiles,
             'pruned': ['share/ except share/cmake (its Help/ too)', 'etc/', 'bin/*.exe not in KEEP_BIN (gcov, '
                        'x86_64-w64-mingw32-*, gprof, elfedit, ld.gold..., cmake-gui, ccmake, ctest, cpack)',
@@ -919,14 +1088,27 @@ STEPS = ['toolchain', 'python', 'deps', 'ffmpeg', 'tools', 'manifest']
 
 def main():
     ap = argparse.ArgumentParser(description='Assembles the TMB_Recomp build kit (see the docstring).')
-    ap.add_argument('--out', required=True, help='the kit folder to write (outside the repository, or under build/)')
+    ap.add_argument('--out', help='the kit folder to write (outside the repository, or under build/)')
     ap.add_argument('--msys', default='C:/msys64', help='the MSYS2 installation the toolchain comes from')
     ap.add_argument('--downloads', help='where the FFmpeg and Python downloads are kept (default: next to --out)')
     ap.add_argument('--work', help='scratch folder for the FFmpeg and tools builds (default: next to --out)')
     ap.add_argument('--only', choices=STEPS, action='append', help='run only these steps')
     ap.add_argument('--zip', help='also write the kit as this .zip')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
+    ap.add_argument('--install-packages', action='store_true', help='only install the pinned MSYS2 packages '
+                    '(tools/build_kit_packages.json) into --msys with pacman -U, their files SHA-256 checked')
+    ap.add_argument('--install-dry-run', action='store_true', help='with --install-packages: pacman --print only')
+    ap.add_argument('--pin-packages', action='store_true', help='only rewrite tools/build_kit_packages.json from the '
+                    'installed MSYS2')
     args = ap.parse_args()
+    if args.install_packages or args.pin_packages:
+        try:
+            (install_packages if args.install_packages else pin_packages)(args)
+        except KitError as e:
+            sys.exit('make_build_kit: %s' % e)
+        return
+    if not args.out:
+        ap.error('--out is needed')
     out = os.path.normcase(os.path.abspath(args.out))
     if out.startswith(os.path.normcase(ROOT) + os.sep) and \
             not out.startswith(os.path.normcase(os.path.join(ROOT, 'build')) + os.sep):

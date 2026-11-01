@@ -34,6 +34,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <chrono>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -251,6 +252,67 @@ static std::string iniValue(const std::string &file, const char *name)
     return {};
 }
 
+// The section of a Keep a Changelog file for a version ("## [0.1.0] - date" up to the next "## "), without its
+// heading and link references; "" when the file or the section is missing.
+static std::string changelogSection(const std::string &file, std::string version)
+{
+    if (!version.empty() && (version[0] == 'v' || version[0] == 'V'))
+        version.erase(0, 1);
+    std::ifstream in(plat::path(file));
+    std::string line, out;
+    bool inside = false;
+    while (std::getline(in, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.rfind("## ", 0) == 0)
+        {
+            if (inside)
+                break;
+            std::string v = line.substr(3);
+            v.erase(0, v.find_first_not_of(" ["));
+            v = v.substr(0, v.find_first_of("] \t"));
+            if (!v.empty() && (v[0] == 'v' || v[0] == 'V'))
+                v.erase(0, 1);
+            inside = v == version;
+            continue;
+        }
+        if (inside && !(line.size() > 1 && line[0] == '[' && line.find("]: ") != std::string::npos))
+            out += line + "\n";
+    }
+    const size_t first = out.find_first_not_of(" \t\n"), last = out.find_last_not_of(" \t\n");
+    return first == std::string::npos ? std::string() : out.substr(first, last - first + 1);
+}
+
+// Markdown's emphasis and code marks out of a changelog line (the launcher draws plain text).
+static std::string plainMarkdown(std::string s)
+{
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i)
+    {
+        if (s[i] == '`' || (s[i] == '*' && i + 1 < s.size() && s[i + 1] == '*'))
+        {
+            if (s[i] == '*')
+                ++i;
+            continue;
+        }
+        // [text](url) -> text
+        if (s[i] == '[')
+        {
+            const size_t close = s.find("](", i);
+            const size_t end = close == std::string::npos ? close : s.find(')', close);
+            if (end != std::string::npos)
+            {
+                out += s.substr(i + 1, close - i - 1);
+                i = end;
+                continue;
+            }
+        }
+        out += s[i];
+    }
+    return out;
+}
+
 // ---- the launcher ----
 
 enum class Tab
@@ -311,6 +373,9 @@ struct App
     std::string updateUrl = kLatestReleaseApi;
     std::string sourceCommit, sourceVersion, builtCommit;
     bool runCounted = false; // this build run's time is already in cfg.pendingSeconds
+    // "What's new": CHANGELOG.md's section for the installed version (the release's top folder, else source\).
+    std::string whatsNew, whatsNewVersion;
+    bool openWhatsNew = false;
 
     bool wantQuit = false, quit = false;
     double time = 0;
@@ -360,6 +425,11 @@ struct App
         if (sourceCommit.empty())
             sourceCommit = kCommit;
         builtCommit = iniValue(p.builtFrom, "commit");
+        whatsNewVersion = sourceVersion.empty() ? std::string(kVersion) : sourceVersion;
+        const fs::path r = plat::path(p.release);
+        whatsNew = changelogSection(plat::str(r / L"CHANGELOG.md"), whatsNewVersion);
+        if (whatsNew.empty())
+            whatsNew = changelogSection(plat::str(r / L"source" / L"CHANGELOG.md"), whatsNewVersion);
     }
 
     // The code changed since the game was built (a new release unzipped over this one): offer Rebuild. A game built
@@ -924,6 +994,12 @@ static void drawReady(App &app, float inner)
         gap(6);
         if (ui::button(L("Rebuild now", "Reconstruire maintenant"), ImVec2(0, S(48)), ui::Kind::Primary, !app.gameRunning))
             app.startBuild();
+        if (!app.whatsNew.empty())
+        {
+            ImGui::SameLine(0, S(12));
+            if (ui::button(L("What's new", "Nouveautés"), ImVec2(0, S(48))))
+                app.openWhatsNew = true;
+        }
     }
     std::string newVersion, page;
     // One note at a time (both do not fit the card at the window's smallest size): Rebuild first; the footer and
@@ -1194,6 +1270,14 @@ static void drawFrame(App &app)
     if (app.updates.get() == UpdateCheck::State::Available)
         ver += L("  \xC2\xB7  update available", "  \xC2\xB7  mise à jour disponible");
     ui::text(ver.c_str(), 15, ui::color::inkFaint);
+    if (!app.whatsNew.empty())
+    {
+        ImGui::SameLine(0, S(16));
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - S(2));
+        if (ui::button(L("What's new \xE2\x80\xBA##whatsnew-footer", "Nouveautés \xE2\x80\xBA##whatsnew-footer"), ImVec2(0, 0),
+                       ui::Kind::Quiet, true, 16))
+            app.openWhatsNew = true;
+    }
     if (app.building && app.tab != Tab::Play)
     {
         char buf[96];
@@ -1228,6 +1312,62 @@ static void drawFrame(App &app)
             app.cancelBuild();
             app.quit = true;
         }
+        ImGui::EndPopup();
+    }
+
+    // "What's new": the changelog's section for the installed version (shipped CHANGELOG.md), as plain text.
+    if (app.openWhatsNew)
+    {
+        ImGui::OpenPopup("##whatsnew");
+        app.openWhatsNew = false;
+    }
+    ImGui::SetNextWindowPos(ImVec2(W / 2, H / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    const float popupW = std::min(W - 2 * S(40), S(820));
+    ImGui::SetNextWindowSize(ImVec2(popupW, 0));
+    if (ImGui::BeginPopupModal("##whatsnew", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        const std::string title = std::string(L("What's new in ", "Nouveautés de la version ")) + app.whatsNewVersion;
+        heading(title.c_str());
+        const float boxW = popupW - 2 * S(28);
+        ImGui::BeginChild("##whatsnew-text", ImVec2(boxW, std::min(H - S(260), S(420))), ImGuiChildFlags_None);
+        ImGui::PushTextWrapPos(boxW - S(16));
+        // Lines, a bullet's indented continuation lines joined to it (the text wraps to the box instead).
+        std::vector<std::string> lines;
+        for (size_t at = 0; at <= app.whatsNew.size();)
+        {
+            size_t end = app.whatsNew.find('\n', at);
+            if (end == std::string::npos)
+                end = app.whatsNew.size();
+            std::string line = app.whatsNew.substr(at, end - at);
+            at = end + 1;
+            const size_t text = line.find_first_not_of(' ');
+            if (text != std::string::npos && text >= 2 && !lines.empty() && !lines.back().empty())
+                lines.back() += " " + line.substr(text);
+            else
+                lines.push_back(text == std::string::npos ? std::string() : line);
+        }
+        for (std::string &line : lines)
+        {
+            if (line.empty())
+            {
+                gap(4);
+                continue;
+            }
+            if (line.rfind("### ", 0) == 0)
+            {
+                gap(4);
+                ui::text(plainMarkdown(line.substr(4)).c_str(), 19, ui::color::accent);
+                continue;
+            }
+            if (line.rfind("- ", 0) == 0)
+                line = "\xE2\x80\xA2 " + line.substr(2);
+            ui::textWrapped(plainMarkdown(line).c_str(), 17, ui::color::ink);
+        }
+        ImGui::PopTextWrapPos();
+        ImGui::EndChild();
+        gap(8);
+        if (ui::button(L("Close", "Fermer"), ImVec2(S(160), S(44)), ui::Kind::Primary) || ImGui::IsKeyPressed(ImGuiKey_Escape))
+            ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
     ImGui::PopStyleVar();
@@ -1530,6 +1670,85 @@ struct Selftest
     }
 };
 
+// ---- the self-check ----
+
+// --version / --self-check <file> [--report <path>]: no window (the release workflow runs it with no display and no
+// disc). Writes the version and commit, then with --self-check: the release folder is complete (source, the kit's
+// Python and manifest), CHANGELOG.md has the version's section (a release build), and the disc check of <file> (any
+// file that is not a disc, e.g. zeros) runs through the kit's Python and tmb_build.py and is refused as not a disc.
+// Exit 0 when all of that holds. The report goes to --report, else to stdout (inherited handles; the exe is a GUI one).
+static int selfCheck(const std::string &release, const std::string &file, const std::string &reportPath)
+{
+    std::string report;
+    auto say = [&](const std::string &line) { report += line + "\n"; };
+    say(std::string("version ") + kVersion);
+    say(std::string("commit ") + (*kCommit ? kCommit : "(none)"));
+    bool ok = true;
+    if (!file.empty())
+    {
+        App app;
+        app.init(release);
+        say("release " + app.p.release);
+        say("source version " + (app.sourceVersion.empty() ? std::string("(no release.ini)") : app.sourceVersion));
+        if (!app.missingPart.empty())
+        {
+            say("FAIL missing " + app.missingPart);
+            ok = false;
+        }
+        const bool released = std::strcmp(kVersion, "dev") != 0;
+        say("whats_new " + std::to_string(app.whatsNew.size()) + " bytes for " + app.whatsNewVersion);
+        if (released && app.whatsNew.empty())
+        {
+            say("FAIL CHANGELOG.md has no section for " + app.whatsNewVersion);
+            ok = false;
+        }
+        if (released && app.sourceVersion != kVersion)
+        {
+            say("FAIL source\\release.ini says " + app.sourceVersion + ", the launcher " + kVersion);
+            ok = false;
+        }
+        if (app.missingPart.empty())
+        {
+            app.checkDisc(file);
+            const double t0 = plat::now();
+            while (app.checking && plat::now() - t0 < 120)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                app.pollCheck();
+            }
+            if (app.checking)
+            {
+                app.checker.kill();
+                say("FAIL the disc check did not finish in 120 s");
+                ok = false;
+            }
+            else
+            {
+                say("disc check: " + (app.discError.empty() ? std::string("accepted") : app.discError) + " / " +
+                    app.discErrorDetail);
+                // Refused as not a disc: the launcher ran the kit's Python and tmb_build and read its answer.
+                if (app.discErrorDetail.find("not an ISO9660 disc image") == std::string::npos)
+                {
+                    say("FAIL expected tmb_build's \"not an ISO9660 disc image\"");
+                    ok = false;
+                }
+            }
+        }
+        say(ok ? "self-check OK" : "self-check FAILED");
+    }
+    if (!reportPath.empty())
+    {
+        std::ofstream out(plat::path(reportPath), std::ios::binary);
+        out << report;
+    }
+    else
+    {
+        std::fputs(report.c_str(), stdout);
+        std::fflush(stdout);
+    }
+    return ok ? 0 : 1;
+}
+
 // ---- main ----
 
 int main(int argc, char **argv)
@@ -1538,7 +1757,8 @@ int main(int argc, char **argv)
     bool errorDemo = false, cancel = false, screensOnly = false;
     double playSeconds = 40, crashSeconds = 0;
     float uiScale = 0;
-    std::string updateUrl;
+    std::string updateUrl, selfCheckFile, reportPath;
+    bool versionOnly = false;
     (void)argc;
     (void)argv;
     const std::vector<std::string> args = plat::arguments(); // UTF-8, from the wide command line
@@ -1568,9 +1788,17 @@ int main(int argc, char **argv)
             uiScale = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--update-url") // a test: another address answering as GitHub's latest-release API
             updateUrl = next();
+        else if (a == "--self-check") // no window: the release folder and the disc check on a file (see selfCheck)
+            selfCheckFile = next();
+        else if (a == "--report")
+            reportPath = next();
+        else if (a == "--version")
+            versionOnly = true;
     }
     if (release.empty())
         release = plat::exeDirectory();
+    if (versionOnly || !selfCheckFile.empty())
+        return selfCheck(release, selfCheckFile, reportPath);
 
     App app;
     app.init(release);

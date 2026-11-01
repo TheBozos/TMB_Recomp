@@ -17,11 +17,20 @@ What it does, from <commit> (default HEAD; only committed files count, the worki
   launcher   launcher/ configured and built with the kit's toolchain alone (PATH = the kit and Windows), offline (the
              kit's raylib, imgui, rlImGui; the Exo 2 font from --font-dir or downloaded and SHA-256 checked), with
              LAUNCHER_VERSION / LAUNCHER_COMMIT: the footer, the update check, the exe's version information.
-  licences   LICENSES\\: each component's licence files (the code's GPL-3.0, the kit's components, the launcher's
-             libraries and font) and SOURCES.txt: every MSYS2 package the kit holds files of, with its version and its
-             source package on repo.msys2.org, FFmpeg's tarball, the libraries' repositories and commits.
+  licences   LICENSES\\: each component's licence files (TMB_Recomp's own code: MIT, the repository's LICENSE;
+             PS2Recomp: GPL-3.0; the kit's components, the launcher's libraries and font) and SOURCES.txt: every MSYS2
+             package the kit holds files of, with its version and its source package on repo.msys2.org, FFmpeg's
+             tarball, the libraries' repositories and commits.
+  changelog  CHANGELOG.md's section for the version (## [x.y.z], Keep a Changelog), from the commit: the release
+             refuses to be made without one (an empty one, or only "Unreleased", too) unless
+             --allow-missing-changelog (test builds). CHANGELOG.md is shipped at the zip's top (the launcher's
+             "What's new" reads it) and the section is the release notes' "What's new".
   zip        TMB_Recomp-<version>.zip (deflate, entries sorted, every timestamp the commit's), <zip>.sha256,
-             RELEASE_NOTES.md (a stub to edit before publishing). The zip's names are audited again.
+             RELEASE_NOTES.md (the changelog section, the hashes, the source offer: the GitHub release's body). The
+             zip's names are audited again.
+
+  python tools/make_release.py --check-changelog --version 0.1.0     the section, printed (exit 1 when missing)
+  python tools/make_release.py --verify-zip <out>/TMB_Recomp-0.1.0.zip    names and contents audited once more
   sources    --with-sources: the MSYS2 source packages (repo.msys2.org/mingw/sources only, cached in --downloads, their
              SHA-256 recorded) and FFmpeg's tarball in TMB_Recomp-<version>-sources.zip (stored: they are compressed
              already), to attach to the same release: the GPL / LGPL corresponding source shipped alongside.
@@ -311,6 +320,12 @@ def write_sha256(path):
     return digest
 
 
+def sha256_matches(path):
+    """True when <path>.sha256 holds path's SHA-256."""
+    with open(path + '.sha256') as f:
+        return f.read().split()[0].lower() == sha256_file(path)
+
+
 def write_text(path, text, crlf=False, bom=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8-sig' if bom else 'utf-8', newline='\r\n' if crlf else '\n') as f:
@@ -464,6 +479,14 @@ class Release:
         for name, info in m['deps'].items():
             if not re.search(r"\('%s', '[^']+', '%s'" % (re.escape(name), re.escape(info['tag'])), text):
                 wrong.append('%s %s' % (name, info['tag']))
+        # The toolchain's MSYS2 packages: the versions tools/build_kit_packages.json pins at this commit.
+        pins_path = os.path.join(self.source, 'tools', 'build_kit_packages.json')
+        if os.path.isfile(pins_path):
+            with open(pins_path, encoding='utf-8') as f:
+                pinned = {e['name']: e['version'] for e in json.load(f)['packages']}
+            for name, info in m['toolchain']['msys2_packages'].items():
+                if pinned.get(name) != info['version']:
+                    wrong.append('%s %s (pinned %s)' % (name, info['version'], pinned.get(name, 'none')))
         if wrong:
             raise ReleaseError('the kit does not match this commit\'s pins (%s): make a new kit (make_build_kit.py)'
                                % ', '.join(wrong))
@@ -527,9 +550,14 @@ class Release:
     def step_licenses(self):
         lic = os.path.join(self.stage, 'LICENSES')
         rmtree(lic)
-        # The code: TMB_Recomp is built on PS2Recomp (GPL-3.0); the release's code is under its licence.
-        os.makedirs(os.path.join(lic, 'TMB_Recomp'))
-        shutil.copy2(os.path.join(self.source, 'PS2Recomp', 'LICENSE'), os.path.join(lic, 'TMB_Recomp', 'LICENSE'))
+        # The code: TMB_Recomp's own files are MIT (the repository's LICENSE); PS2Recomp, the runtime and recompiler
+        # in source\PS2Recomp, is GPL-3.0 (the game a player builds links it: a GPL-3.0 combined work).
+        for name, src in (('TMB_Recomp', os.path.join(self.source, 'LICENSE')),
+                          ('PS2Recomp', os.path.join(self.source, 'PS2Recomp', 'LICENSE'))):
+            if not os.path.isfile(src):
+                raise ReleaseError('%s has no LICENSE at this commit (%s)' % (name, src))
+            os.makedirs(os.path.join(lic, name))
+            shutil.copy2(src, os.path.join(lic, name, 'LICENSE'))
         # The kit's components: their own licence folders (make_build_kit), then what MSYS2 installed elsewhere for
         # the packages without one (share/doc), with --msys.
         shutil.copytree(os.path.join(self.kit, 'licenses'), os.path.join(lic, 'kit'))
@@ -594,8 +622,10 @@ class Release:
         lines = [
             '%s: where the source of everything in this download is' % self.name,
             '',
-            'TMB_Recomp (source\\, this release\'s code; GPL-3.0, LICENSES\\TMB_Recomp)',
+            'TMB_Recomp (source\\, this release\'s code; MIT, LICENSES\\TMB_Recomp)',
             '  https://github.com/%s/tree/%s' % (REPO, self.commit),
+            'PS2Recomp, the runtime and recompiler (source\\PS2Recomp; GPL-3.0, LICENSES\\PS2Recomp): the game you',
+            'build links its runtime, so that game is a GPL-3.0 combined work.',
             '  PS2Recomp fork: https://github.com/%s/tree/%s' % (FORK_REPO, self.fork_commit),
             '  The whole source is in source\\ already, the launcher\'s too (source\\launcher).',
             '',
@@ -721,6 +751,33 @@ class Release:
     def step_readme(self):
         write_text(os.path.join(self.stage, 'README.txt'),
                    PLAYER_README.format(version=self.version, name=self.name, repo=REPO), crlf=True, bom=True)
+        # The changelog at the top, for players (Notepad) and the launcher's "What's new": the commit's, CRLF.
+        text = self.changelog_text()
+        if text is not None:
+            write_text(os.path.join(self.stage, 'CHANGELOG.md'), text.replace('\r\n', '\n'), crlf=True)
+
+    # -- the changelog
+
+    def changelog_text(self):
+        """CHANGELOG.md as committed at the release's commit (None when the commit has none)."""
+        try:
+            return git('show', '%s:CHANGELOG.md' % self.commit, binary=True).decode('utf-8')
+        except ReleaseError:
+            return None
+
+    def changelog(self):
+        """The section of CHANGELOG.md for this version, or a placeholder with --allow-missing-changelog."""
+        text = self.changelog_text()
+        section = changelog_section(text, self.version) if text is not None else None
+        if section:
+            return section
+        why = ('the commit has no CHANGELOG.md' if text is None else
+               'CHANGELOG.md has no section "## [%s]" with content (move the Unreleased entries under it, with the '
+               'date)' % self.version)
+        if not self.args.allow_missing_changelog:
+            raise ReleaseError(why + ': a release needs its changelog (--allow-missing-changelog for a test build)')
+        log('  WARNING: %s; a placeholder is used (--allow-missing-changelog)' % why)
+        return '_A test build: no changelog entry for %s._' % self.version
 
     def step_zip(self):
         problems = [p for p in audit_tree(self.stage, allow_pe=True)]
@@ -746,10 +803,9 @@ class Release:
         sources = os.path.isfile(self.sources_zip + '.sha256')
         lines = [
             '# TMB_Recomp %s' % self.version, '',
-            '<!-- A stub written by tools/make_release.py: write what changed before publishing the draft. -->', '',
             'Twisted Metal: Black (USA) as a native PC game, built on your PC from **your own disc**: nothing of the '
             'game is in this download.', '',
-            '## What changed', '', '- ...', '',
+            "## What's new", '', self.changelog_section.strip(), '',
             '## Download', '',
             '1. `%s.zip` below. Check its SHA-256 before running anything:' % self.name,
             '   `Get-FileHash .\\%s.zip` (PowerShell) must print' % self.name, '',
@@ -776,7 +832,9 @@ class Release:
                                                                       sdig))
         lines += [
             '', '## Source code and licences', '',
-            'The code is in the zip (`source\\`) and at the commit above. The build kit redistributes unmodified '
+            'The code is in the zip (`source\\`) and at the commit above: our own code under the MIT licence, '
+            'PS2Recomp (the runtime and recompiler it is built on) under GPL-3.0, which makes the game you build a '
+            'GPL-3.0 combined work. The build kit redistributes unmodified '
             'GPL / LGPL programs (GCC, binutils, mingw-w64, the DLLs CMake loads) and FFmpeg (LGPL-2.1+): '
             '`LICENSES\\` in the zip has their licences, and `LICENSES\\SOURCES.txt` lists each package with its exact '
             'source on repo.msys2.org.' +
@@ -788,7 +846,7 @@ class Release:
             'Twisted Metal: Black © Sony Interactive Entertainment, developed by Incognito Entertainment. An unofficial '
             'fan project by The Bozos (boubou666 & Arzaroth), not affiliated with or endorsed by them.', '']
         write_text(os.path.join(self.out, 'RELEASE_NOTES.md'), '\n'.join(lines))
-        log('  RELEASE_NOTES.md (a stub)')
+        log('  RELEASE_NOTES.md (the changelog section for %s, the hashes, the source offer)' % self.version)
 
     def pkg_version(self, name):
         info = self.manifest['toolchain']['msys2_packages'].get(name)
@@ -811,13 +869,37 @@ class Release:
         gh = shutil.which('gh')
         if not gh:
             raise ReleaseError('gh (GitHub CLI) is needed for --publish')
+        # A second run for the same tag would make a second draft: refuse while one exists (draft or published).
+        p = subprocess.run([gh, 'release', 'view', 'v' + self.version, '--repo', REPO, '--json', 'isDraft'],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if p.returncode == 0:
+            raise ReleaseError('a release v%s exists already (%s): delete the draft on GitHub first'
+                               % (self.version, p.stdout.decode('utf-8', 'replace').strip()))
         # The commit has to be on GitHub for --target: say so instead of pushing anything.
         log('  creating a DRAFT release (nothing is pushed; the commit must already be on GitHub)')
         run([gh] + cmd[1:])
 
+    def publish_made(self):
+        """--publish-only: the draft from what an earlier run left in --out, after its checks."""
+        notes = os.path.join(self.out, 'RELEASE_NOTES.md')
+        for p in (self.zip, self.zip + '.sha256', notes):
+            if not os.path.isfile(p):
+                raise ReleaseError('%s is missing: make the release first (without --publish-only)' % p)
+        with open(notes, encoding='utf-8') as f:
+            if not f.readline().strip().endswith(' ' + self.version):
+                raise ReleaseError('%s is not the notes of %s' % (notes, self.version))
+        problems = verify_zip(self.zip)
+        if problems:
+            raise ReleaseError('%s:\n  %s' % (self.zip, '\n  '.join(problems[:40])))
+        if not sha256_matches(self.zip):
+            raise ReleaseError('%s does not match its .sha256' % self.zip)
+        self.publish()
+
     def main(self):
         os.makedirs(self.work, exist_ok=True)
         log('%s from %s' % (self.name, self.commit))
+        # First, so a release without its changelog stops before the long steps.
+        self.changelog_section = self.changelog()
         steps = [('export', self.step_export), ('kit', self.step_kit), ('launcher', self.step_launcher),
                  ('licenses', self.step_licenses), ('readme', self.step_readme)]
         if self.args.with_sources:
@@ -834,6 +916,57 @@ class Release:
         if not self.args.keep_work:
             rmtree(self.work)
         log('done in %.0f s: %s' % (time.time() - t0, self.zip))
+
+
+CHANGELOG_HEADING = re.compile(r'^##[ \t]+\[?([^\]\s]+)\]?(.*)$', re.M)
+
+
+def changelog_section(text, version):
+    """The body of the "## [version] - date" section of a Keep a Changelog text (up to the next "## " heading), the
+    link references removed, stripped; None when missing, empty, or the version is "Unreleased"."""
+    if version.lower() == 'unreleased':
+        return None
+    text = text.replace('\r\n', '\n')
+    heads = list(CHANGELOG_HEADING.finditer(text))
+    for i, m in enumerate(heads):
+        if m.group(1).lstrip('vV') != version:
+            continue
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        body = re.sub(r'^\[[^\]]+\]:\s*\S+\s*$', '', text[m.end():end], flags=re.M).strip()
+        return body if re.search(r'\w', body) else None
+    return None
+
+
+def verify_zip(path):
+    """The zip audited as the release folder is (--verify-zip): names of the game's files or the build's folders, ELF
+    and ISO9660 contents, the top folder, the files a release must have. Problems as a list of strings."""
+    problems = []
+    with zipfile.ZipFile(path) as zf:
+        names = zf.namelist()
+        tops = set(n.split('/', 1)[0] for n in names)
+        if tops != {NAME}:
+            problems.append('the zip\'s top folders are %s, expected %s only' % (sorted(tops), NAME))
+        for info in zf.infolist():
+            n = info.filename
+            rel = n.split('/', 1)[1] if '/' in n else n
+            if n.endswith('/'):
+                if game_name(rel):
+                    problems.append('%s: a generated / game folder' % n)
+                continue
+            if game_name(rel) or (rel.lower().endswith(GAME_EXTENSIONS) and not allowed_extension(rel)):
+                problems.append('%s: named like a file of the game' % n)
+            with zf.open(info) as f:
+                head = f.read(0x8006)
+            if head[:4] == b'\x7fELF':
+                problems.append('%s: an ELF file' % n)
+            if len(head) >= 0x8006 and head[0x8001:0x8006] == b'CD001':
+                problems.append('%s: an ISO9660 volume' % n)
+        for need in ('TMB Launcher.exe', 'README.txt', 'CHANGELOG.md', 'LICENSES/TMB_Recomp/LICENSE',
+                     'LICENSES/PS2Recomp/LICENSE', 'source/release.ini', 'kit/kit_manifest.json',
+                     'kit/python/python.exe', 'source/tools/tmb_build.py'):
+            if '%s/%s' % (NAME, need) not in names:
+                problems.append('%s/%s is missing' % (NAME, need))
+    return problems
 
 
 def link_tree_file(src, dst):
@@ -873,8 +1006,10 @@ def licence_files_in_source_package(path):
 
 LICENSES_README = """{name}: licences
 
-TMB_Recomp\\LICENSE    the code in source\\ (built on PS2Recomp, GPL-3.0)
-kit\\                  the build kit's components: toolchain\\<MSYS2 package> (GCC, binutils, mingw-w64,
+TMB_Recomp\\LICENSE    TMB_Recomp's own code in source\\ (MIT)
+PS2Recomp\\LICENSE     PS2Recomp, the runtime and recompiler in source\\PS2Recomp (GPL-3.0); the game
+                      you build links its runtime, so that game is a GPL-3.0 combined work
+kit\\                 the build kit's components: toolchain\\<MSYS2 package> (GCC, binutils, mingw-w64,
                       winpthreads, CMake, Ninja and the DLLs they load), ffmpeg\\, python\\
 libraries\\            the libraries compiled into the game and the launcher (raylib, Dear ImGui, rlImGui,
                       ELFIO, toml11, fmt, libdwarf, rabbitizer)
@@ -926,7 +1061,8 @@ Help
   https://github.com/{repo}/issues
   When preparing fails, the launcher's "Copy details" button copies what we need to know.
 
-Licences and source code: LICENSES\\ (SOURCES.txt says where every source is).
+Licences and source code: LICENSES\\ (SOURCES.txt says where every source is). Our code is MIT; PS2Recomp,
+the runtime it is built on, is GPL-3.0, and so is the game you build with it.
 Twisted Metal: Black (c) Sony Interactive Entertainment, developed by Incognito Entertainment.
 An unofficial fan project, not affiliated with or endorsed by them.
 
@@ -969,7 +1105,8 @@ Aide
   https://github.com/{repo}/issues
   Si la préparation échoue, le bouton « Copier les détails » du lanceur copie ce dont nous avons besoin.
 
-Licences et code source : LICENSES\\ (SOURCES.txt indique où se trouve chaque source).
+Licences et code source : LICENSES\\ (SOURCES.txt indique où se trouve chaque source). Notre code est sous
+licence MIT ; PS2Recomp, le moteur sur lequel il repose, est sous GPL-3.0, tout comme le jeu que vous construisez.
 Twisted Metal: Black (c) Sony Interactive Entertainment, développé par Incognito Entertainment.
 Un projet de fans non officiel, ni affilié ni approuvé par eux.
 
@@ -981,7 +1118,7 @@ def main():
     ap = argparse.ArgumentParser(description='Makes the TMB_Recomp release zip (see the docstring).')
     ap.add_argument('--version', help='MAJOR.MINOR.PATCH[-pre] (default: the commit\'s tag, v stripped)')
     ap.add_argument('--commit', help='the commit to release (default HEAD); only committed files count')
-    ap.add_argument('--out', required=True, help='the folder for the zips and the work (outside the repository)')
+    ap.add_argument('--out', help='the folder for the zips and the work (outside the repository)')
     ap.add_argument('--kit', help='an existing build kit to ship (default: assembled with make_build_kit.py)')
     ap.add_argument('--msys', default='C:/msys64', help='MSYS2 (the kit\'s toolchain, its licence files)')
     ap.add_argument('--downloads', help='download cache: the font, the MSYS2 source packages (default <out>/downloads)')
@@ -991,10 +1128,46 @@ def main():
     ap.add_argument('--publish', action='store_true', help='create a DRAFT GitHub release with gh (never published, '
                     'nothing pushed)')
     ap.add_argument('--dry-run', action='store_true', help='with --publish: print the gh command only')
+    ap.add_argument('--publish-only', action='store_true', help='the draft from a release already made in --out (the '
+                    'zips and RELEASE_NOTES.md of this version): the release workflow checks the zip in between')
     ap.add_argument('--keep-work', action='store_true', help='keep <out>/work (the launcher build)')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
+    ap.add_argument('--allow-missing-changelog', action='store_true', help='a test build: a placeholder when '
+                    'CHANGELOG.md has no section for the version (never for a real release)')
+    ap.add_argument('--check-changelog', action='store_true', help='only print CHANGELOG.md\'s section for the version '
+                    '(--version or the commit\'s tag) at the commit; exit 1 when it is missing')
+    ap.add_argument('--verify-zip', metavar='ZIP', help='only audit a release zip (no game file, the expected files)')
     args = ap.parse_args()
     try:
+        if args.verify_zip:
+            problems = verify_zip(args.verify_zip)
+            if problems:
+                raise ReleaseError('%s:\n  %s' % (args.verify_zip, '\n  '.join(problems[:40])))
+            log('%s: no game file, the expected files present' % args.verify_zip)
+            return
+        if args.check_changelog:
+            commit = git('rev-parse', '--verify', (args.commit or 'HEAD') + '^{commit}')
+            version = args.version
+            if not version:
+                try:
+                    tag = git('describe', '--tags', '--exact-match', commit)
+                except ReleaseError:
+                    raise ReleaseError('the commit has no tag: pass --version')
+                version = tag[1:] if tag[:1] in 'vV' else tag
+            try:
+                text = git('show', '%s:CHANGELOG.md' % commit, binary=True).decode('utf-8')
+            except ReleaseError:
+                raise ReleaseError('%s has no CHANGELOG.md' % commit[:12])
+            section = changelog_section(text, version)
+            if not section:
+                raise ReleaseError('CHANGELOG.md at %s has no section "## [%s]" with content' % (commit[:12], version))
+            log(section)
+            return
+        if not args.out:
+            ap.error('--out is needed')
+        if args.publish_only:
+            Release(args).publish_made()
+            return
         Release(args).main()
     except ReleaseError as e:
         sys.exit('make_release: %s' % e)

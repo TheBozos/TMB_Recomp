@@ -39,12 +39,24 @@ namespace tmb::textures
     std::shared_ptr<const ps2x::native::TextureCache::Texture> font();
 }
 
+namespace tmb::native
+{
+    bool menusDrawn();
+}
+
 namespace tmb::twod
 {
     void publish();
 
     namespace
     {
+        // The movie pictures (sceMpegGetPicture, below), shared by loadImage and the loading bar.
+        std::mutex g_movieMutex;
+        std::shared_ptr<const ps2x::native::TextureCache::Texture> g_moviePicture; // under g_movieMutex
+        // The picture loadImage last put in the display buffers (under g_movieMutex): the one shown through the display's
+        // circuit 2 (ps2x::native::setDisplayPicture).
+        std::shared_ptr<const ps2x::native::TextureCache::Texture> g_menuPicture;
+
         constexpr uint32_t kFontBuildPrim = TMB_ADDR(0x001C5B28u);
         // displayDialog (a match's pause, won / lost and results overlays): where its loop flushes the font, and its D2
         // kick of the darkening sprite that follows (inline; its offsets differ between the regions).
@@ -785,6 +797,12 @@ namespace tmb::twod
             const uint32_t gp = getRegU32(ctx, 28);
             g_barGp.store(gp, std::memory_order_relaxed);
             g_rdram.store(rdram, std::memory_order_relaxed);
+            if (getRegU32(ctx, 4) == 0u) // a load's start: the picture the menus were drawn over is gone
+            {
+                std::lock_guard<std::mutex> lock(g_movieMutex);
+                g_menuPicture.reset();
+                ps2x::native::clearDisplayPicture();
+            }
             setWord(rdram, gp + kGpBarProgress, std::min<uint32_t>(getRegU32(ctx, 4), 0x400u));
             loadingBar(rdram, gp);
             ctx->pc = getRegU32(ctx, 31); // jr $ra
@@ -835,8 +853,6 @@ namespace tmb::twod
         constexpr uint32_t kVoBufDecCount = 0x00200168u, kVoBuf = 0x004C7A18u;
         constexpr int32_t kImageHeld = -0x3408;
 #endif
-        std::mutex g_movieMutex;
-        std::shared_ptr<const ps2x::native::TextureCache::Texture> g_moviePicture; // under g_movieMutex
 
         void moviePicture(uint32_t, uint32_t width, uint32_t height, const uint8_t *rgba)
         {
@@ -854,13 +870,37 @@ namespace tmb::twod
         }
 
         // loadImage(chain): the last picture, centred in the frame (as dispSetTags places it: a 640 x 448 frame in NTSC,
-        // 640 x 512 in PAL), under the overlay; no transfer.
+        // 640 x 512 in PAL); no transfer. It goes in the buffer the display reads through circuit 2: the shell's menus
+        // are drawn over it with alpha 0 where it shows (PMODE merges the circuits by the frame's alpha), and it stays
+        // there after the clip ends (blitLastMovieFrame) until a load starts. A movie on its own (no menu frames) is
+        // also shown under the overlay.
+        void showOnCircuit2(const ps2x::native::TextureCache::Texture &picture)
+        {
+#if TMB_REGION_US
+            constexpr uint32_t kFrameWidth = 640u, kFrameHeight = 448u;
+#else
+            constexpr uint32_t kFrameWidth = 640u, kFrameHeight = 512u;
+#endif
+            auto frame = std::make_shared<std::vector<uint32_t>>(static_cast<size_t>(kFrameWidth) * kFrameHeight, 0x80000000u);
+            const uint32_t width = std::min(picture.width, kFrameWidth), height = std::min(picture.height, kFrameHeight);
+            const uint32_t x0 = (kFrameWidth - width) / 2u, y0 = (kFrameHeight - height) / 2u;
+            for (uint32_t y = 0; y < height; ++y)
+                for (uint32_t x = 0; x < width; ++x)
+                    (*frame)[(y0 + y) * kFrameWidth + x0 + x] = (picture.rgba[y * picture.width + x] & 0x00ffffffu) | 0x80000000u;
+            ps2x::native::setDisplayPicture(std::move(frame), kFrameWidth, kFrameHeight);
+        }
+
         void loadImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             std::shared_ptr<const ps2x::native::TextureCache::Texture> picture;
             {
                 std::lock_guard<std::mutex> lock(g_movieMutex);
                 picture = g_moviePicture;
+                if (on() && picture && picture != g_menuPicture)
+                {
+                    g_menuPicture = picture;
+                    showOnCircuit2(*picture);
+                }
             }
             if (!on() || !picture)
             {
@@ -878,7 +918,8 @@ namespace tmb::twod
             screen.width = 640.0f;
             screen.height = kFrameHeight;
             const float width = static_cast<float>(picture->width), height = static_cast<float>(picture->height);
-            ps2x::native::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
+            if (!tmb::native::menusDrawn())
+                ps2x::native::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
                                                            screen.originY + (kFrameHeight - height) * 0.5f, width, height);
             const uint32_t held = getRegU32(ctx, 28) + static_cast<uint32_t>(kImageHeld);
             if (word(rdram, held) != 0u)

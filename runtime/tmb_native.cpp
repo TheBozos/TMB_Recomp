@@ -2973,6 +2973,12 @@ namespace tmb::native
         return state().group + 1u;
     }
 
+    // For the movie pictures (runtime/tmb_2d.cpp): whether the shell's menus are drawn natively now.
+    bool menusDrawn()
+    {
+        return enabled() && menusNative();
+    }
+
     namespace
     {
         void onVif1(const uint8_t *stream, size_t bytes)

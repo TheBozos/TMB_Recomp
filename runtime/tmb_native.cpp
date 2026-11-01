@@ -26,6 +26,7 @@
 #include "runtime/ps2_memory.h"
 #include "runtime/native/native_display.h"
 #include "runtime/native/native_gs_hook.h"
+#include "tmb_host.h"
 #include "tmb_meshes.h"
 #include "tmb_vu1_shading.h"
 
@@ -3063,6 +3064,7 @@ namespace tmb::native
     {
         static const bool on = []
         {
+            tmb::host::setEnvDefault("TMB_NATIVE", "1"); // the default: the native port (TMB_NATIVE=0 opts out)
             const char *value = std::getenv("TMB_NATIVE");
             return value && *value == '1';
         }();

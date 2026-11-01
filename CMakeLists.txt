@@ -16,7 +16,24 @@ set(PS2X_BUILD_ANALYZER OFF CACHE BOOL "" FORCE)
 set(PS2X_BUILD_TEST OFF CACHE BOOL "" FORCE)
 set(PS2X_BUILD_STUDIO OFF CACHE BOOL "" FORCE)
 
+# The runner as a PC game (the fork's ps2_app.h): its window title, the per-user folder (%APPDATA%\TMB_Recomp,
+# $XDG_DATA_HOME/tmb_recomp) for the memory cards, input.ini, video.ini, the log and crash reports, and with no argument
+# the game data in game/ next to the runner (or in the user folder). No console window (a GUI-subsystem runner: the
+# output goes to the log, and to the terminal it was started from).
+set(PS2X_APP_TITLE "Twisted Metal: Black" CACHE STRING "" FORCE)
+set(PS2X_APP_FOLDER "TMB_Recomp" CACHE STRING "" FORCE)
+set(PS2X_APP_XDG_FOLDER "tmb_recomp" CACHE STRING "" FORCE)
+set(PS2X_APP_BOOT_ELF "SCUS_971.01" CACHE STRING "" FORCE)
+set(PS2X_APP_DATA_FOLDER "game" CACHE STRING "" FORCE)
+set(PS2X_SHOW_WINDOWS_CONSOLE OFF CACHE BOOL "" FORCE)
+
 add_subdirectory(PS2Recomp)
+
+# The runner's icon and version information (runtime/app: a placeholder icon, no game art).
+if(WIN32)
+    enable_language(RC)
+    target_sources(ps2EntryRunner PRIVATE "${CMAKE_SOURCE_DIR}/runtime/app/tmb.rc")
+endif()
 
 file(GLOB TMB_GENERATED_SOURCES CONFIGURE_DEPENDS "${TMB_GENERATED_DIR}/*.cpp")
 if(NOT TMB_GENERATED_SOURCES)

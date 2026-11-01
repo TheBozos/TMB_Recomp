@@ -5,7 +5,10 @@
 source "$(dirname "$0")/common.sh"
 BIN="$GAME_BUILD/PS2Recomp/ps2xRuntime/ps2EntryRunner"
 [ -x "$BIN" ] || { echo "missing $BIN, run scripts/build_runtime.sh first"; exit 1; }
+# (All of these are the runner's defaults now, a double-click starts the same game; set here for the record. The frame
+# rate counter, off for players, is on for us.)
 export TMB_NATIVE=1 PS2X_SPU2_WALLCLOCK=1 PS2X_IOP_WALLCLOCK=1 PS2X_GS_RENDERER="${PS2X_GS_RENDERER:-native}"
+export PS2X_SHOW_FPS="${PS2X_SHOW_FPS:-1}"
 if compgen -G "$GENERATED/iop/*.cpp" > /dev/null; then
     export PS2X_IOP_NATIVE=1
 else

@@ -21,6 +21,7 @@
 #include "ps2_recompiled_functions.h"
 #include "runtime/native/native_texture_cache.h"
 #include "runtime/native/native_texture_pack.h"
+#include "tmb_meshes.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -98,9 +99,8 @@ namespace tmb::textures
             if (s.loaded)
                 return;
             s.loaded = true;
-            const char *path = std::getenv("TMB_TEXTURE_PACK");
-            if (!path || !*path)
-                path = TMB_TEXTURE_PACK;
+            const std::string pathText = tmb::meshes::packPath("TMB_TEXTURE_PACK", TMB_TEXTURE_PACK);
+            const char *path = pathText.c_str();
             if (!s.pack.load(path))
             {
                 std::fprintf(stderr, "[tmb:tex] no texture pack at %s (tools/tmb_texture_pack.py): the native draws are untextured\n", path);

@@ -1754,3 +1754,49 @@ What is left for the owner: push the branches, tag, `make_release.py --with-sour
 notes, attach nothing else, publish; a LICENSE file at the repository's root (the code is GPL-3.0 through PS2Recomp;
 the release ships PS2Recomp's); the clean-PC run of `docs/RELEASE_CHECKLIST.md` (SmartScreen, Defender, a 4-core PC,
 a real 150 % / 200 % display, offline); code signing if it ever becomes possible.
+
+## Releases by tag: CHANGELOG.md, pinned kit packages, the release workflow (2026-11-01)
+
+The owner's rules: a release is built by CI only when asked (a pushed `v*` tag, or a manual run with a tag; no CI on
+push or pull request), and every release has a changelog.
+
+- **`CHANGELOG.md`** (Keep a Changelog, players first). `make_release.py` reads the section `## [x.y.z]` from the
+  commit (`git show`, never the working tree) before anything else and refuses to go on when it is missing, empty or
+  only "Unreleased" (`--allow-missing-changelog` for test builds: a placeholder). The section is RELEASE_NOTES.md's
+  "What's new" (no longer a stub: the section, the download steps, hashes, build information, the source offer), which
+  is the draft's body. `CHANGELOG.md` is shipped at the zip's top (CRLF); the launcher shows the installed version's
+  section in a popup ("What's new" in the footer, and beside Rebuild now after an update; `--screens` shoots it).
+- **Licences.** The repository's root LICENSE is MIT (TMB's own code); PS2Recomp stays GPL-3.0 and the game a player
+  builds links its runtime. `LICENSES\TMB_Recomp\LICENSE` is now the MIT one and `LICENSES\PS2Recomp\LICENSE` the
+  GPL-3.0; SOURCES.txt, the LICENSES README, the player README (both languages) and the notes say so.
+- **Pinned kit packages.** `tools/build_kit_packages.json`: the 10 roots make_build_kit hard-coded and their
+  dependency closure from pacman's database (DEPENDS through PROVIDES): 51 UCRT64 packages, each with its exact
+  version, its file on repo.msys2.org and that file's SHA-256 (from the local pacman cache; all 51 downloaded again
+  from repo.msys2.org and matched). repo.msys2.org keeps superseded files for a long time (gcc 14.2.0-2 is still there)
+  but has no separate archive: when a pinned file disappears the release fails loudly and the pins move
+  (`--pin-packages` after an MSYS2 update, a new kit, a test, a commit). `--install-packages` downloads the files
+  (repo.msys2.org, then mirror.msys2.org; SHA-256 checked; cached) and installs exactly them with MSYS2's own
+  `pacman -U --needed` from the cache folder (bare names: the command line stays short); `pacman -U --print` resolves
+  the 51 files with nothing pulled from the sync repositories. The toolchain step refuses an MSYS2 with other
+  versions and a kit file from an unpinned package; the manifest records each package's file and hash, and
+  make_release checks the kit's versions against the commit's pins. Not pinned: MSYS2's base (sh, sed, awk,
+  diffutils) that only runs FFmpeg's configure.
+- **`.github/workflows/release.yml`** (windows-latest, steps in Git Bash, each a call into the two scripts): the tag
+  checked (`vX.Y.Z[-pre]`), checkout at the tag with the submodule, Python 3.14, `--check-changelog`,
+  msys2/setup-msys2 (UCRT64, no update, diffutils), the downloads cached by the hash of the pins and make_build_kit.py,
+  the kit's FFmpeg cached by the same key (then the kit is made without the ffmpeg step), `--install-packages`, the
+  kit, `make_release.py --with-sources`, smoke checks, then `--publish-only` (the draft, with `GITHUB_TOKEN`,
+  `contents: write`). Smoke checks, without any game data: `--verify-zip` (one top folder `TMB_Recomp`, no game file
+  names, no ELF or ISO9660 content, the files a release needs), `sha256sum -c` of both zips, the zip unzipped, the
+  kit's Python running `tmb_build.py --check` on 1 MB of zeros (exit 1, "is not an ISO9660 disc image"), `TMB
+  Launcher.exe --version`, and `--self-check <zeros> --report <file>`: no window; the version and commit, the release
+  folder complete, release.ini's version the launcher's, CHANGELOG.md's section present, and the same disc check run
+  through the launcher's own code path, refused for that reason. A published, non-pre release pings RecompWatcher
+  (`project-updated`) when the `WATCHER_DISPATCH_TOKEN` secret exists.
+- **Tested here** (not on GitHub: only a real run proves the runner's MSYS2, pacman -U into a fresh MSYS2, the caches
+  and gh with GITHUB_TOKEN): the YAML parsed; the kit made from scratch with the pins (138 s, 459.3 MB, pin check
+  passed); `make_release.py --version 0.1.0 --with-sources` from commit 10f1303 (68 s; zip 145.7 MB, 8471 entries;
+  sources zip 452.3 MB); the workflow's smoke-check script run as written in Git Bash: all passed; `--verify-zip` on a
+  zip with `game/SCUS_971.01` (ELF) and an ISO9660 image: refused with each reason; `--publish-only --dry-run` printed
+  the gh command; 0.1.1-test without `--allow-missing-changelog`: refused before the export; a tampered pin
+  (version, hash) refused.

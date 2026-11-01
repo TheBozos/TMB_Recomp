@@ -1,6 +1,7 @@
 # Release checklist: a clean Windows PC before each release
 
-Run `tools/make_release.py` (README, "The release"), then check the zip on a Windows 10 or 11 PC that has never seen
+Take the draft the release workflow made from the version tag (README, "Making a release"; or `tools/make_release.py`
+by hand), then check the zip on a Windows 10 or 11 PC that has never seen
 the project: a fresh VM or a spare PC, nothing installed (no MSYS2, git, Python, Visual C++ redistributables), a
 standard user account, Defender on. Tick each line, write what differed in "Notes", and keep the filled copy with the
 release (or in the release's issue).
@@ -61,10 +62,11 @@ Release: `TMB_Recomp-<version>.zip`, SHA-256 `<from the .sha256>`, commit `<comm
 
 ## Before publishing
 
-- [ ] `RELEASE_NOTES.md` finished (what changed); the version tag on the release commit, pushed with it.
-- [ ] `make_release.py --with-sources`: the sources zip and its `.sha256` attached to the same release (the GPL /
-      LGPL corresponding source of the kit's MSYS2 binaries).
-- [ ] `make_release.py --publish` (a draft), the assets and notes checked on GitHub, then published by the owner.
+- [ ] `CHANGELOG.md`'s section for the version says what changed, for players; the draft's body is that section
+      (plus the hashes and the source offer). The launcher's "What's new" (footer) shows the same section.
+- [ ] The draft has the zip, its `.sha256`, the sources zip and its `.sha256` (the GPL / LGPL corresponding source of
+      the kit's MSYS2 binaries); the workflow's smoke checks passed (its summary).
+- [ ] Published by the owner on GitHub (the workflow only ever makes a draft).
 
 ## Results on the development PC
 

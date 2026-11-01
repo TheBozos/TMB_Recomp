@@ -1438,6 +1438,14 @@ struct Selftest
         steps.push_back(shot("s4-play-fr"));
         steps.push_back({"french maintenance", [](App &app, double) { app.tab = Tab::Maintenance; return true; }});
         steps.push_back(shot("s5-maintenance-fr"));
+        steps.push_back({"what's new", [](App &app, double)
+                         {
+                             g_fr = false;
+                             app.tab = Tab::Play;
+                             app.openWhatsNew = !app.whatsNew.empty();
+                             return true;
+                         }});
+        steps.push_back(shot("s6-whats-new"));
         steps.push_back({"quit", [this](App &app, double)
                          {
                              std::string v, page, error;

@@ -303,12 +303,18 @@ python tools\make_release.py --out D:\tmb_release --kit D:\tmb_kit\kit --with-so
 
 | Output (in `--out`) | Contents |
 |---|---|
-| `TMB_Recomp-<version>.zip` | `TMB_Recomp\` (the same folder name each release, so a new one unzips over the last): `TMB Launcher.exe` (built with the kit, the version and commit in it), `source\` (`git archive` of the commit and of PS2Recomp at its recorded commit, `release.ini`, `release_files.txt`), `kit\`, `README.txt` (players, English and French), `LICENSES\` (every component's licence, `SOURCES.txt`) |
+| `TMB_Recomp-<version>.zip` | `TMB_Recomp\` (the same folder name each release, so a new one unzips over the last): `TMB Launcher.exe` (built with the kit, the version and commit in it), `source\` (`git archive` of the commit and of PS2Recomp at its recorded commit, `release.ini`, `release_files.txt`), `kit\`, `README.txt` (players, English and French), `CHANGELOG.md`, `LICENSES\` (every component's licence: TMB_Recomp's code MIT, PS2Recomp GPL-3.0, the kit's components; `SOURCES.txt`) |
 | `<zip>.sha256` | `sha256sum` format; the release page quotes it |
 | `TMB_Recomp-<version>-sources.zip` | `--with-sources`: the MSYS2 source packages of every package the kit holds files of (repo.msys2.org only) and FFmpeg's tarball: the GPL / LGPL corresponding source, attached to the same release |
-| `RELEASE_NOTES.md` | a stub (hashes, sizes, versions, the source offer) to finish before publishing |
+| `RELEASE_NOTES.md` | the release's body: CHANGELOG.md's section for the version ("What's new"), the download steps, hashes, sizes, versions, the source offer |
 
 - The version is the commit's tag (`v0.1.0` → `0.1.0`) or `--version`; `x.y.z-pre` makes a pre-release.
+- A release needs its changelog: `CHANGELOG.md` at the commit must have a `## [x.y.z]` section with content (checked
+  first; `--allow-missing-changelog` for a test build). The section is the notes' "What's new"; `CHANGELOG.md` is
+  shipped at the zip's top, and the launcher shows the installed version's section ("What's new" in its footer, and
+  next to Rebuild now after an update). `--check-changelog --version x.y.z` prints it.
+- `--verify-zip <zip>` audits a zip again on its own; `--publish-only` makes the draft from a release already in
+  `--out` (the workflow checks the zip in between).
 - Nothing of the game: the export and the release folder are audited (no ELF, IRX, ISO volume, disc file names,
   `generated/` / `game/` / `disc/` / `build/` folders) and the zip's names again; the script stops on any.
 - The kit's prebuilt recompilers must be the fork's at the commit (`kit_manifest.json` `tools.fork_commit`): when they
@@ -316,6 +322,36 @@ python tools\make_release.py --out D:\tmb_release --kit D:\tmb_kit\kit --with-so
 - `--publish` creates a **draft** GitHub release with `gh` (the zips, their `.sha256`, the notes); `--dry-run` prints
   the command. It never pushes: the commit has to be on GitHub first, and the owner publishes the draft.
 - Before each release: `docs/RELEASE_CHECKLIST.md` on a clean Windows.
+
+### Making a release
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`), and only when the owner asks: on a pushed
+version tag, or a manual run with a tag. Nothing runs on ordinary pushes or pull requests.
+
+1. Move the entries under `## [Unreleased]` in `CHANGELOG.md` to a new `## [0.1.0] - <date>` section (players first,
+   plain words; Added / Changed / Fixed), update the links at the bottom, and commit. Push the branch.
+2. Tag that commit and push the tag: `git tag v0.1.0 && git push origin v0.1.0`. Or, with the tag already pushed:
+   Actions → Release → Run workflow, tag `v0.1.0`.
+3. The workflow (its first run, with nothing cached, is the longest) checks the tag against `CHANGELOG.md`, installs the pinned MSYS2
+   packages, makes the build kit, runs `make_release.py --with-sources`, checks the result without any game data
+   (`--verify-zip`, the hashes, `tmb_build.py --check` and the launcher's `--self-check` on a file of zeros refused
+   as "not an ISO9660 disc image"), then creates a **draft** release with the zip, its `.sha256`, the sources zip
+   and the changelog section as its body.
+4. Download the draft's zip and run `docs/RELEASE_CHECKLIST.md` on a clean PC.
+5. Publish the draft on GitHub. The workflow never publishes anything itself; a published release then pings
+   RecompWatcher (only if the `WATCHER_DISPATCH_TOKEN` secret is set). A failed or wrong draft: delete it (and the
+   tag if the commit was wrong), fix, tag again; a second run for a tag that has a release is refused.
+
+The kit is the same one a developer makes here: `tools/build_kit_packages.json` pins its 51 MSYS2 UCRT64 packages
+(exact versions, the files' SHA-256 on repo.msys2.org); `make_build_kit.py --install-packages` installs exactly those
+with pacman, and the kit refuses an MSYS2 holding other versions. To move to newer packages: update MSYS2,
+`make_build_kit.py --pin-packages`, make a kit, test, commit the file. The same release by hand, on this PC:
+
+```bat
+python tools\make_build_kit.py --install-packages
+python tools\make_build_kit.py --out D:\tmb_kit\kit
+python tools\make_release.py --version 0.1.0 --kit D:\tmb_kit\kit --out D:\tmb_release --with-sources --publish
+```
 
 ### Step by step (development)
 

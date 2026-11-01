@@ -729,7 +729,7 @@ namespace tmb::native
                 out.u = static_cast<float>(static_cast<int32_t>(vu.w(q + 2, 0))) / 4096.0f + vu.f(4, 0);
                 out.v = static_cast<float>(static_cast<int32_t>(vu.w(q + 2, 1))) / 4096.0f + vu.f(4, 1);
                 const float w = s.matrix[3] * pos[0] + s.matrix[7] * pos[1] + s.matrix[11] * pos[2] + s.matrix[15];
-                out.fog = w > 0.0f ? fogFactor(vu, 1.0f / w) : 0.0f;
+                out.fog = tmb::vu1::fogAt(vu, w);
                 strip.push_back(out);
             }
             for (size_t i = 2; i < strip.size(); ++i)
@@ -1969,7 +1969,7 @@ namespace tmb::native
                 out.u = static_cast<float>(static_cast<int32_t>(s.vu.w(q + 2, 0))) / 4096.0f + uOffset;
                 out.v = static_cast<float>(static_cast<int32_t>(s.vu.w(q + 2, 1))) / 4096.0f + vOffset;
                 const float w = s.matrix[3] * pos[0] + s.matrix[7] * pos[1] + s.matrix[11] * pos[2] + s.matrix[15];
-                out.fog = w > 0.0f ? fogFactor(s.vu, 1.0f / w) : 0.0f;
+                out.fog = tmb::vu1::fogAt(s.vu, w);
                 strip.push_back(out);
             }
             for (size_t i = 2; i < strip.size(); ++i)

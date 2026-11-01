@@ -61,6 +61,7 @@
 #include "runtime/ps2_memory.h"
 
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -387,7 +388,7 @@ namespace tmb::meshes
         {
             bool valid = false;
             uint32_t file = 0, offset = 0, poolFrom = 0, pc = 0;
-            float screen[16] = {};
+            float screen[16] = {}, clip[16] = {};
             uint32_t pointLights[11][4] = {};
         } g_previous;
 
@@ -521,6 +522,44 @@ namespace tmb::meshes
             return s_on;
         }
 
+        // TMB_LIVE_TOGGLES=<file> (a diagnostic): words read from the file every 60 frames, while the game runs:
+        // nodepth (the hier objects drawn without the depth test), nofog, noclip (no view clip), flat (each object
+        // untextured in a colour of its own).
+        struct LiveToggles
+        {
+            bool noDepth = false, noFog = false, noClip = false, flat = false, opaque = false, noAtest = false, noTex = false, dump = false, noGuard = false;
+            bool dumping = false; // this frame
+        } g_live;
+        void readLiveToggles()
+        {
+            static const char *s_path = std::getenv("TMB_LIVE_TOGGLES");
+            if (!s_path)
+                return;
+            std::string words;
+            if (FILE *f = std::fopen(s_path, "rb"))
+            {
+                char buffer[256];
+                const size_t n = std::fread(buffer, 1, sizeof(buffer), f);
+                std::fclose(f);
+                words.assign(buffer, n);
+            }
+            const LiveToggles was = g_live;
+            g_live.noDepth = words.find("nodepth") != std::string::npos;
+            g_live.noFog = words.find("nofog") != std::string::npos;
+            g_live.noClip = words.find("noclip") != std::string::npos;
+            g_live.flat = words.find("flat") != std::string::npos;
+            g_live.opaque = words.find("opaque") != std::string::npos;
+            g_live.noAtest = words.find("noatest") != std::string::npos;
+            g_live.noTex = words.find("notex") != std::string::npos;
+            g_live.noGuard = words.find("noguard") != std::string::npos;
+            const bool dump = words.find("dump") != std::string::npos;
+            g_live.dumping = dump && !g_live.dump;
+            g_live.dump = dump;
+            if (std::memcmp(&was, &g_live, sizeof(was)) != 0)
+                std::fprintf(stderr, "[tmb:live] frame %u: nodepth %d nofog %d noclip %d flat %d opaque %d noatest %d notex %d\n", g_frame, g_live.noDepth, g_live.noFog,
+                             g_live.noClip, g_live.flat, g_live.opaque, g_live.noAtest, g_live.noTex);
+        }
+
         void submit(const Drawn &drawn)
         {
             ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
@@ -555,6 +594,89 @@ namespace tmb::meshes
                 }
                 if (batch.vertices.empty())
                     continue;
+                // The strips' clip volume (the microprograms' CLIP, Drawn::clip): a triangle wholly outside one of its
+                // planes is not drawn, one partly outside is cut to it (its colour, texture coordinates and fog along
+                // the cuts: VU1's new vertices there), so what is nearer than its near plane never shows (a wall under
+                // the car seen from above) and the ground around the car is drawn to it. Then nothing behind the camera
+                // (w <= 0) of what is left: cut there too.
+                const std::vector<ps2x::native::Vertex> *vertices = &batch.vertices;
+                static thread_local std::vector<ps2x::native::Vertex> s_kept;
+                if (!drawn.screenSpace && !g_live.noGuard)
+                {
+                    const float *m = drawn.matrix, *c = drawn.clip;
+                    const int planeCount = drawn.hasClip ? 7 : 1;
+                    constexpr float kWMin = 1.0e-3f;
+                    // Plane p's distance (inside > 0): 0 the screen's w > kWMin, then the clip volume's w -+ x, y, z.
+                    const auto distance = [m, c](const ps2x::native::Vertex &v, int plane)
+                    {
+                        if (plane == 0)
+                            return m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15] - kWMin;
+                        const int axis = (plane - 1) >> 1;
+                        const float w = c[3] * v.x + c[7] * v.y + c[11] * v.z + c[15];
+                        const float a = c[axis] * v.x + c[4 + axis] * v.y + c[8 + axis] * v.z + c[12 + axis];
+                        return (plane & 1) ? w - a : w + a;
+                    };
+                    const auto lerp = [](const ps2x::native::Vertex &a, const ps2x::native::Vertex &b, float t)
+                    {
+                        ps2x::native::Vertex o = a;
+                        o.x = a.x + t * (b.x - a.x), o.y = a.y + t * (b.y - a.y), o.z = a.z + t * (b.z - a.z);
+                        o.u = a.u + t * (b.u - a.u), o.v = a.v + t * (b.v - a.v), o.fog = a.fog + t * (b.fog - a.fog);
+                        uint32_t rgba = 0;
+                        for (int ch = 0; ch < 32; ch += 8)
+                        {
+                            const float ca = static_cast<float>((a.rgba >> ch) & 0xffu), cb = static_cast<float>((b.rgba >> ch) & 0xffu);
+                            rgba |= static_cast<uint32_t>(std::lround(ca + t * (cb - ca))) << ch;
+                        }
+                        o.rgba = rgba;
+                        return o;
+                    };
+                    const size_t count = batch.vertices.size();
+                    bool change = false;
+                    for (size_t t = 0; t < count && !change; ++t)
+                        for (int p = 0; p < planeCount && !change; ++p)
+                            change = !(distance(batch.vertices[t], p) > 0.0f);
+                    if (change)
+                    {
+                        s_kept.clear();
+                        for (size_t t = 0; t + 2u < count; t += 3u)
+                        {
+                            ps2x::native::Vertex poly[10], next[10];
+                            int n = 3;
+                            for (int k = 0; k < 3; ++k)
+                                poly[k] = batch.vertices[t + static_cast<size_t>(k)];
+                            for (int p = 0; p < planeCount && n >= 3; ++p)
+                            {
+                                float d[10];
+                                bool allIn = true;
+                                for (int k = 0; k < n; ++k)
+                                    allIn = (d[k] = distance(poly[k], p)) > 0.0f && allIn;
+                                if (allIn)
+                                    continue;
+                                int n2 = 0;
+                                for (int k = 0; k < n && n2 < 9; ++k)
+                                {
+                                    const int k1 = (k + 1) % n;
+                                    if (d[k] > 0.0f)
+                                        next[n2++] = poly[k];
+                                    if ((d[k] > 0.0f) != (d[k1] > 0.0f))
+                                        next[n2++] = lerp(poly[k], poly[k1], d[k] / (d[k] - d[k1]));
+                                }
+                                for (int k = 0; k < n2; ++k)
+                                    poly[k] = next[k];
+                                n = n2;
+                            }
+                            for (int f = 1; f + 1 < n; ++f)
+                            {
+                                s_kept.push_back(poly[0]);
+                                s_kept.push_back(poly[f]);
+                                s_kept.push_back(poly[f + 1]);
+                            }
+                        }
+                        if (s_kept.empty())
+                            continue;
+                        vertices = &s_kept;
+                    }
+                }
                 ps2x::native::Material material;
                 material.textured = batch.textured && batch.texture != nullptr;
                 material.tex0 = batch.tex0;
@@ -568,8 +690,66 @@ namespace tmb::meshes
                 }
                 material.fog = batch.fogged;
                 material.fogColour = fog;
-                renderer.draw(material, drawn.screenSpace ? kScreenSpace : drawn.matrix, batch.vertices.data(),
-                              static_cast<uint32_t>(batch.vertices.size()), material.textured ? batch.texture : nullptr);
+                if (g_live.noDepth)
+                    material.depthTest = false;
+                if (g_live.noFog)
+                    material.fog = false;
+                if (g_live.opaque)
+                    material.blend = ps2x::native::Material::Blend::Opaque;
+                if (g_live.noAtest)
+                    material.alphaTest = false;
+                if (g_live.noTex)
+                    material.textured = false;
+                if (g_live.flat)
+                {
+                    material.textured = false;
+                    material.blend = ps2x::native::Material::Blend::Opaque;
+                    std::vector<ps2x::native::Vertex> tinted(*vertices);
+                    const uint32_t h = drawn.object * 2654435761u;
+                    const uint32_t colour = 0x80000000u | ((h >> 8) & 0x7f7f7fu) | 0x202020u;
+                    for (ps2x::native::Vertex &v : tinted)
+                        v.rgba = colour;
+                    renderer.draw(material, drawn.screenSpace ? kScreenSpace : drawn.matrix, tinted.data(), static_cast<uint32_t>(tinted.size()), nullptr);
+                    continue;
+                }
+                if (g_live.dumping)
+                {
+                    uint32_t aMin = 255u, aMax = 0u;
+                    for (const ps2x::native::Vertex &v : batch.vertices)
+                        aMin = std::min(aMin, v.rgba >> 24), aMax = std::max(aMax, v.rgba >> 24);
+                    // Its triangles through the matrix: all in front (w > 0), some corner behind, all behind; the
+                    // screen box and GS Z range of the corners in front.
+                    const float *m = drawn.screenSpace ? kScreenSpace : drawn.matrix;
+                    uint32_t front = 0, mixed = 0, behind = 0;
+                    float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f, z0 = 1e30f, z1 = -1e30f, w0 = 1e30f, w1 = -1e30f;
+                    for (size_t t = 0; t + 2u < batch.vertices.size(); t += 3u)
+                    {
+                        int in = 0;
+                        for (size_t k = 0; k < 3u; ++k)
+                        {
+                            const ps2x::native::Vertex &v = batch.vertices[t + k];
+                            const float w = m[3] * v.x + m[7] * v.y + m[11] * v.z + m[15];
+                            w0 = std::min(w0, w), w1 = std::max(w1, w);
+                            if (w > 0.0f)
+                            {
+                                ++in;
+                                const float x = (m[0] * v.x + m[4] * v.y + m[8] * v.z + m[12]) / w, y = (m[1] * v.x + m[5] * v.y + m[9] * v.z + m[13]) / w,
+                                            z = (m[2] * v.x + m[6] * v.y + m[10] * v.z + m[14]) / w;
+                                x0 = std::min(x0, x), x1 = std::max(x1, x), y0 = std::min(y0, y), y1 = std::max(y1, y), z0 = std::min(z0, z), z1 = std::max(z1, z);
+                            }
+                        }
+                        (in == 3 ? front : in == 0 ? behind : mixed) += 1u;
+                    }
+                    std::fprintf(stderr, "[tmb:dump]   tris front %u mixed %u behind %u; w %.3g..%.3g; x %.0f..%.0f y %.0f..%.0f z %.4g..%.4g\n", front, mixed, behind,
+                                 w0, w1, x0, x1, y0, y1, z0, z1);
+                    std::fprintf(stderr, "[tmb:dump] obj %#x file %u off %#x: %zu verts blend %d alpha %#llx test %#llx atest %d ref %u zw %d tex %d found %d tex0 %#llx vA %u-%u fog %d\n",
+                                 drawn.object, drawn.file, drawn.offset, batch.vertices.size(), static_cast<int>(material.blend),
+                                 static_cast<unsigned long long>(g_gs.alpha), static_cast<unsigned long long>(g_gs.test), material.alphaTest,
+                                 material.alphaRef, material.depthWrite, batch.textured, batch.texture != nullptr,
+                                 static_cast<unsigned long long>(batch.tex0), aMin, aMax, batch.fogged);
+                }
+                renderer.draw(material, drawn.screenSpace ? kScreenSpace : drawn.matrix, vertices->data(),
+                              static_cast<uint32_t>(vertices->size()), material.textured ? batch.texture : nullptr);
             }
         }
 
@@ -997,7 +1177,7 @@ namespace tmb::meshes
                         outV.u = static_cast<float>(st[0]) / 4096.0f + uOffset;
                         outV.v = static_cast<float>(st[1]) / 4096.0f + vOffset;
                         const float w = m[3] * pos[0] + m[7] * pos[1] + m[11] * pos[2] + m[15];
-                        outV.fog = w > 0.0f ? tmb::vu1::fogFactor(g_vu, 1.0f / w) : 0.0f;
+                        outV.fog = tmb::vu1::fogAt(g_vu, w);
                         strip.push_back(outV);
                     }
                     const size_t from = batch->vertices.size();
@@ -1038,7 +1218,7 @@ namespace tmb::meshes
                     outV.u = static_cast<float>(st[0]) / 4096.0f + uOffset;
                     outV.v = static_cast<float>(st[1]) / 4096.0f + vOffset;
                     const float w = m[3] * pos[0] + m[7] * pos[1] + m[11] * pos[2] + m[15];
-                    outV.fog = w > 0.0f ? tmb::vu1::fogFactor(g_vu, 1.0f / w) : 0.0f;
+                    outV.fog = tmb::vu1::fogAt(g_vu, w);
                     strip.push_back(outV);
                 }
                 if (s_check)
@@ -1485,12 +1665,23 @@ namespace tmb::meshes
             drawn.offset = offset;
             // The setup's matrix: this object's, or (a resume) the one before it, which 0xc78 keeps (it runs 0x1700's
             // setup again, which makes it anew).
-            float screen[16];
+            float screen[16], clip[16];
             if (resume && drawPc != 0x1700u)
+            {
                 std::memcpy(screen, previous.screen, sizeof(screen));
+                std::memcpy(clip, previous.clip, sizeof(clip));
+            }
             else
+            {
                 tmb::vu1::objectToScreen(g_vu, screen, false);
+                for (int j = 0; j < 4; ++j)
+                    for (int k = 0; k < 4; ++k)
+                        clip[j * 4 + k] = g_vu.f(13, k) * g_vu.f(j, 0) + g_vu.f(14, k) * g_vu.f(j, 1) + g_vu.f(15, k) * g_vu.f(j, 2) +
+                                          g_vu.f(16, k) * g_vu.f(j, 3);
+            }
             buildStrips(ee, obj, fileBase, *it, drawPc, drawn, screen, it->kind == 4u ? bones : 0u);
+            std::memcpy(drawn.clip, clip, sizeof(clip));
+            drawn.hasClip = !drawn.screenSpace && it->kind != 4u; // (the skinned programs: not modelled)
             g_stats.skid += skid ? 1u : 0u;
             if (opaque)
             {
@@ -1500,6 +1691,7 @@ namespace tmb::meshes
                 g_previous.poolFrom = it->kind == 1u ? it->poolFrom : offset;
                 g_previous.pc = drawPc;
                 std::memcpy(g_previous.screen, screen, sizeof(screen));
+                std::memcpy(g_previous.clip, clip, sizeof(clip));
                 std::memcpy(g_previous.pointLights, &g_vu.words[165u * 4u], sizeof(g_previous.pointLights));
             }
             const uint64_t hash = (static_cast<uint64_t>(fileIndex) << 32 | offset) * 0x9e3779b97f4a7c15ull;
@@ -1609,6 +1801,8 @@ namespace tmb::meshes
                 return;
             }
             tmb::native::applyViewClip();
+            if (g_live.noClip)
+                ps2x::native::Renderer::instance().clearClip();
             g_submitIndex = 0;
             const int which = g_inHier2pFlush ? 1 : 0; // hier__Fi's, hier2p's
             ++g_kicks[which];
@@ -1805,6 +1999,9 @@ namespace tmb::meshes
         if (!active())
             return;
         ++g_frame;
+        g_live.dumping = false;
+        if (g_frame % 60u == 0u)
+            readLiveToggles();
         g_keysThisFrame.clear();
         if (checking() && tmb::native::vifObserved())
             compareOrders();

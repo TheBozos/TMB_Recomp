@@ -42,6 +42,14 @@ namespace tmb::vu1
         return std::min(std::max(vu.f(4, 3) + vu.f(21, 0) + vu.f(21, 3) * q, 0.0f), vu.f(21, 1)) / 255.0f;
     }
 
+    // A vertex's fog at its w. Behind the camera (w <= 0, a corner of a triangle that reaches past it: the ground under a
+    // car seen from above, which the microprograms never draw) the fog it tends to as w goes to 0 from in front (q very
+    // large): not fully fogged, which the triangle's visible part would fade toward, angle by angle.
+    inline float fogAt(const VuImage &vu, float w)
+    {
+        return fogFactor(vu, w > 0.0f ? 1.0f / w : 1.0e30f);
+    }
+
     inline uint32_t clampByte(float v)
     {
         if (!(v > 0.0f))
@@ -333,7 +341,7 @@ namespace tmb::vu1
             c[k] = std::min(value * vu.f(5, k) + vu.f(20, k), 255.0f);
         }
         out.rgba = clampByte(c[0]) | (clampByte(c[1]) << 8) | (clampByte(c[2]) << 16) | (clampByte(c[3]) << 24);
-        out.fog = w > 0.0f ? std::min(std::max(vu.f(4, 3) + vu.f(21, 2) + vu.f(21, 3) / w, 0.0f), vu.f(21, 1)) / 255.0f : 0.0f;
+        out.fog = std::min(std::max(vu.f(4, 3) + vu.f(21, 2) + vu.f(21, 3) * (w > 0.0f ? 1.0f / w : 1.0e30f), 0.0f), vu.f(21, 1)) / 255.0f; // (behind the camera: fogAt)
     }
 
     // The rigid strip setups' object-to-screen matrix (the setup's subroutine at 0x1c08: vf1-4): camera (VU 9-12) x

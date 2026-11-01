@@ -33,6 +33,10 @@ namespace tmb::meshes
         uint32_t setupPc = 0;
         uint32_t resumes = 0; // a resume (setupPc 0xc78): the setup it goes on with, which the stream's must be
         float matrix[16] = {}; // object to GS screen (columns), the z row times the depth factor
+        // The microprograms' clip volume (VU 13-16 x VU 0-3, the CLIP their strips test each vertex with): a triangle
+        // with a corner outside it (|x|, |y| or |z| past |w|) is not drawn. hasClip: the world's strips.
+        float clip[16] = {};
+        bool hasClip = false;
         bool screenSpace = false; // sprites and ribbons: their vertices in screen space (matrix: the setup's, unscaled)
         uint64_t key = 0;      // Renderer::setKey
         std::vector<Batch> batches;

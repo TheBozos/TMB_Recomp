@@ -226,7 +226,9 @@ key positions):
 | Variable | Effect |
 |---|---|
 | `TMB_NATIVE=1` | The native port: the native renderer, the GS native back end at 2x, the recompiled IOP modules, the SPU2 and IOP on the PC's clock (`scripts/run_native.sh` sets it; each part has its own switch below) |
-| `TMB_GS_HEADLESS=0` | The GS front end still draws its (unseen) frame from the game's packets; by default, with the native frame, it only raises the events the game waits on (SIGNAL, FINISH, LABEL) |
+| `TMB_GS_HEADLESS=0` | The GS front end still draws its (unseen) frame from the game's packets; by default, with the native frame, it draws nothing |
+| `TMB_GS_PACKETS=1` | The fork reads the game's VIF1 and GIF DMA chains again (its VIF1 interpreter, the GIF tags, the headless GS front end looking for SIGNAL / FINISH / LABEL), for an A/B. By default a DMA kick to VIF1 or the GIF completes unread (`ps2x::native::setGsDmaSkipped`): no DMA tag, VIFcode or GIF tag is read, the libgraph image transfers and drawing environment send nothing, and the channel's end (STR, D_STAT, its DMAC handlers) comes at the kick |
+| `TMB_TRACE_PACKETS=1` | Every 250 frames, `[tmb:packets]`: what the fork read of the GS and VIF1 packets (GIF packets, SIGNAL / FINISH / LABEL, VIF1 interpreter runs, DMA chains walked) and the DMA kicks per channel; logged without it whenever something was read |
 | `TMB_NATIVE_VIF=1` | Reads the VIF1 stream again (the old adapter) to place the hier objects at their marks; with `TMB_NATIVE_MESHES_CHECK=1` the objects stay in the game's order from its hooks and `[tmb:order]` compares the two. By default nothing reads the VIF1 stream and VU1 runs no program |
 | `TMB_NATIVE_FRAME=0` | The native draws go into the GS front end's frame, which presents it, instead of the native renderer presenting its own frame |
 | `TMB_NATIVE_MESHES=0` | The rigid 3D objects back on the VIF stream's translation instead of the mesh pack (`TMB_NATIVE_MESHES_CHECK=1`: compare the two) |

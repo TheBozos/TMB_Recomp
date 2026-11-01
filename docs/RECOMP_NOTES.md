@@ -1031,3 +1031,39 @@ from EE memory), then the strips' register blocks; objects not drawn still count
 `TMB_NATIVE_MESHES_CHECK=1` too the draws stay in the game's order and `[tmb:order]` compares: Junkyard 1P 1.66 M
 objects, CITY 1P 1.53 M, 4P 0.41 M: 0 out of the stream's order, 0 materials differing, the skid marks' geometry equal
 to the stream's. By default no VIF1 observer is registered and the VU1 gate skips every program.
+
+## 2026-11-01: no GIF or VIF1 packet read at runtime
+
+What the game waits on, counted per 250 frames in a whole run (boot movies, menus, 1P Junkyard with the missile
+camera's split, CITY, 4P, story movies, memory card screens; `TMB_TRACE_PACKETS=1`) and traced by pc (every guest
+access to the DMAC, VIF, GIF and GS registers):
+- SIGNAL, FINISH, LABEL: none, ever. TMB puts none in its packets and registers no GS interrupt handler (initAll adds
+  INTC 2, the vblank, and the DMAC handlers for VIF1 (hierDmaHandler), the GIF (handler_endimage) and fromIPU (the
+  movies' colour conversion)). GS CSR is read only for FIELD (vblankHandler, blitLastMovieFrame); nothing polls FINISH or
+  the FIFO bits, so the headless front end's draw-time estimate (`m_drawEstimate`, `gsEventDelay`, `g_gsBusyUntil`) paced
+  nothing in TMB.
+- The game never reads D1 / D2 CHCR, MADR, TADR, D_STAT, VIF1_STAT, VIF1_MARK or GIF_STAT: it only writes the kicks
+  (hier__Fi's chain, hierTraverseAsm's per view, hierFlushObjQ from hierDmaHandler, uiMain's GIF chain, fogUpdate's,
+  hier2p's), D_STAT acknowledges and D_PCR. hierCheckVifComplete and hierTraverseAsm test the DMA condition with
+  BC0T / BC0F, which the recompiler makes constant (VIF1 always complete). sceGsSyncPath (fork HLE) reads the channels'
+  STR. What does depend on the end of a transfer is the DMAC handlers: hierDmaHandler kicks the queued chain
+  (hierFlushObjQ) and handler_endimage's work is done at the vblank already (runtime/tmb_2d.cpp).
+
+So the fork's DMA controller no longer reads them (`ps2x::native::setGsDmaSkipped`, set with `setGsHeadless` unless
+`TMB_NATIVE_VIF=1` or `TMB_GS_PACKETS=1`): a kick to VIF1 or the GIF ends at once, unread: QWC 0, STR cleared, D_STAT's
+channel bit, the channel's handlers dispatched after the store as before. No DMA tag followed, no VIFcode, GIF tag or
+image read, no PATH3, nothing for the VIF1 worker; the libgraph HLE sends nothing (sceGsPutDrawEnv, sceGsExecLoadImage;
+sceGsExecStoreImage leaves zeros, which the lens flares outside a match now get: far, the flare shows, the samples'
+start value). The kicks per frame are the same in both modes (a match: about 250 to VIF1 from hierTraverseAsm).
+`[tmb:packets]` (the fork's `ps2x::native::packetStats`) shows it: in every run above GIF packets 0, event scans 0,
+VIF1 interpreter 0, VIF1 / GIF chains walked 0, PATH3 0, libgraph packets 0, every VIF1 and GIF kick unread.
+
+Still interpreted: VIF0, one chain a frame from hier__Fi (VU0 microcode, MPG, for the VU0 programs, and their data):
+VU0's, not the GS's; the VU0 programs not translated (runtime/tmb_vu0.cpp) run on VU0's interpreter from that code.
+
+Frame timing (`TMB_TRACE_FRAMES=1`, not under the bench lock, CITY 1P, one run each alone): frame wall time 14.3 ms
+(14.0 with `TMB_GS_PACKETS=1`), game thread 7.5 ms CPU per frame (10.2), every host thread 13.2 ms (19.9: no VIF1
+worker). 4P beside the main build: game thread 8.7 ms (9.9), all threads 13.9 ms (19.0).
+
+Found while checking, on the main build too (not from this change): after quitting a match back to the shell's menus,
+the menus show grey and white rectangles over their pictures (the car select's panels, the game-mode menu).

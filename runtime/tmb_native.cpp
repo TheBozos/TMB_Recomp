@@ -15,7 +15,8 @@
 //
 // Since the game's own order is known at its hooks (runtime/tmb_meshes.cpp, runtime/tmb_particles.cpp), the stream
 // reading above only runs with TMB_NATIVE_VIF=1 (a comparison mode): by default no VIF1 observer is registered, the
-// VU1 gate skips every program (skipEveryProgram) and the DIRECT packets go to the headless GS front end.
+// VU1 gate skips every program (skipEveryProgram), and the fork completes the DMA kicks to VIF1 and the GIF without
+// reading them (ps2x::native::setGsDmaSkipped; TMB_GS_PACKETS=1: read, their DIRECT packets to the headless GS front end).
 
 #include "ps2_runtime.h"
 #include "runtime/native/native_renderer.h"
@@ -3181,7 +3182,14 @@ namespace tmb::native
             ps2x::native::Renderer::instance().setPresentsAlone(ownFrame);
             // Presenting alone, the GS front end draws nothing (TMB_GS_HEADLESS=0: it still draws its unseen frame).
             const char *headless = std::getenv("TMB_GS_HEADLESS");
-            ps2x::native::setGsHeadless(ownFrame && !(headless && *headless == '0'));
+            const bool gsHeadless = ownFrame && !(headless && *headless == '0');
+            ps2x::native::setGsHeadless(gsHeadless);
+            // Headless and nothing read from the VIF1 stream, the DMA kicks to VIF1 and the GIF complete unread: no
+            // DMA chain followed, no VIFcode or GIF tag interpreted, no image transfer, no SIGNAL / FINISH / LABEL (TMB
+            // waits on none: its DMAC handlers, hierDmaHandler and the movie's, run at the kick's end).
+            // TMB_GS_PACKETS=1: the fork reads them as before (the headless GS front end raising their events).
+            const char *packets = std::getenv("TMB_GS_PACKETS");
+            ps2x::native::setGsDmaSkipped(gsHeadless && !vifObserved() && !(packets && *packets == '1'));
         }
     }
 
@@ -3194,6 +3202,40 @@ namespace tmb::native
             uint32_t background;
             std::memcpy(&background, g_rdram + kBgColour, 4);
             return gameFogColour(background & 0xffffffu);
+        }
+
+        // [tmb:packets] per 250 frames: what the fork read of the GS / VIF packets (ps2x::native::packetStats) and the DMA
+        // kicks per channel (those completed unread in brackets). Logged when a GS or VIF1 packet was read (none by
+        // default: the kicks to VIF1 and the GIF complete unread), or always with TMB_TRACE_PACKETS=1. VIF0 is still
+        // interpreted (hier__Fi's chain each frame: VU0 microcode, MPG, for the VU0 programs; not GS data).
+        void logPacketStats()
+        {
+            static const bool s_always = []
+            {
+                const char *value = std::getenv("TMB_TRACE_PACKETS");
+                return value && *value == '1';
+            }();
+            ps2x::native::PacketStats &stats = ps2x::native::packetStats();
+            const auto take = [](std::atomic<uint64_t> &counter) { return static_cast<unsigned long long>(counter.exchange(0, std::memory_order_relaxed)); };
+            const unsigned long long gif = take(stats.gifPackets), gifBytes = take(stats.gifBytes), scans = take(stats.eventScans),
+                                     signals = take(stats.signals), finishes = take(stats.finishes), labels = take(stats.labels),
+                                     vif1 = take(stats.vif1Runs), vif1Bytes = take(stats.vif1Bytes), vif0 = take(stats.vif0Runs),
+                                     walks = take(stats.chainWalks), path3 = take(stats.path3), host = take(stats.hostGif),
+                                     irqs = take(stats.gsIrqs);
+            unsigned long long kicks[10], unread[10];
+            for (uint32_t i = 0; i < 10u; ++i)
+            {
+                kicks[i] = take(stats.kicks[i]);
+                unread[i] = take(stats.unread[i]);
+            }
+            if (!s_always && gif + scans + vif1 + walks + path3 + host + irqs == 0u)
+                return;
+            std::string channels;
+            for (uint32_t i = 0; i < 10u; ++i)
+                if (kicks[i] != 0u)
+                    channels += " ch" + std::to_string(i) + " " + std::to_string(kicks[i]) + " (" + std::to_string(unread[i]) + ")";
+            std::fprintf(stderr, "[tmb:packets] per 250 frames: GIF packets %llu (%llu B), event scans %llu (SIGNAL %llu, FINISH %llu, LABEL %llu; GS interrupts %llu), VIF1 interpreter %llu runs (%llu B), VIF1 / GIF DMA chains walked %llu, VIF0 (VU0) %llu, PATH3 %llu, libgraph HLE packets %llu; DMA kicks (unread):%s\n",
+                         gif, gifBytes, scans, signals, finishes, labels, irqs, vif1, vif1Bytes, walks, vif0, path3, host, channels.c_str());
         }
 
         // Publishes what was submitted and starts the next frame.
@@ -3212,6 +3254,8 @@ namespace tmb::native
                              s.matrix[12], s.matrix[13], s.matrix[14], s.matrix[15]);
                 g_stats = Stats{};
             }
+            if (s_frames % 250u == 0u)
+                logPacketStats();
             tmb::meshes::flushUnsent(); // a view whose chain hier__Fi did not kick itself (the menus): its objects now
             tmb::twod::publish(); // the 2D the game's rewritten builders drew (runtime/tmb_2d.cpp), on this frame's screen
             renderer.endFrame();

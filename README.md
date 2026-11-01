@@ -33,8 +33,9 @@ You build the game yourself, on your PC, from **your own disc**: nothing of the 
 1. Download the release zip from the [Releases](https://github.com/boubou666/TMB_Recomp/releases) page. Each release
    publishes the zip's SHA-256: check it before running anything
    (`Get-FileHash .\TMB_Recomp-<version>.zip` in PowerShell, or `certutil -hashfile <zip> SHA256`).
-2. Unzip it anywhere with about 10 GB free (for example `D:\Games\TMB_Recomp`). Keep its folders together:
-   `TMB Launcher.exe`, `source\` (our code) and `kit\` (the compiler and tools that build the game).
+2. Unzip it anywhere with about 10 GB free (for example `D:\Games\TMB_Recomp`), but not in `Program Files` (the
+   launcher writes the game next to itself). Keep its folders together: `TMB Launcher.exe`, `source\` (our code),
+   `kit\` (the compiler and tools that build the game), `README.txt` (these steps, English and French), `LICENSES\`.
 3. Double-click **TMB Launcher.exe**. The launcher is not signed, so Windows may say *"Windows protected your PC"*:
    click **More info**, then **Run anyway**.
 4. Click **Select your disc image…** and pick your image of the USA disc (`SCUS-97101`): a `.iso`, or a `.bin` with
@@ -44,8 +45,11 @@ You build the game yourself, on your PC, from **your own disc**: nothing of the 
 6. Click **Play**. In the game, **F2** opens the settings (controls, video, cheats). Your memory cards, settings and
    logs are in `%APPDATA%\TMB_Recomp` (the launcher's Maintenance tab opens it).
 
-After an update, unzip the new release over the old one and click **Rebuild** in the Maintenance tab: only what
-changed is built again. Linux players build with `tools/tmb_build.py` (below).
+The launcher says when a newer release is out (it asks GitHub for the latest version number at start; Settings
+turns that off; nothing is downloaded by itself). After an update, unzip the new release over the old one: the
+launcher sees the code changed since the game was built and offers **Rebuild** (also in the Maintenance tab); only what
+changed is built again and the saves stay. To uninstall, delete the folder (and `%APPDATA%\TMB_Recomp` for the saves
+and settings). Linux players build with `tools/tmb_build.py` (below).
 
 ## Status
 
@@ -248,7 +252,8 @@ kit\python\python.exe -I TMB_Recomp\tools\tmb_build.py --disc "D:\Games\Twisted 
 - Size: 468 MB unpacked, 142 MB as a zip; assembled in about 2.5 minutes. From an empty folder with the kit and a
   PATH of only the Windows folders: 4 minutes to the game folder (compile 3.4), no recompiler build, no downloads.
 - The kit is build output, never committed. GCC, binutils and the other MSYS2 binaries are redistributed unmodified:
-  a public kit must also ship or offer their sources (MSYS2's source packages of the versions in the manifest).
+  a release ships their sources alongside (`make_release.py --with-sources`: MSYS2's source packages of the versions
+  in the manifest) and lists them in `LICENSES\SOURCES.txt`.
 
 ### The launcher (Windows)
 
@@ -258,7 +263,7 @@ rlImGui at the fork's tags, linked static: a 4 MB GUI exe that loads only Window
 ```bat
 cmake -S launcher -B build\launcher -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build\launcher
-rem offline, with the kit: -DFETCHCONTENT_SOURCE_DIR_RAYLIB=<kit>\depsaylib-src (IMGUI, RLIMGUI likewise)
+rem offline, with the kit: -DFETCHCONTENT_SOURCE_DIR_RAYLIB=<kit>\deps\raylib-src (IMGUI, RLIMGUI likewise)
 rem                        -DLAUNCHER_FONT_DIR=<folder with Exo2[wght].ttf and OFL.txt>
 ```
 
@@ -276,9 +281,41 @@ rem                        -DLAUNCHER_FONT_DIR=<folder with Exo2[wght].ttf and O
 - The look is the team's, from RecompWatcher: the PS2 BIOS's radial blue, glowing boot towers (motion can be turned
   off), glass cards, Exo 2 (SIL OFL 1.1, google/fonts at a pinned commit, embedded with its licence; downloaded at
   configure time, never committed). The icon is drawn at build time by `launcher/tools/make_icon.cpp`. No game art.
+- Updates: at start (Settings: "Check for updates at start") and from Maintenance's "Check for updates", one HTTPS
+  GET of `api.github.com/repos/boubou666/TMB_Recomp/releases/latest` through WinHTTP; a newer `tag_name` shows
+  "Version X is available" with a link to its release page (built from the tag). Offline or no release: silent. When
+  `source\release.ini`'s commit differs from the one in `game\built_from.ini` (written by tmb_build), the Play tab
+  offers "Rebuild now".
 - `--selftest <iso> --shots <dir> [--wrong <image>] [--error-demo] [--cancel] [--play-seconds s] [--crash-seconds s]`:
   the whole flow unattended, a screenshot of each screen and `selftest.log` (with `PS2X_USER_DIR` set, the real user
-  folder is untouched).
+  folder is untouched). `--screens`: the tabs' screenshots only; `--ui-scale <x>`: another DPI scale; `--update-url
+  <url>`: the update check asks another address (a test server).
+
+### The release (maintainers)
+
+`tools/make_release.py` makes the player's download from a commit (committed files only; standard library, the kit's
+Python runs it too):
+
+```bat
+python tools\make_release.py --version 0.1.0 --kit D:\tmb_kit\kit --out D:\tmb_release --with-sources
+python tools\make_release.py --out D:\tmb_release --kit D:\tmb_kit\kit --with-sources --publish --dry-run
+```
+
+| Output (in `--out`) | Contents |
+|---|---|
+| `TMB_Recomp-<version>.zip` | `TMB_Recomp-<version>\`: `TMB Launcher.exe` (built with the kit, the version and commit in it), `source\` (`git archive` of the commit and of PS2Recomp at its recorded commit, `release.ini`), `kit\`, `README.txt` (players, English and French), `LICENSES\` (every component's licence, `SOURCES.txt`) |
+| `<zip>.sha256` | `sha256sum` format; the release page quotes it |
+| `TMB_Recomp-<version>-sources.zip` | `--with-sources`: the MSYS2 source packages of every package the kit holds files of (repo.msys2.org only) and FFmpeg's tarball: the GPL / LGPL corresponding source, attached to the same release |
+| `RELEASE_NOTES.md` | a stub (hashes, sizes, versions, the source offer) to finish before publishing |
+
+- The version is the commit's tag (`v0.1.0` → `0.1.0`) or `--version`; `x.y.z-pre` makes a pre-release.
+- Nothing of the game: the export and the release folder are audited (no ELF, IRX, ISO volume, disc file names,
+  `generated/` / `game/` / `disc/` / `build/` folders) and the zip's names again; the script stops on any.
+- The kit's prebuilt recompilers must be the fork's at the commit (`kit_manifest.json` `tools.fork_commit`): when they
+  are not, the release's copy of the kit gets them rebuilt (the original kit stays as it is).
+- `--publish` creates a **draft** GitHub release with `gh` (the zips, their `.sha256`, the notes); `--dry-run` prints
+  the command. It never pushes: the commit has to be on GitHub first, and the owner publishes the draft.
+- Before each release: `docs/RELEASE_CHECKLIST.md` on a clean Windows.
 
 ### Step by step (development)
 

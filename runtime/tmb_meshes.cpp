@@ -1,6 +1,9 @@
-// TMB's rigid 3D objects drawn natively from the mesh pack (tools/tmb_mesh_pack.py: the disc's NGP files converted
-// offline, generated_us/tmb_meshes.pack) and the EE state the game computes per object, at its per-object hook: no VIF
-// or GIF packet is read for them. TMB_NATIVE_MESHES=1 (with TMB_NATIVE=1) turns it on; default off.
+// TMB's 3D objects drawn natively from the mesh pack (tools/tmb_mesh_pack.py: the disc's NGP files converted offline,
+// generated_us/tmb_meshes.pack) and the EE state the game computes per object, at its per-object hook: no VIF or GIF
+// packet is read for them. TMB_NATIVE_MESHES=1 (with TMB_NATIVE=1) turns it on; default off. The kinds: rigid strips
+// (setups 0xcc8, 0xd08, 0xce8, 0x1700), pool-less objects (the resume, 0xc78: the setup and pool of the object before
+// them go on), sprites (0x3000), ribbons (0x3270), environment-mapped strips (0x1db8) and skinned meshes (0x70, 0x90,
+// 0xb0: their bones' matrices where skeletonTraverse wrote them, (*(inst + 0x14))[obj + 0x68]).
 //
 // - Which NGP file an object is in: fileOnlyNgpFile / fileAddNgpFile (address, size) after fileReadf / zipInflateAll
 //   read a file there (its name, tmb::textures::nameAt); the pack's file of that name, its size and CRC checked
@@ -23,8 +26,12 @@
 // The draws wait for the object's place in the frame: the hook marks the header's last qword (its VIF NOP, which
 // carries no data: the mark sits in the NOP's unused immediate) and the adapter (runtime/tmb_native.cpp), as it
 // reaches that object's setup in the stream it already follows for the other draws, submits these instead of its
-// own translation, in the same group of the GS stream. Sprites, ribbons, skinned, environment-mapped and morphing
-// objects and the 2P resume stay on the adapter's path.
+// own translation, in the same group of the GS stream. Left to the adapter's path: the morphing objects (flag 42:
+// 0xd28 / 0xd48 / 0xd68, three in the game, which the adapter does not translate either), resumes after an alpha
+// object or after a setup other than the rigid strips', and hierObjectNode's C path (pktAddVu1Obj).
+//
+// TMB_NATIVE_MESHES_CHECK=1: the adapter compares each object's VU 0-21 and matrix as built here with the stream's,
+// and its strips (rigid: their vertices; the others: their triangles) with its own translation.
 
 #include "game_overrides.h"
 #include "ps2_runtime.h"
@@ -110,6 +117,7 @@ namespace tmb::meshes
             uint64_t flags = 0;
             uint16_t ntex = 0;
             uint16_t textures[5] = {};
+            uint32_t poolFrom = 0xffffffffu; // pool-less: the object whose pool it uses
             const uint8_t *body = nullptr; // its positions' count
         };
         struct PackFile
@@ -153,9 +161,9 @@ namespace tmb::meshes
             in.seekg(0);
             in.read(reinterpret_cast<char *>(s_pack.blob.data()), static_cast<std::streamsize>(s_pack.blob.size()));
             const uint8_t *p = s_pack.blob.data(), *end = p + s_pack.blob.size();
-            if (s_pack.blob.size() < 12u || std::memcmp(p, "TMBMESH2", 8) != 0)
+            if (s_pack.blob.size() < 12u || std::memcmp(p, "TMBMESH3", 8) != 0)
             {
-                std::fprintf(stderr, "[tmb:mesh] %s: not a mesh pack\n", path);
+                std::fprintf(stderr, "[tmb:mesh] %s: not a mesh pack (TMBMESH3: tools/tmb_mesh_pack.py)\n", path);
                 s_pack.blob.clear();
                 return s_pack;
             }
@@ -181,7 +189,7 @@ namespace tmb::meshes
                     o.ntex = rd<uint16_t>(p);
                     for (uint16_t &t : o.textures)
                         t = rd<uint16_t>(p);
-                    rd<uint32_t>(p); // pool object
+                    o.poolFrom = rd<uint32_t>(p);
                     o.body = p;
                     const uint32_t positions = rd<uint32_t>(p), aux = rd<uint32_t>(p);
                     p += static_cast<size_t>(positions) * 16u * (aux ? 2u : 1u);
@@ -189,6 +197,8 @@ namespace tmb::meshes
                     p += static_cast<size_t>(sources) * 12u;
                     const uint32_t params = rd<uint32_t>(p);
                     p += static_cast<size_t>(params) * 20u;
+                    const uint32_t skin = rd<uint32_t>(p);
+                    p += static_cast<size_t>(skin) * 20u;
                     const uint32_t strips = rd<uint32_t>(p);
                     for (uint32_t s = 0; s < strips; ++s)
                     {
@@ -323,15 +333,29 @@ namespace tmb::meshes
         float g_lastMatrix[4][4] = {};
         float g_lastLights[3][4] = {};
 
+        // The opaque object sent last (the chain's order), when this path drew it: what the resume (MSCAL 0xc78, the
+        // pool-less objects after it) goes on with, its setup, its object-to-screen matrix (vf1-4, before the depth
+        // factor) and the point lights VU1 then holds.
+        struct Previous
+        {
+            bool valid = false;
+            uint32_t file = 0, offset = 0, poolFrom = 0, pc = 0;
+            float screen[16] = {};
+            uint32_t pointLights[11][4] = {};
+        } g_previous;
+
         std::unordered_map<uint32_t, Drawn> g_drawn; // mark -> the object's draws
         uint32_t g_nextMark = 1;
         uint32_t g_frame = 0;
         std::unordered_map<uint64_t, uint32_t> g_keysThisFrame;
+        const uint8_t *g_rdramForDump = nullptr; // TMB_NATIVE_MESHES_DUMP
+        uint32_t g_firstSkinned = 0;              // the frame of the first skinned object at the hook
 
         struct Stats
         {
             uint64_t calls = 0, cCalls = 0, drawn = 0, taken = 0, unclaimed = 0, noFile = 0, noObject = 0, kindOther = 0,
-                     program = 0, extra = 0, unmarked = 0, triangles = 0, idMismatch = 0;
+                     program = 0, extra = 0, unmarked = 0, triangles = 0, idMismatch = 0, resumed = 0, resumeOther = 0, sprites = 0, ribbons = 0,
+                     skinned = 0, reflective = 0;
         } g_stats;
 
         void vf(const R5900Context *ctx, int reg, float out[4]) { _mm_storeu_ps(out, ctx->vu0_vf[reg]); }
@@ -344,15 +368,19 @@ namespace tmb::meshes
 
         // The rigid setup pktAddVu1ObjAsm picks for these flags (its upper half, fp) and clip state (s6), or 0 for
         // the programs this path leaves to the stream (environment map, ribbon, sprite, morph, 2P resume).
-        uint32_t setupFor(uint32_t fp, uint32_t s6, bool pointLights)
+        uint32_t setupFor(uint32_t fp, uint32_t s6, bool pointLights, bool skinned)
         {
             if (fp & 0x1000u)
-                return 0; // bit 44: MSCAL 0xc78, the split screen's resume
+                return 0x0c78u; // bit 44: MSCAL 0xc78, the resume (the pool-less objects: the setup before them goes on)
+            if (skinned)
+                return (fp & 0x100u) ? 0x0070u : s6 == 1u ? 0x00b0u : 0x0090u; // directional, unlit (scaled), unlit
             if ((fp >> 1) & 7u)
-                return 0; // bits 33-35: 0x1db8, environment map
+                return 0x1db8u; // bits 33-35: environment map
             const uint32_t sprite = (fp >> 5) & 3u;
-            if (sprite == 1u || sprite == 2u)
-                return 0; // 0x3270 ribbon, 0x3000 sprite
+            if (sprite == 1u)
+                return 0x3270u; // ribbon
+            if (sprite == 2u)
+                return 0x3000u; // sprite
             if ((fp >> 10) & 1u)
                 return 0; // bit 42: 0xd48 / 0xd68 / 0xd28 (morph)
             if (pointLights)
@@ -363,12 +391,29 @@ namespace tmb::meshes
         }
 
         // The object's strips from the pack, shaded as the setup's strip program shades them.
-        void buildStrips(const Ee &ee, uint32_t obj, uint32_t fileBase, const PackObject &object, uint32_t pc, Drawn &out)
+        // screen: the setup's matrix before the depth factor when it is not this object's (a resume), else null.
+        // bones: a skinned object's bone matrices in EE memory (16 floats each), else 0.
+        void buildStrips(const Ee &ee, uint32_t obj, uint32_t fileBase, const PackObject &object, uint32_t pc, Drawn &out,
+                         const float *screen = nullptr, uint32_t bones = 0u)
         {
             const tmb::vu1::Shading mode = pc == 0x0ce8u ? tmb::vu1::Shading::Directional
                                          : pc == 0x1700u ? tmb::vu1::Shading::Point
                                                          : tmb::vu1::Shading::Unlit;
-            tmb::vu1::objectToScreen(g_vu, out.matrix, true);
+            // Sprites and ribbons: screen-space vertices, from the setup's matrix without the depth factor (their
+            // programs scale z themselves).
+            // The lit skinned strips (0x640) do not scale z either; the unlit ones (0x878, 0x9e8) do.
+            const bool sprite = pc == 0x3000u, ribbon = pc == 0x3270u;
+            out.screenSpace = sprite || ribbon;
+            const bool depthScaled = !out.screenSpace && pc != 0x0070u;
+            if (screen)
+            {
+                std::memcpy(out.matrix, screen, sizeof(out.matrix));
+                if (depthScaled)
+                    for (int j = 0; j < 4; ++j)
+                        out.matrix[j * 4 + 2] *= g_vu.f(4, 2);
+            }
+            else
+                tmb::vu1::objectToScreen(g_vu, out.matrix, depthScaled);
             const float *m = out.matrix;
             const uint8_t *p = object.body;
             const uint32_t positionCount = rd<uint32_t>(p), aux = rd<uint32_t>(p);
@@ -388,8 +433,38 @@ namespace tmb::meshes
                     std::memcpy(&s_positions[static_cast<size_t>(first + v) * 4u], from + v * 12u, 12);
             }
             const float *positions = s_positions.data();
+            // The parameter batches (environment map: the alpha terms of the strips after them).
             const uint32_t params = rd<uint32_t>(p);
+            const uint8_t *paramAt = p;
             p += static_cast<size_t>(params) * 20u;
+            const bool reflective = pc == 0x1db8u;
+            tmb::vu1::Reflection reflection;
+            // A skinned object's vertex pass: each position and its normal blended by its bones' matrices, as they are
+            // in EE memory now (the chain sends them from there).
+            const uint32_t skinCount = rd<uint32_t>(p);
+            static thread_local std::vector<float> s_skinNormals;
+            if (bones != 0u && skinCount == positionCount)
+            {
+                s_skinNormals.assign(static_cast<size_t>(positionCount) * 3u, 0.0f);
+                for (uint32_t i = 0; i < skinCount; ++i)
+                {
+                    const uint8_t *v = p + static_cast<size_t>(i) * 20u;
+                    const int count = std::min<int>(v[0], 3);
+                    int32_t raw[3];
+                    std::memcpy(raw, v + 8, 12);
+                    const float weight[3] = {count == 1 ? 1.0f : tmb::vu1::skinWeight(raw[0]), tmb::vu1::skinWeight(raw[1]), tmb::vu1::skinWeight(raw[2])};
+                    float matrix[3][16];
+                    const float *matrices[3] = {matrix[0], matrix[1], matrix[2]};
+                    for (int b = 0; b < 3; ++b)
+                        std::memcpy(matrix[b], ee.at(bones + 64u * v[4 + b]), 64);
+                    const float n[3] = {1.0f - static_cast<float>(v[1]) / 128.0f, 1.0f - static_cast<float>(v[2]) / 128.0f, 1.0f - static_cast<float>(v[3]) / 128.0f};
+                    float *pos = &s_positions[static_cast<size_t>(i) * 4u];
+                    const float bind[3] = {pos[0], pos[1], pos[2]};
+                    tmb::vu1::skinVertex(count, matrices, weight, bind, n, pos, &s_skinNormals[static_cast<size_t>(i) * 3u]);
+                }
+            }
+            p += static_cast<size_t>(skinCount) * 20u;
+            const bool skin = bones != 0u && skinCount == positionCount;
             const uint32_t strips = rd<uint32_t>(p);
             const float uOffset = g_vu.f(4, 0), vOffset = g_vu.f(4, 1);
             // The material as the strip program and the GS keep it: a strip's header brings a texture (its slot's
@@ -402,6 +477,17 @@ namespace tmb::meshes
             static const bool s_check = std::getenv("TMB_NATIVE_MESHES_CHECK") != nullptr;
             for (uint32_t si = 0; si < strips; ++si)
             {
+                for (uint32_t i = 0; i < params; ++i)
+                {
+                    uint32_t before;
+                    std::memcpy(&before, paramAt + 20u * i, 4);
+                    if (before == si)
+                    {
+                        float terms[4];
+                        std::memcpy(terms, paramAt + 20u * i + 4u, 16);
+                        reflection = tmb::vu1::reflection(terms + 1);
+                    }
+                }
                 const uint16_t prim = rd<uint16_t>(p);
                 rd<uint16_t>(p); // gif flags (PRE: TMB's strips all carry their PRIM)
                 rd<uint32_t>(p); // material header
@@ -457,6 +543,157 @@ namespace tmb::meshes
                         }
                     }
                 }
+                if (sprite || ribbon)
+                {
+                    // One sprite (one point, one colour, four corners' texture coordinates) or one ribbon segment (two
+                    // points, four colours and texture coordinates): the converter checked the shapes.
+                    std::vector<ps2x::native::Vertex> &triangles = batch->vertices;
+                    const size_t from = triangles.size();
+                    const auto vertexAt = [&](uint32_t v) { return vertices + v * 16u; };
+                    const auto pointOf = [&](uint32_t v, float out4[4])
+                    {
+                        uint16_t index;
+                        std::memcpy(&index, vertexAt(v), 2);
+                        if (index < positionCount)
+                            std::memcpy(out4, positions + static_cast<size_t>(index) * 4u, 16);
+                        else
+                            std::memset(out4, 0, 16);
+                    };
+                    if (sprite && vertexCount == 4u)
+                    {
+                        float point[4];
+                        pointOf(0u, point);
+                        const uint8_t *vx = vertexAt(0u);
+                        const uint32_t rgba[4] = {vx[6], vx[7], vx[8], vx[9]};
+                        int32_t st[4][2];
+                        for (uint32_t v = 0; v < 4u; ++v)
+                        {
+                            int16_t pair[2];
+                            std::memcpy(pair, vertexAt(v) + 10, 4);
+                            st[v][0] = pair[0];
+                            st[v][1] = pair[1];
+                        }
+                        ps2x::native::Vertex quad[4];
+                        static const int kOrder[6] = {0, 1, 2, 1, 2, 3};
+                        if (tmb::vu1::spriteQuad(g_vu, m, point, rgba, st, quad))
+                            for (int i : kOrder)
+                                triangles.push_back(quad[i]);
+                    }
+                    else if (ribbon && vertexCount == 4u)
+                    {
+                        // The strip as the program reads it from TOP: the tag (its NLOOP, the points), point j at 1 + 3j,
+                        // colour j at 2 + 3j, texture coordinates j at 3 + 3j (Z and W from the row hierSetVu1Regs sets,
+                        // 0x1000, by its mask 0x50505050).
+                        float points[2][4];
+                        pointOf(0u, points[0]);
+                        pointOf(2u, points[1]);
+                        const auto read = [&](uint32_t r, uint32_t words[4])
+                        {
+                            std::memset(words, 0, 16);
+                            if (r == 0u)
+                                words[0] = 2u;
+                            else if (r % 3u == 1u && (r - 1u) / 3u < 2u)
+                                std::memcpy(words, points[(r - 1u) / 3u], 16);
+                            else if (r % 3u == 2u && (r - 2u) / 3u < 4u)
+                            {
+                                const uint8_t *vx = vertexAt((r - 2u) / 3u);
+                                for (int k = 0; k < 4; ++k)
+                                    words[k] = vx[6 + k];
+                            }
+                            else if (r % 3u == 0u && (r - 3u) / 3u < 4u)
+                            {
+                                int16_t pair[2];
+                                std::memcpy(pair, vertexAt((r - 3u) / 3u) + 10, 4);
+                                words[0] = static_cast<uint32_t>(static_cast<int32_t>(pair[0]));
+                                words[1] = static_cast<uint32_t>(static_cast<int32_t>(pair[1]));
+                                words[2] = words[3] = 0x1000u;
+                            }
+                        };
+                        tmb::vu1::ribbonStrip<ps2x::native::Vertex>(g_vu, m, read, triangles);
+                    }
+                    if (s_check)
+                        out.checkStrips.emplace_back(triangles.begin() + static_cast<std::ptrdiff_t>(from), triangles.end());
+                    continue;
+                }
+                if (reflective)
+                {
+                    // An environment-mapped strip (0x1ec8, the water's 0x2248): texture coordinates from the reflected
+                    // eye vector, alpha by the view angle.
+                    strip.clear();
+                    for (uint32_t v = 0; v < vertexCount; ++v)
+                    {
+                        const uint8_t *vx = vertices + v * 16u;
+                        uint16_t index;
+                        std::memcpy(&index, vx, 2);
+                        ps2x::native::Vertex outV;
+                        if (index >= positionCount)
+                        {
+                            outV.rgba = 0xdeadu;
+                            strip.push_back(outV);
+                            continue;
+                        }
+                        const int32_t normal[3] = {vx[2], vx[3], vx[4]};
+                        const int32_t rgba[4] = {vx[6], vx[7], vx[8], vx[9]};
+                        tmb::vu1::reflectVertex(g_vu, m, reflection, positions + static_cast<size_t>(index) * 4u, normal, rgba, outV);
+                        strip.push_back(outV);
+                    }
+                    const size_t from = batch->vertices.size();
+                    for (size_t i = 2; i < strip.size(); ++i)
+                    {
+                        if (strip[i].rgba == 0xdeadu || strip[i - 1].rgba == 0xdeadu || strip[i - 2].rgba == 0xdeadu)
+                            continue;
+                        batch->vertices.push_back(strip[i - 2]);
+                        batch->vertices.push_back(strip[i - 1]);
+                        batch->vertices.push_back(strip[i]);
+                    }
+                    if (s_check)
+                        out.checkStrips.emplace_back(batch->vertices.begin() + static_cast<std::ptrdiff_t>(from), batch->vertices.end());
+                    continue;
+                }
+                if (skin)
+                {
+                    // A skinned strip (0x640, 0x878, 0x9e8): the blended positions, the colour lit by the blended normal
+                    // (0x70) or not, texture coordinates plus VU 4.
+                    strip.clear();
+                    for (uint32_t v = 0; v < vertexCount; ++v)
+                    {
+                        const uint8_t *vx = vertices + v * 16u;
+                        uint16_t index;
+                        std::memcpy(&index, vx, 2);
+                        ps2x::native::Vertex outV;
+                        if (index >= positionCount)
+                        {
+                            outV.rgba = 0xdeadu;
+                            strip.push_back(outV);
+                            continue;
+                        }
+                        const float *pos = positions + static_cast<size_t>(index) * 4u;
+                        outV.x = pos[0];
+                        outV.y = pos[1];
+                        outV.z = pos[2];
+                        const uint32_t rgba[4] = {vx[6], vx[7], vx[8], vx[9]};
+                        outV.rgba = tmb::vu1::skinShade(g_vu, pc == 0x0070u, &s_skinNormals[static_cast<size_t>(index) * 3u], rgba);
+                        int16_t st[2];
+                        std::memcpy(st, vx + 10, 4);
+                        outV.u = static_cast<float>(st[0]) / 4096.0f + uOffset;
+                        outV.v = static_cast<float>(st[1]) / 4096.0f + vOffset;
+                        const float w = m[3] * pos[0] + m[7] * pos[1] + m[11] * pos[2] + m[15];
+                        outV.fog = w > 0.0f ? tmb::vu1::fogFactor(g_vu, 1.0f / w) : 0.0f;
+                        strip.push_back(outV);
+                    }
+                    const size_t from = batch->vertices.size();
+                    for (size_t i = 2; i < strip.size(); ++i)
+                    {
+                        if (strip[i].rgba == 0xdeadu || strip[i - 1].rgba == 0xdeadu || strip[i - 2].rgba == 0xdeadu)
+                            continue;
+                        batch->vertices.push_back(strip[i - 2]);
+                        batch->vertices.push_back(strip[i - 1]);
+                        batch->vertices.push_back(strip[i]);
+                    }
+                    if (s_check)
+                        out.checkStrips.emplace_back(batch->vertices.begin() + static_cast<std::ptrdiff_t>(from), batch->vertices.end());
+                    continue;
+                }
                 strip.clear();
                 for (uint32_t v = 0; v < vertexCount; ++v)
                 {
@@ -509,8 +746,26 @@ namespace tmb::meshes
             if (!active())
                 return;
             ++g_stats.calls;
+            g_rdramForDump = rdram;
             const Ee ee{rdram, runtime->memory().getScratchpad()};
             const uint32_t fp = ee.u16(obj + 0xcu); // lh $fp, 0xC($s5): the flags' bits 32-47
+            // TMB_NATIVE_MESHES_DUMP: the objects of the kinds other than the rigid strips, once each (a skinned one with
+            // its per-instance chain and bones), for the offline comparison with the dump.
+            if (static const bool s_dumpLog = std::getenv("TMB_NATIVE_MESHES_DUMP") != nullptr; s_dumpLog)
+            {
+                static std::unordered_map<uint32_t, bool> s_seen;
+                if (!s_seen[obj] && (ee.u32(obj + 0x64u) != 0u || ((fp >> 5) & 3u) || ((fp >> 1) & 7u) || (fp & 0x1400u)))
+                {
+                    s_seen[obj] = true;
+                    const uint32_t index = ee.u32(obj + 0x68u);
+                    const bool skinned = ee.u32(obj + 0x64u) != 0u && inst != 0u;
+                    if (skinned && g_firstSkinned == 0u)
+                        g_firstSkinned = g_frame + 1u;
+                    std::fprintf(stderr, "[tmb:mesh] dump object %#x inst %#x flags %#x skeleton %#x spr38 %#x index %u chain %#x bones %#x\n", obj, inst, fp,
+                                 ee.u32(obj + 0x64u), ee.u32(spr + 0x38u), index, skinned ? ee.u32(ee.u32(inst + 0x18u) + 4u * index) : 0u,
+                                 skinned ? ee.u32(ee.u32(inst + 0x14u) + 4u * index) : 0u);
+                }
+            }
             const bool opaque = getRegU32(ctx, 31) == kOpaqueReturn;
 
             // VU 0-3: the object-to-camera matrix (hierMulEoForObjAsm: vf1-3 the rotation, vf6 the translation),
@@ -603,8 +858,27 @@ namespace tmb::meshes
 
             // What this path draws: a rigid object (no skeleton) of the pack, with one of the four strip setups and
             // no extra header qwords.
-            const uint32_t pc = setupFor(fp, s6, pointLights);
-            if (pc == 0u || ee.u32(obj + 0x64u) != 0u)
+            // A skinned object (a skeleton at obj+0x64, and its instance): its bones' matrices where skeletonTraverse
+            // wrote them, (*(inst + 0x14))[obj + 0x68] (the per-instance chain the header CALLs sends them to TOP).
+            const bool skinned = ee.u32(obj + 0x64u) != 0u;
+            const uint32_t boneLists = skinned && inst != 0u ? ee.u32(inst + 0x14u) : 0u;
+            const uint32_t bones = boneLists != 0u ? ee.u32(boneLists + 4u * ee.u32(obj + 0x68u)) : 0u;
+            const uint32_t pc = skinned && bones == 0u ? 0u : setupFor(fp, s6, pointLights, skinned);
+            // An opaque object this path does not draw: a resume after it is left to the stream too.
+            const Previous previous = g_previous;
+            if (opaque)
+                g_previous.valid = false;
+            if (pc == 0u)
+            {
+                ++g_stats.program;
+                return;
+            }
+            // The resume: the setup before it goes on (in the chain's order, which only the opaque objects keep), with
+            // this header's VU 4-5 (and point lights).
+            const bool resume = pc == 0x0c78u;
+            // (Only after the rigid strip setups: the resume's way back into the others' loops is not known here.)
+            const bool rigidBefore = previous.pc == 0x0cc8u || previous.pc == 0x0d08u || previous.pc == 0x0ce8u || previous.pc == 0x1700u;
+            if (resume && (!opaque || !previous.valid || !rigidBefore))
             {
                 ++g_stats.program;
                 return;
@@ -655,11 +929,25 @@ namespace tmb::meshes
                 ++g_stats.noObject;
                 return;
             }
-            if (it->kind > 1u)
+            // The pack's kind as the flags pick the program: rigid or pool-less for the strip setups, sprite, ribbon.
+            const uint32_t kindFor = pc == 0x3000u ? 2u : pc == 0x3270u ? 3u : skinned && !resume ? 4u : 1u;
+            if (kindFor == 1u ? it->kind > 1u : it->kind != kindFor)
             {
                 ++g_stats.kindOther;
                 return;
             }
+            // A resume draws a pool-less object with the pool (and setup) the object before it left: that object must be
+            // its pool's (or another pool-less object of that pool).
+            if (resume && (it->kind != 1u || previous.file != file->index ||
+                           (it->poolFrom != previous.offset && it->poolFrom != previous.poolFrom)))
+            {
+                ++g_stats.resumeOther;
+                return;
+            }
+            const uint32_t drawPc = resume ? previous.pc : pc;
+            if (resume && drawPc == 0x1700u && !pointLights)
+                for (uint32_t q = 0; q < 11u; ++q)
+                    g_vu.setQw(165u + q, previous.pointLights[q]);
 
             // The header's last qword: NOP, BASE, OFFSET, MSCAL (pktAddVu1ObjAsm leaves the END tag after it, at the
             // packet's write pointer). The mark goes in the NOP's immediate.
@@ -680,11 +968,29 @@ namespace tmb::meshes
 
             Drawn drawn;
             drawn.setupPc = pc;
+            drawn.resumes = resume ? drawPc : 0u;
             drawn.frame = g_frame;
             drawn.object = obj;
             drawn.file = file->index;
             drawn.offset = offset;
-            buildStrips(ee, obj, file->base, *it, pc, drawn);
+            // The setup's matrix: this object's, or (a resume) the one before it, which 0xc78 keeps (it runs 0x1700's
+            // setup again, which makes it anew).
+            float screen[16];
+            if (resume && drawPc != 0x1700u)
+                std::memcpy(screen, previous.screen, sizeof(screen));
+            else
+                tmb::vu1::objectToScreen(g_vu, screen, false);
+            buildStrips(ee, obj, file->base, *it, drawPc, drawn, screen, it->kind == 4u ? bones : 0u);
+            if (opaque)
+            {
+                g_previous.valid = true;
+                g_previous.file = file->index;
+                g_previous.offset = offset;
+                g_previous.poolFrom = it->kind == 1u ? it->poolFrom : offset;
+                g_previous.pc = drawPc;
+                std::memcpy(g_previous.screen, screen, sizeof(screen));
+                std::memcpy(g_previous.pointLights, &g_vu.words[165u * 4u], sizeof(g_previous.pointLights));
+            }
             const uint64_t hash = (static_cast<uint64_t>(file->index) << 32 | offset) * 0x9e3779b97f4a7c15ull;
             const uint32_t occurrence = g_keysThisFrame[hash]++;
             drawn.key = (hash ^ (static_cast<uint64_t>(occurrence) * 0xc2b2ae3d27d4eb4full)) | 1u;
@@ -696,16 +1002,45 @@ namespace tmb::meshes
             g_nextMark = (g_nextMark + 1u) & 0xffffffu;
             if (g_nextMark == 0u)
                 g_nextMark = 1u;
-            words[0] = mark; // a VIF NOP (cmd 0, no interrupt) whatever its immediate and NUM
-            std::memcpy(last, words, 4);
+            // A VIF NOP (cmd 0, no interrupt) whatever its immediate and NUM. The resume's last qword is three NOPs and
+            // the MSCAL: each carries the mark (the adapter keeps the last NOP's before the MSCAL).
+            for (int k = 0; k < 3; ++k)
+                if (k == 0 || words[k] == 0u)
+                    words[k] = mark;
+                else
+                    break;
+            std::memcpy(last, words, 12);
             g_drawn[mark] = std::move(drawn);
             ++g_stats.drawn;
+            g_stats.resumed += resume ? 1u : 0u;
+            g_stats.sprites += pc == 0x3000u ? 1u : 0u;
+            g_stats.ribbons += pc == 0x3270u ? 1u : 0u;
+            g_stats.skinned += it->kind == 4u ? 1u : 0u;
+            g_stats.reflective += pc == 0x1db8u ? 1u : 0u;
         }
 
         void pktAddVu1ObjOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             if (active())
+            {
                 ++g_stats.cCalls; // hierObjectNode's C path: left to the stream for now
+                g_previous.valid = false;
+                if (static const bool s_dumpLog = std::getenv("TMB_NATIVE_MESHES_DUMP") != nullptr; s_dumpLog)
+                {
+                    const Ee ee{rdram, runtime->memory().getScratchpad()};
+                    const uint32_t obj = getRegU32(ctx, 6), inst = ee.u32(0x70000020u);
+                    static std::unordered_map<uint32_t, bool> s_seen;
+                    if (!s_seen[obj])
+                    {
+                        s_seen[obj] = true;
+                        const uint32_t index = ee.u32(obj + 0x68u);
+                        const bool skinned = ee.u32(obj + 0x64u) != 0u && inst != 0u;
+                        std::fprintf(stderr, "[tmb:mesh] dump C object %#x inst %#x flags %#x skeleton %#x index %u chain %#x bones %#x\n", obj, inst,
+                                     ee.u16(obj + 0xcu), ee.u32(obj + 0x64u), index, skinned ? ee.u32(ee.u32(inst + 0x18u) + 4u * index) : 0u,
+                                     skinned ? ee.u32(ee.u32(inst + 0x14u) + 4u * index) : 0u);
+                    }
+                }
+            }
             pktAddVu1Obj__FP9Vu1DmaPktP6QwDataP11_hierobjecti_0x1eadd0(rdram, ctx, runtime);
         }
 
@@ -719,6 +1054,7 @@ namespace tmb::meshes
             const Ee ee{rdram, runtime->memory().getScratchpad()};
             for (uint32_t q = 0; q < 3u; ++q)
                 std::memcpy(g_lastLights[q], ee.at(kConstVu5 + 16u + q * 16u), 16);
+            g_previous.valid = false;
         }
     }
 
@@ -752,19 +1088,46 @@ namespace tmb::meshes
             }
             else
                 ++it;
+        // TMB_NATIVE_MESHES_DUMP=<file>,<frame>: EE memory at that frame (a diagnostic, to compare the loaded NGP
+        // images with the disc's offline).
+        if (static const char *s_dump = std::getenv("TMB_NATIVE_MESHES_DUMP"); s_dump && g_rdramForDump)
+        {
+            static std::string s_path;
+            static uint32_t s_at = [&]
+            {
+                std::string spec(s_dump);
+                const size_t comma = spec.rfind(',');
+                s_path = spec.substr(0, comma);
+                return comma == std::string::npos ? 0u : static_cast<uint32_t>(std::strtoul(spec.c_str() + comma + 1, nullptr, 10));
+            }();
+            if (s_at == 0u && g_firstSkinned != 0u)
+                s_at = g_firstSkinned + 300u; // frame 0: 300 frames after the first skinned object
+            if (g_frame == s_at)
+                if (FILE *f = std::fopen(s_path.c_str(), "wb"))
+                {
+                    std::fwrite(g_rdramForDump, 1, 0x2000000u, f);
+                    std::fclose(f);
+                    std::fprintf(stderr, "[tmb:mesh] EE memory dumped to %s at frame %u\n", s_path.c_str(), g_frame);
+                }
+        }
         if (g_frame % 250u == 0u)
         {
             std::fprintf(stderr,
                          "[tmb:mesh] per 250 frames: %llu objects at the hook (%llu by the C path), %llu drawn from the pack (%llu triangles), "
                          "%llu taken in the stream, %llu unclaimed; left to the stream: %llu by program (%llu drawn with a group GS-state block), %llu outside "
-                         "the loaded files, %llu not in the pack, %llu sprites / ribbons / skinned, %llu unmarked; %llu texture number mismatches\n",
+                         "the loaded files, %llu not in the pack, %llu of another kind in the pack, %llu unmarked; %llu texture number mismatches; "
+                         "%llu resumes drawn, %llu resumes not after their pool's object; %llu sprites, %llu ribbons, %llu skinned, %llu environment-mapped "
+                         "drawn\n",
                          static_cast<unsigned long long>(g_stats.calls), static_cast<unsigned long long>(g_stats.cCalls),
                          static_cast<unsigned long long>(g_stats.drawn), static_cast<unsigned long long>(g_stats.triangles),
                          static_cast<unsigned long long>(g_stats.taken), static_cast<unsigned long long>(g_stats.unclaimed),
                          static_cast<unsigned long long>(g_stats.program), static_cast<unsigned long long>(g_stats.extra),
                          static_cast<unsigned long long>(g_stats.noFile), static_cast<unsigned long long>(g_stats.noObject),
                          static_cast<unsigned long long>(g_stats.kindOther), static_cast<unsigned long long>(g_stats.unmarked),
-                         static_cast<unsigned long long>(g_stats.idMismatch));
+                         static_cast<unsigned long long>(g_stats.idMismatch), static_cast<unsigned long long>(g_stats.resumed),
+                         static_cast<unsigned long long>(g_stats.resumeOther), static_cast<unsigned long long>(g_stats.sprites),
+                         static_cast<unsigned long long>(g_stats.ribbons), static_cast<unsigned long long>(g_stats.skinned),
+                         static_cast<unsigned long long>(g_stats.reflective));
             g_stats = Stats{};
         }
     }
@@ -779,6 +1142,6 @@ namespace tmb::meshes
         runtime.registerFunction(kHierCacheForAsm, &hierCacheForAsmOverride);
         runtime.registerFunction(kPktAddVu1ObjAsm, &pktAddVu1ObjAsmOverride);
         runtime.registerFunction(kPktAddVu1Obj, &pktAddVu1ObjOverride);
-        std::fprintf(stderr, "[tmb:mesh] TMB_NATIVE_MESHES=1: rigid objects drawn from the mesh pack at pktAddVu1ObjAsm\n");
+        std::fprintf(stderr, "[tmb:mesh] TMB_NATIVE_MESHES=1: hier objects drawn from the mesh pack at pktAddVu1ObjAsm\n");
     }
 }

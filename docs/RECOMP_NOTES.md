@@ -1473,3 +1473,95 @@ What a player gets from a double-click, without the scripts (README, "As a PC ga
   and a Challenge match in Suburbs natively (`[tmb:gs] no GS front end`, the recompiled IOP modules, the native mixer
   playing), cards and video.ini migrated, the log written; the scripted Challenge runs (`arena.sh`) of main's runner
   and of this one with the variables and without them; a forced crash (`PS2X_TEST_CRASH`) in a match.
+
+## The build kit: tmb_build on a PC with nothing installed (2026-11-01)
+
+`tools/make_build_kit.py` (standard library only) assembles, from this PC's MSYS2 and three official downloads, the
+folder tmb_build needs on a player's PC with no MSYS2, git, network or Python. tmb_build uses it when it sits in
+`<TMB_Recomp>/kit` or in the folder above (`--kit <dir>`, `--no-kit`), so a launcher only has to unpack the code and
+the kit side by side and run `kit\python\python.exe -I TMB_Recomp\tools\tmb_build.py --disc <iso> --out <dir>`.
+
+- **Toolchain (`ucrt64/`).** The files of the MSYS2 packages gcc, libgcc, binutils, crt, headers, winpthreads,
+  libwinpthread, windows-default-manifest, cmake and ninja, read from pacman's local database (`var/lib/pacman/local/
+  <pkg>/files`, versions in the manifest), minus what no build here reads: `share/` but CMake's modules (its Help too),
+  `etc/`, programs outside a keep list (gcov, the `x86_64-w64-mingw32-*` copies, gprof, elfedit, cmake-gui, ccmake,
+  ctest, cpack), `x86_64-w64-mingw32/bin` (copies), `*.idl`, binutils' own libraries and headers, GCC's plugin
+  headers and install-tools, `lto1.exe` (no -flto anywhere: the runner is RelWithDebInfo, CMake's IPO check turns
+  itself off for a Release build), and the import libraries of the old, Store and debug C runtimes and of the API-set
+  umbrellas (onecore, windowsapp, mincore...). Then the DLLs every kept program loads, found by reading PE imports
+  against UCRT64's `bin` (gmp, mpfr, mpc, isl, zstd, zlib for cc1; curl, OpenSSL, libarchive, libuv, jsoncpp,
+  cppdap, rhash... for CMake), and the three runtime DLLs the game loads (libstdc++-6, libgcc_s_seh-1,
+  libwinpthread-1). 365 MB, 5495 files (227 MB of the packages left out).
+  - The folder keeps the name `ucrt64`: MSYS2's GCC is configured `--with-sysroot=/ucrt64
+    --with-native-system-header-dir=/include` and relocates its sysroot as `<bin>/../../ucrt64`; under another name
+    it finds its C++ headers but not `stdio.h`. The windows-default-manifest package is needed too (every link pulls
+    `default-manifest.o`).
+  - A smoke test after assembly: a C++ program with `<thread>` and `<windows.h>` compiled, linked and run with PATH =
+    the Windows folders and the kit's `bin`, and `g++ -v` checked for any `msys64` path (only the "Configured with"
+    line names MSYS2's CI build folder).
+- **FFmpeg (`ffmpeg/`).** FFmpeg 9.0.2 from ffmpeg.org (SHA-256 `8c385028...` pinned; the `.asc` signature checked
+  once against ffmpeg-devel.asc, key `FCF986EA15E6E293A5644F10B4322F04D67658D8`). The runtime's only FFmpeg user is
+  `MPEG.cpp`: `avcodec_find_decoder` / `av_parser_init` for MPEG-2 video, send / receive, `sws_scale` to RGBA,
+  `av_log_set_level`, `av_strerror`. Configured with `--disable-everything --disable-autodetect --disable-network
+  --disable-avdevice --disable-avformat --disable-avfilter --disable-swresample --enable-decoder=mpeg2video
+  --enable-parser=mpegvideo --enable-w32threads --disable-x86asm --enable-static --disable-shared --disable-programs
+  --disable-doc --disable-debug` (configure reports "LGPL version 2.1 or later"; the script refuses CONFIG_GPL /
+  VERSION3 / NONFREE). No GNU make here: configure runs in MSYS2's `sh` with the kit's GCC, then the script reads
+  FFmpeg's Makefiles itself (config.mak, each library's Makefile, `x86/Makefile`, `arch.mak`: the assignments,
+  conditionals, includes, substitution references and the few functions they use, as the top-level DOSUBDIR does)
+  and writes a `build.ninja` the kit's Ninja builds: avcodec 71 objects, swscale 34, avutil 95; 5 MB of static
+  libraries with their public headers and `.pc` files (Libs.private: m, atomic, ole32, user32, bcrypt). No nasm
+  (`--disable-x86asm`): a 640x448 MPEG-2 stream is no load for the C decoder. The tarball goes in the kit
+  (`sources/`) as LGPL's corresponding source.
+  - The fork (`PS2X_FFMPEG_ROOT`): include/ and the three static libraries linked in order with the system
+    libraries the `.pc` files list, no pkg-config; the pkg-config path now asks only for avcodec, avutil and
+    swscale.
+- **Sources (`deps/`).** `git clone --depth 1 --branch <tag>` of the tags the CMake files pin (checked against them:
+  a CMake file that moves its pin stops the script), `.git` removed; commits equal to the existing build trees'
+  `_deps` (raylib c1ab645, imgui b1bcb12, rlImGui 118221c, ELFIO 8ae6cec, toml11 be08ba2, fmt 407c905, libdwarf
+  2e088b9, rabbitizer d5804fa). raylib's examples / projects, imgui's examples / docs and rlImGui's examples,
+  resources and premake binaries left out (53 MB instead of 125). paraLLEl-GS and Granite are not in the kit: the
+  player's runner is configured `PS2X_ENABLE_PARALLEL_GS=OFF` (the fork already guards every use with
+  `PS2X_HAVE_PARALLEL_GS`); `PS2X_GS_RENDERER=parallel` is a GS-emulation diagnostic the native port never uses.
+  tmb_build passes `FETCHCONTENT_FULLY_DISCONNECTED=ON` with a kit: never the network.
+- **Recompilers (`tools/`).** ps2_recomp and ps2_vu_aot built by the script with the kit (`-static`, debug info
+  stripped): 5.8 and 3.3 MB, importing only KERNEL32 and the UCRT API sets; tmb_build's tools step becomes a check.
+  They are the fork's recompiler at the kit's commit (`tools.fork_commit` in the manifest): a kit goes with the code
+  version it was made from.
+- **Python (`python/`).** python-3.14.10-embed-amd64.zip from python.org (SHA-256 `90905e64...` pinned), unpacked as
+  is; tmb_build and every script it runs (`-I`) are standard-library only.
+- **Manifest.** `kit_manifest.json`: each MSYS2 package that contributed files (version, license, URL), the prune
+  rules, FFmpeg's configure line, versions and objects, the sources' repositories, tags and commits, the tools'
+  hashes and imports, sizes, and the licenses: GCC's runtime libraries under the GCC Runtime Library Exception (no
+  obligation on the game), FFmpeg LGPL-2.1+, CMake BSD-3, Ninja Apache-2.0, mingw-w64 ZPL / public domain,
+  winpthreads MIT / BSD, Python PSF; `licenses/` has each component's files. GCC, binutils and the MSYS2 DLLs are
+  GPL / LGPL binaries redistributed unmodified: a public kit has to ship or offer their sources (MSYS2's source
+  packages of the listed versions).
+
+Sizes: 468 MB unpacked (ucrt64 365, deps 53, python 24, sources 12, tools 9, ffmpeg 5,
+licenses 0.6), 142 MB as a deflate zip (`--zip`); the script runs in about 150 s (FFmpeg 80, the tools 18, the zip
+20-30).
+
+Check: the kit unpacked from its zip next to a copy of the repository's files (no `.git`), tmb_build run by
+`kit\python\python.exe -I` with PATH = `C:\Windows\System32;C:\Windows;...\Wbem` and nothing else from the
+environment (no MSYS2, git or Python reachable; no `msys64` in the CMake cache), the USA ISO: 241 s from an empty
+folder (verify 0, extract 1.8 from a warm cache, tools 0 (prebuilt), recompile 2.8, packs 22.4, iop 2.2, configure 6.0,
+compile 205.3, stage 0.3). `generated/` equals main's `generated_us/` file for file (3601 files: code, VU1, packs,
+iop), so the kit's static recompilers and the embeddable Python give the same output. The runner imports only Windows
+DLLs, the UCRT and libstdc++-6 / libgcc_s_seh-1 / libwinpthread-1: the stage step copies those three instead of 81
+(118 MB). The game folder: 775 MB besides the disc's files and `disc.iso` (the runner 613 MB, RelWithDebInfo's debug
+information; the packs 196 MB; the DLLs 2.9 MB). Run from the game folder with the same restricted PATH and a scratch
+`PS2X_USER_DIR`, the scripted Challenge match (`arena.sh`): the boot movies decoded by the kit's FFmpeg (207 frames
+presented, no decoder failure; swscale's C path, `No accelerated colorspace conversion` from yuv420p to rgba, as no
+x86 assembly is built), the menus, Suburbs with two opponents at the 59-60 fps cap, `[tmb:gs] no GS front end`, the
+nine native IOP modules. The pkg-config path (MSYS2) still configures: `libavcodec;libavutil;libswscale`.
+
+What is left for the launcher step:
+- Unpack the code and the kit side by side, run the kit's Python on tmb_build and read its PROGRESS / PERCENT /
+  RESULT lines; then start `Play TMB.cmd` (or the exe).
+- The runner's 600 MB of debug information: a player build could be `--build-type Release` (IPO is off without
+  `lto1`) or stripped at the stage step.
+- A kit is tied to the code version it was made from (the prebuilt recompilers); the launcher should ship them
+  together, or tmb_build fall back to building the tools when the fork's recompiler sources changed.
+- GPL / LGPL source availability for the MSYS2 binaries (their source packages), alongside FFmpeg's tarball already in
+  the kit.

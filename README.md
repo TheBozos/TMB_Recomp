@@ -159,7 +159,7 @@ Age*, *Jade Cocoon 2*, *Soulcalibur III* and others). Fixes made for this port l
 
 - Linux (developed on Arch) or Windows 10/11 with [MSYS2](https://www.msys2.org/) (UCRT64, see below)
 - CMake 3.21+, Ninja, GCC 13+ or Clang with C++20
-- FFmpeg development libraries (`libavcodec`, `libavformat`, `libavutil`, `libswresample`, `libswscale`) and `pkg-config`
+- FFmpeg development libraries (`libavcodec`, `libavutil`, `libswscale`) and `pkg-config` (or a static FFmpeg folder: `PS2X_FFMPEG_ROOT`)
 - X11/Wayland and OpenGL development headers (raylib is fetched and built by the fork)
 - `bsdtar` (libarchive) to extract the disc
 - A CPU with AVX2 (the runtime is built for `x86-64-v3`)
@@ -196,6 +196,35 @@ python tools\tmb_build.py --disc "D:\Games\Twisted Metal - Black (USA).iso" --ou
   <message>` (exit code 1), `RESULT <game folder> <launcher>`; each step's full output is in `<out>/logs/`.
 - From an empty folder on a Ryzen 7 7800X3D: about 9 minutes (the compile 5, the recompiler's build and CMake's
   downloads 1.5 each).
+
+### The build kit: nothing installed (Windows)
+
+`tools/make_build_kit.py` assembles, once on a developer's PC (MSYS2 UCRT64 installed, network), the folder that lets
+`tmb_build.py` run on a PC with nothing installed: no MSYS2, no git, no network, no Python.
+
+```bat
+python tools\make_build_kit.py --out D:\tmb_kit\kit --zip D:\tmb_kit\tmb_build_kit.zip
+rem on the player's PC: TMB_Recomp\ (this repository's files) and kit\ side by side
+kit\python\python.exe -I TMB_Recomp\tools\tmb_build.py --disc "D:\Games\Twisted Metal - Black (USA).iso" --out D:\TMB
+```
+
+| Kit folder | Contents |
+|---|---|
+| `ucrt64/` | MSYS2 UCRT64's GCC 16.2, binutils, mingw-w64 headers and CRT, winpthreads, CMake 4.4, Ninja 1.13: the packages' files minus documentation, translations, GCC plugin headers, `lto1`, gcov, the prefixed duplicates, binutils' libraries, old / Store / API-set import libraries; plus the DLLs those programs load (CMake's curl, OpenSSL...) |
+| `ffmpeg/` | FFmpeg 9.0.2 (ffmpeg.org tarball, SHA-256 and release signature checked), LGPL, static: `--disable-everything` plus the `mpeg2video` decoder and `mpegvideo` parser; avcodec, swscale, avutil only (5 MB), built with the kit's GCC |
+| `deps/` | the FetchContent sources at the pinned tags (raylib, imgui, rlImGui, ELFIO, toml11, fmt, libdwarf, rabbitizer), without `.git` |
+| `tools/` | `ps2_recomp.exe`, `ps2_vu_aot.exe` built with the kit, static |
+| `python/` | the Windows embeddable Python 3.14 (python.org, SHA-256 pinned) |
+| `sources/`, `licenses/`, `kit_manifest.json` | FFmpeg's source tarball; each component's license files; versions, origins, hashes, licenses, sizes |
+
+- `tmb_build.py` uses the kit when it sits in `TMB_Recomp\kit` or next to the `TMB_Recomp` folder (or `--kit <dir>`;
+  `--no-kit` ignores it): the kit's compiler, recompilers and sources, FFmpeg through `PS2X_FFMPEG_ROOT` (no
+  pkg-config) and `PS2X_ENABLE_PARALLEL_GS=OFF` (paraLLEl-GS, a GS-emulation diagnostic the native port does not use).
+  The game folder then holds the runner and three DLLs (libstdc++, libgcc, winpthread) instead of 81.
+- Size: 468 MB unpacked, 142 MB as a zip; assembled in about 2.5 minutes. From an empty folder with the kit and a
+  PATH of only the Windows folders: 4 minutes to the game folder (compile 3.4), no recompiler build, no downloads.
+- The kit is build output, never committed. GCC, binutils and the other MSYS2 binaries are redistributed unmodified:
+  a public kit must also ship or offer their sources (MSYS2's source packages of the versions in the manifest).
 
 ### Step by step (development)
 
@@ -391,7 +420,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `recomp/` | Recompiler config (analyzer output plus manual additions) |
 | `runtime/` | Game override module (game-specific bindings) |
 | `scripts/` | Extract, build tools, analyze, recomp, build runner, run |
-| `tools/` | Analysis helpers (`iso_lbn.py`: disc file of a sector; `gs_fb_decode.py`: framebuffer out of a VRAM dump; `irx_disasm.py`: IOP module code) |
+| `tools/` | `tmb_build.py` (disc to game folder), `make_build_kit.py` (the build kit), analysis helpers (`iso_lbn.py`: disc file of a sector; `gs_fb_decode.py`: framebuffer out of a VRAM dump; `irx_disasm.py`: IOP module code) |
 | `docs/` | Bring-up notes |
 | `PS2Recomp/` | PS2Recomp fork (submodule) |
 

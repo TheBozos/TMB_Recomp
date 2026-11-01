@@ -21,9 +21,18 @@ again):
   compile    the runner (ps2EntryRunner)
   stage      <out>/TMB: the executable, the DLLs it loads from the toolchain, the packs, "Play TMB.cmd"
 
-Toolchain: --toolchain <dir> (a folder whose bin/ has g++, cmake, ninja, pkg-config: an MSYS2 UCRT64 prefix such as
-C:/msys64/ucrt64, or a bundled compiler), else the PATH, else C:/msys64/ucrt64. FetchContent's sources (raylib, imgui,
-...) come from the network (git) unless --fetch-cache <dir> holds <name>-src folders.
+The build kit (tools/make_build_kit.py): a folder with kit_manifest.json, the compiler (ucrt64/), a minimal static
+FFmpeg (ffmpeg/), the libraries' sources (deps/), the prebuilt recompilers (tools/) and an embeddable Python. Used
+when it sits in <TMB_Recomp>/kit or next to the TMB_Recomp folder (<parent>/kit), or with --kit <dir> (--no-kit: not
+used). With it nothing else is needed (no MSYS2, git, network or installed Python), and the runner is the player's
+build: FFmpeg from the kit (no pkg-config, no FFmpeg DLLs: the game folder gets the exe and the three GCC runtime
+DLLs), paraLLEl-GS left out (PS2X_ENABLE_PARALLEL_GS=OFF, a GS-emulation diagnostic the native port never uses).
+  kit/python/python.exe -I tools/tmb_build.py --disc "Twisted Metal - Black (USA).iso" --out D:/TMB
+
+Without a kit: --toolchain <dir> (a folder whose bin/ has g++, cmake, ninja, pkg-config: an MSYS2 UCRT64 prefix such
+as C:/msys64/ucrt64), else the PATH, else C:/msys64/ucrt64; FFmpeg through pkg-config; FetchContent's sources from the
+network (git) unless --fetch-cache <dir> holds <name>-src folders. --toolchain, --tools and --fetch-cache also
+override the kit's.
 
 Output for a launcher, one line each on stdout (everything else goes to <out>/logs/<step>.log):
   PROGRESS <step> <i>/<n> <message>     a step starts
@@ -64,6 +73,7 @@ FETCH_NAMES = ['raylib', 'imgui', 'rlimgui', 'parallel_gs', 'granite',
 LAUNCH_ENV = [('TMB_NATIVE', '1'), ('PS2X_SPU2_WALLCLOCK', '1'), ('PS2X_IOP_WALLCLOCK', '1'),
               ('PS2X_GS_RENDERER', 'native'), ('PS2X_IOP_NATIVE', '1')]
 EXE = '.exe' if os.name == 'nt' else ''
+KIT_MANIFEST = 'kit_manifest.json'
 
 
 class BuildError(Exception):
@@ -219,6 +229,14 @@ class Build:
         self.toolchain_bin = None
         self.env = dict(os.environ)
         self.step = None
+        self.kit = find_kit(args)
+        self.ffmpeg_root = None
+        if self.kit:
+            # The kit's parts unless the command line names others.
+            args.toolchain = args.toolchain or os.path.join(self.kit, 'ucrt64')
+            args.tools = args.tools or os.path.join(self.kit, 'tools')
+            args.fetch_cache = args.fetch_cache or os.path.join(self.kit, 'deps')
+            self.ffmpeg_root = os.path.join(self.kit, 'ffmpeg')
 
     def save_state(self):
         tmp = self.state_path + '.tmp'
@@ -321,7 +339,7 @@ class Build:
                                file_stamp(os.path.join(ROOT, 'recomp', 'tmb_iop_modules.json')),
                                [file_stamp(os.path.join(ROOT, 'PS2Recomp', 'tools', t)) for t in ('irx_load.py', 'iop_recomp.py')])
         if step == 'configure':
-            return fingerprint(self.find_toolchain(), a.build_type, a.fetch_cache,
+            return fingerprint(self.find_toolchain(), a.build_type, a.fetch_cache, self.ffmpeg_root,
                                [self.state.get(s, {}).get('key') for s in ('recompile', 'packs', 'iop')])
         if step == 'compile':
             return fingerprint(self.state.get('configure', {}).get('key'),
@@ -601,7 +619,7 @@ class Build:
                                  'pass --fetch-cache <dir> with their sources')
             return []
         cache = os.path.abspath(self.args.fetch_cache)
-        out = []
+        out = ['-DFETCHCONTENT_FULLY_DISCONNECTED=ON'] if self.kit else []  # never the network
         for n in FETCH_NAMES:
             d = os.path.join(cache, n + '-src')
             if os.path.isdir(d):
@@ -614,9 +632,12 @@ class Build:
                '-DTMB_GENERATED_DIR=' + self.gen.replace('\\', '/'),
                '-DCMAKE_C_COMPILER=' + self.tool('gcc'), '-DCMAKE_CXX_COMPILER=' + self.tool('g++'),
                '-DCMAKE_MAKE_PROGRAM=' + self.tool('ninja')]
-        pkg = os.path.join(self.find_toolchain(), 'pkg-config' + EXE)
-        if os.path.isfile(pkg):
-            cmd.append('-DPKG_CONFIG_EXECUTABLE=' + pkg)
+        if self.ffmpeg_root:
+            cmd += ['-DPS2X_FFMPEG_ROOT=' + self.ffmpeg_root.replace('\\', '/'), '-DPS2X_ENABLE_PARALLEL_GS=OFF']
+        else:
+            pkg = os.path.join(self.find_toolchain(), 'pkg-config' + EXE)
+            if os.path.isfile(pkg):
+                cmd.append('-DPKG_CONFIG_EXECUTABLE=' + pkg)
         self.run(cmd + self.fetch_args())
 
     def runner_path(self):
@@ -657,7 +678,7 @@ class Build:
             os.chmod(sh, 0o755)
         with open(os.path.join(self.game, 'tmb_build.json'), 'w') as f:
             json.dump({'built': time.strftime('%Y-%m-%d %H:%M:%S'), 'elf_sha1': ELF_SHA1,
-                       'build_type': self.args.build_type, 'toolchain': self.find_toolchain(),
+                       'build_type': self.args.build_type, 'toolchain': self.find_toolchain(), 'kit': self.kit,
                        'files': [os.path.basename(p) for p in staged],
                        'env': dict(LAUNCH_ENV)}, f, indent=1)
         emit('INFO', 'stage', '%d DLLs staged' % (len(staged) - 1))
@@ -708,6 +729,21 @@ class Build:
         return 0
 
 
+def find_kit(args):
+    """The build kit: --kit, else <TMB_Recomp>/kit or <TMB_Recomp's parent>/kit when it has kit_manifest.json."""
+    if args.no_kit:
+        return None
+    if args.kit:
+        kit = os.path.abspath(args.kit)
+        if not os.path.isfile(os.path.join(kit, KIT_MANIFEST)):
+            raise SystemExit('ERROR kit %s has no %s' % (kit, KIT_MANIFEST))
+        return kit
+    for kit in (os.path.join(ROOT, 'kit'), os.path.join(os.path.dirname(ROOT), 'kit')):
+        if os.path.isfile(os.path.join(kit, KIT_MANIFEST)):
+            return kit
+    return None
+
+
 STEP_TITLES = {
     'verify': 'Checking the disc',
     'extract': 'Copying the disc\'s files',
@@ -734,7 +770,10 @@ def main():
     ap = argparse.ArgumentParser(description='Builds Twisted Metal: Black (USA) as a native PC game from your own disc.')
     ap.add_argument('--disc', required=True, help='the disc image (.iso, .bin, .cue) or an extracted disc folder')
     ap.add_argument('--out', default='tmb_build', help='the work folder; the game ends up in <out>/TMB')
-    ap.add_argument('--toolchain', help='compiler folder (with bin/g++, cmake, ninja), default: PATH, C:/msys64/ucrt64')
+    ap.add_argument('--kit', help='the build kit folder (default: <TMB_Recomp>/kit or <its parent>/kit if present)')
+    ap.add_argument('--no-kit', action='store_true', help='do not use a build kit even if one is found')
+    ap.add_argument('--toolchain', help='compiler folder (with bin/g++, cmake, ninja), default: the kit, PATH, '
+                    'C:/msys64/ucrt64')
     ap.add_argument('--tools', help='folder with prebuilt ps2_recomp and ps2_vu_aot (default: built here)')
     ap.add_argument('--fetch-cache', help='folder with the FetchContent sources (<name>-src) instead of git')
     ap.add_argument('--build-type', default='RelWithDebInfo', choices=['Release', 'RelWithDebInfo', 'Debug'])

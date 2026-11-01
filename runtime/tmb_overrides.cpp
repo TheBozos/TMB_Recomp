@@ -1709,7 +1709,16 @@ namespace
             // as the IOP is constructed, after this), the SPU2 emulation absent. TMB_NATIVE_AUDIO=0 (or
             // PS2X_NATIVE_AUDIO=0) keeps libsd recompiled on the emulated SPU2.
             const char *audio = std::getenv("TMB_NATIVE_AUDIO");
-            tmb::host::setEnvDefault("PS2X_NATIVE_AUDIO", audio && *audio == '0' ? "0" : "1");
+            const bool nativeAudio = !(audio && *audio == '0');
+            tmb::host::setEnvDefault("PS2X_NATIVE_AUDIO", nativeAudio ? "1" : "0");
+            // No IOP hardware either (ps2xIOP, PS2X_IOP_HARDWARE=0): TMB's modules reach the IOP only through their
+            // imports (kernel, SIF, cdvdman, timrman, intrman answered natively; libsd's on the native mixer; pad and
+            // memory card are the EE's libpad / libmc HLE), so no SIO2, no INTC or DMA register semantics; the few
+            // register accesses left (module start code: LIBSD's bus setup, USBD's probe, SIO2MAN's first write) are
+            // plain storage, counted in [iop:hw]. With the emulated SPU2 (TMB_NATIVE_AUDIO=0) the hardware stays
+            // modelled, as does TMB_IOP_HARDWARE=1.
+            const char *hardware = std::getenv("TMB_IOP_HARDWARE");
+            tmb::host::setEnvDefault("PS2X_IOP_HARDWARE", nativeAudio && !(hardware && *hardware == '1') ? "0" : "1");
         }
         // The runtime's debugger window starts hidden (F1 shows it, PS2X_DEBUG_UI=1 starts with it): here, before the
         // window opens, where the debug panel reads it (applyTmb comes later, with the ELF).

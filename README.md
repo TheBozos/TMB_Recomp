@@ -167,6 +167,38 @@ Age*, *Jade Cocoon 2*, *Soulcalibur III* and others). Fixes made for this port l
 
 ## Build and run
 
+### One command, from your disc (Windows)
+
+`tools/tmb_build.py` goes from your own disc image to a game folder that runs, with nothing derived from the game
+ever downloaded: it checks the disc (the USA release, SCUS-97101: `SCUS_971.01`'s SHA-1; the European disc and other
+images are refused with a message saying so), extracts it with its own ISO9660 reader (`.iso`, `.bin` / `.cue`; no
+bsdtar), recompiles the game's code and VU1 microcode, converts the textures and models into their packs, recompiles
+the IOP modules straight from the disc's `MOD/*.IRX` (no boot of the game), compiles the runner and stages it.
+
+```bat
+python tools\tmb_build.py --disc "D:\Games\Twisted Metal - Black (USA).iso" --out D:\TMB
+"D:\TMB\TMB\Play TMB.cmd"
+```
+
+- Python: the standard library only, so the Windows embeddable Python (`python-3.x-embed-amd64.zip`) runs it; every
+  build-time tool it calls is stdlib-only too.
+- Compiler: `--toolchain <dir>` (a folder whose `bin` has `g++`, `gcc`, `cmake`, `ninja` and `pkg-config`), else the
+  PATH, else `C:\msys64\ucrt64` (MSYS2 UCRT64 with the packages below). No bash, MSYS2 shell, bsdtar or rsync.
+- `--tools <dir>`: prebuilt `ps2_recomp` / `ps2_vu_aot` (otherwise built from `PS2Recomp`). `--fetch-cache <dir>`:
+  the libraries CMake fetches (`raylib-src`, `imgui-src`, ... as CMake left them) instead of downloading them with git.
+- `--disc` also takes an extracted disc folder; its `.iso` is still needed (in it or a folder above), as the game reads
+  raw sectors from the image.
+- The game ends up in `<out>/TMB`: `ps2EntryRunner.exe`, the DLLs it loads, the two packs, `disc/` (the disc's files),
+  `disc.iso` (a hard link to your image on the same drive, else a copy) and `Play TMB.cmd`.
+- Resumable: a step finished with the same inputs is skipped (`--redo <step>` runs it and the ones after again,
+  `--stop-after <step>` stops there). For a launcher, stdout has one line per event: `PROGRESS <step> <i>/<n>
+  <message>`, `PERCENT <step> <0-100>`, `SKIP <step> <i>/<n>`, `DONE <step> <i>/<n> <seconds>`, `ERROR <step>
+  <message>` (exit code 1), `RESULT <game folder> <launcher>`; each step's full output is in `<out>/logs/`.
+- From an empty folder on a Ryzen 7 7800X3D: about 9 minutes (the compile 5, the recompiler's build and CMake's
+  downloads 1.5 each).
+
+### Step by step (development)
+
 ```bash
 git clone --recurse-submodules https://github.com/boubou666/TMB_Recomp.git
 cd TMB_Recomp
@@ -174,7 +206,7 @@ scripts/extract_iso.sh "/path/to/Twisted Metal - Black (USA).iso"      # disc fi
 scripts/build_tools.sh                                                  # ps2_recomp, ps2_analyzer, ps2_vu_aot -> build/tools
 scripts/recomp.sh                                                       # ELF + recomp/tmb_scus97101.toml -> generated_us/ (VU1 microcode -> generated_us/vu1/)
 scripts/build_runtime.sh                                                # runtime + generated code -> build/game_us
-scripts/iop_recomp.sh                                                   # optional: boots once to recompile the IOP modules -> generated_us/iop/, then rebuild
+scripts/iop_recomp.sh                                                   # the IOP modules from game_us/MOD, loaded offline -> generated_us/iop/ (then rebuild)
 scripts/run_native.sh                                                   # the native port (native renderer, recompiled sound driver, sound on the PC clock)
 scripts/run.sh                                                          # the PS2 path only (VU1 and GS simulated), for comparison
 scripts/pgo.sh                                                          # optional, experimental: profile-guided rebuild (~200 s of scripted play)
@@ -185,7 +217,7 @@ scripts/pgo.sh                                                          # option
 The same scripts run in an MSYS2 **UCRT64** shell, with MSYS2's GCC (MSVC is not supported for this port).
 
 ```bash
-pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,libarchive,python} git rsync
+pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg,python} git rsync
 git clone --recurse-submodules https://github.com/boubou666/TMB_Recomp.git
 ```
 

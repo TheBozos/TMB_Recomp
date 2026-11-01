@@ -1368,3 +1368,70 @@ on, each sets every lock word still at 1 to 0 before the screen runs; switched o
 opened (those still 0). Nothing is written to the card unless the player saves.
 Checked (scripted Challenge, fresh card): without it, the five vehicles "Locked" and the four keyholes above; with it,
 all 15 vehicles shown with their names and the 10 arenas selectable, Freeway picked with opponents and played.
+
+## One command from the disc: tools/tmb_build.py (2026-11-01)
+
+For players: they download our code only (launcher, runtime, recompiler, tools, a compiler) and the game is built on
+their PC from their own disc. `tools/tmb_build.py` (Python, standard library only) runs the whole chain; the bash
+scripts stay for development.
+
+What the old chain needed (scripts/*.sh):
+
+| Step | Outside dependencies | Time (clean, 7800X3D) |
+|---|---|---|
+| extract_iso.sh | bash, bsdtar (libarchive) | I/O bound (3.8 GB) |
+| build_tools.sh | cmake, ninja, gcc, git + network (FetchContent: ELFIO, toml11, fmt, libdwarf, rabbitizer, nlohmann_json) | 90 s (without ps2_analyzer) |
+| recomp.sh | bash, sed, rsync, python (struct, zlib, bisect: no PIL / numpy), ps2_recomp, ps2_vu_aot | 6 s recompile + 39 s packs |
+| build_runtime.sh | cmake, ninja, gcc, pkg-config + MSYS2 FFmpeg, git + network (raylib, imgui, rlImGui, paraLLEl-GS, Granite with two submodules) | 90 s configure (the downloads) + 296 s compile |
+| stage_dlls.sh | ldd, cp | 81 DLLs, 118 MB (FFmpeg and its codecs' dependencies: cairo, pango, glib, x264, x265, aom, ...) |
+| iop_recomp.sh | a built runner, timeout, the game booted 40 s (PS2X_IOP_DUMP_MODULES), then python and a rebuild | 40 s + relink |
+
+PIL appears only in diagnostics (`tools/tmb_textures.py`, `tools/tmb_mesh_decode.py`), not in the build. Every
+build-time Python tool (`tools/tmb_texture_pack.py`, `tools/tmb_mesh_pack.py`, the fork's `tools/native_pack`,
+`tools/iop_recomp.py`, `tools/irx_load.py`, `tools/ps2_disc.py`) runs with `python -I` on the standard library: no
+change was needed, and they import their siblings through an explicit `sys.path` entry, which the embeddable Python's
+`._pth` mode also honours.
+
+What replaced what:
+- **The IOP boot.** The dump PS2X_IOP_DUMP_MODULES writes is the module as `IopModuleLoader::load` leaves it before
+  its start routine: the PT_LOAD copied at the base, the bss zeroed, the IOPRELEXEC relocations (R_MIPS_32 / 26 /
+  HI16 / LO16 / 16, image offsets from the base), entry and gp from the IOPMOD header. The fork's `tools/irx_load.py`
+  does the same offline. The only thing a boot decides is each module's base (in load order, after the heap blocks
+  the earlier start routines allocated), and the native code only activates at that base, so the bases are recorded
+  in `recomp/tmb_iop_modules.json` (with each file's FNV-1a hash): numbers from our runtime, not game data. Result:
+  the nine `.bin` / `.json` pairs byte-identical to the boot's dumps, `generated/iop` identical file for file, and in
+  the match run every module reports `[IOP] native: <name>` at its base. `scripts/iop_recomp.sh --boot` keeps the old
+  path and prints the bases, should the runtime's IOP allocation change.
+- **bsdtar.** The fork's `tools/ps2_disc.py`: ISO9660 (records not crossing sectors, `;1` dropped, dates kept),
+  `.iso`, raw `.bin` (MODE1 / MODE2 form 1, sync pattern detected) and `.cue`. The extraction equals bsdtar's: 757
+  files, byte for byte. `SYSTEM.CNF`'s BOOT2 names the release: SCES_503.60 is reported as the European disc; then
+  `SCUS_971.01`'s SHA-1 (3ff17f48...) refuses another printing or a damaged image.
+- **The disc image is still needed.** The game also reads raw sectors (sceCdRead by LBN: the volume descriptor at
+  0x10, the directories at 0x105..., then its data up to LBN 0x170c4f), which the file-backed cdrom0: cannot serve: the
+  runtime finds the image walking up from the ELF's folder (or `TMB_ISO`). Without it the game sits at its first CD
+  wait (black screen, pc 0x1805e4). tmb_build puts it in the game folder as `disc.iso` (a hard link on the same drive,
+  else a copy; a `.bin` / `.cue` converted to 2048-byte sectors). Serving everything from the image would make the
+  extraction unnecessary (a runtime change: the image as cdrom0:).
+- **rsync / sed / ldd.** In Python: the generated tree is synced by content (unchanged files keep their mtime, so
+  ninja rebuilds nothing), the TOML's input / output rewritten, the DLLs found by reading the PE import and delay-load
+  tables recursively against the toolchain's `bin` (the same 81 ldd lists).
+
+Checks: from an empty folder with the USA ISO, Windows' own Python 3.14 (`-I`) and MSYS2 UCRT64's GCC 16.2 / CMake 4.4
+(not on the PATH, no MSYS2 shell): 530 s (verify 0, extract 4.5 from a warm cache, tools 90, recompile 6, packs 39,
+iop 3, configure 90, compile 296, stage 2). `generated/` equals main's `generated_us/` file for file (3576 files:
+code, VU1, packs, iop). A run again skips every step; `--redo extract` reruns the rest in 43 s (ninja: nothing to
+compile). The staged folder, run as `Play TMB.cmd` sets it up, reaches a Challenge match at 59.5 fps with the textures,
+the meshes and the nine native IOP modules.
+
+What is left for the bundled compiler:
+- A toolchain folder for `--toolchain`: GCC (UCRT64 or a standalone MinGW-w64 such as WinLibs), CMake, Ninja,
+  pkg-config, about 1 GB unpacked; tmb_build only needs `bin/` with those.
+- FFmpeg: the MSYS2 package drags 81 DLLs (118 MB); the game needs the MPEG-2 video decoder only. A small FFmpeg
+  (mpeg1/2 decoder, no external codecs) built once and shipped with its headers and import libraries.
+- The FetchContent sources (raylib, imgui, rlImGui, paraLLEl-GS patched, Granite with volk and vulkan-headers, and the
+  tools' ELFIO, toml11, fmt, libdwarf, rabbitizer) shipped as `--fetch-cache`, so neither git nor the network is
+  needed; or paraLLEl-GS left out (`PS2X_ENABLE_PARALLEL_GS=OFF`, a diagnostic path the native port does not use).
+- Prebuilt `ps2_recomp.exe` / `ps2_vu_aot.exe` (`--tools`), statically linked or with their five DLLs, saving the
+  90 s tools step.
+- The runner taking its defaults (TMB_NATIVE, the wall clocks, PS2X_IOP_NATIVE, the packs and `disc.iso` next to the
+  exe) from itself, so `Play TMB.cmd` becomes just the exe.

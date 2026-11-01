@@ -70,9 +70,9 @@ endif()
 # windres does not like brackets in names.
 configure_file("${_font_dir}/Exo2[wght].ttf" "${_font_dir}/exo2.ttf" COPYONLY)
 
-# The icon: The Bozos' logo (docs/branding/bozos_icon_1024.png, drawn by docs/branding/make_logo.py), as a
-# multi-size .ico (16 to 256 px).
-set(_icon "${CMAKE_CURRENT_SOURCE_DIR}/bozos.ico")
+# The icon: Twisted Metal: Black's variant of The Bozos' logo, the clown with its head on fire
+# (docs/branding/tmb_icon_1024.png, drawn by `python docs/branding/make_logo.py tmb`), as a multi-size .ico (16 to 256 px).
+set(_icon "${CMAKE_CURRENT_SOURCE_DIR}/tmb.ico")
 
 # The release's version and source commit (tools/make_release.py passes them): shown in the footer, compared with
 # GitHub's latest release by the update check, in the exe's version information. "dev" builds skip the check at start.

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/branding/tmb_banner.png" alt="Twisted Metal: Black, native PC port by The Bozos" width="100%">
+
 # TMB_Recomp
 
 **A native Linux and Windows port of *Twisted Metal: Black* (USA `SCUS-97101`): the whole game recompiled to C++ and run on the PC itself.**<br>
@@ -284,7 +286,7 @@ rem                        -DLAUNCHER_FONT_DIR=<folder with Exo2[wght].ttf and O
   (disc, language, background motion, build state) sits next to it. English and French.
 - The look is the team's, from RecompWatcher: the PS2 BIOS's radial blue, glowing boot towers (motion can be turned
   off), glass cards, Exo 2 (SIL OFL 1.1, google/fonts at a pinned commit, embedded with its licence; downloaded at
-  configure time, never committed). The icon is The Bozos' logo (`launcher/bozos.ico`, from `docs/branding/`). No game art.
+  configure time, never committed). The icon is TMB's variant of The Bozos' logo, the clown with its head on fire (`launcher/tmb.ico`; the game's window uses the same, `runtime/app/tmb.ico`; drawn by `docs/branding/make_logo.py`). No game art.
 - Updates: at start (Settings: "Check for updates at start") and from Maintenance's "Check for updates", one HTTPS
   GET of `api.github.com/repos/TheBozos/TMB_Recomp/releases/latest` through WinHTTP; a newer `tag_name` shows
   "Version X is available" with a link to its release page (built from the tag). Offline or no release: silent. When
@@ -410,7 +412,7 @@ the sound and the IOP on the PC's clock) is the runner's default, and the variab
 - **Game data.** With no argument the runner looks for `game/SCUS_971.01` next to it, then in the user folder; `game/`
   holds the disc's files and the disc image (`.iso`, for the raw sector reads: the sound banks). With neither, a message
   box says the data was not found (run the launcher, or see this README) and where it looked.
-- **Window.** Titled *Twisted Metal: Black*, with an icon (a placeholder, `runtime/app/tmb.ico`; no game art). No
+- **Window.** Titled *Twisted Metal: Black*, with TMB's flaming-clown icon (`runtime/app/tmb.ico`; no game art). No
   console window on Windows: the runner is a GUI-subsystem program. Started from a terminal (MSYS2, cmd, PowerShell) or
   with its output redirected, it prints there as before.
 - **User folder.** `%APPDATA%\TMB_Recomp` on Windows, `$XDG_DATA_HOME/tmb_recomp` (`~/.local/share/tmb_recomp`) on

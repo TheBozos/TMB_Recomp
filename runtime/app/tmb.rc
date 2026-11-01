@@ -1,4 +1,4 @@
-// The runner's resources on Windows: its icon (a placeholder, no game art; GLFW_ICON is the name GLFW gives the
+// The runner's resources on Windows: its icon (TMB's variant of The Bozos' logo, the clown with its head on fire; no game art; GLFW_ICON is the name GLFW gives the
 // window's class, so the window and the taskbar show it too) and its version information.
 #include <winver.h>
 

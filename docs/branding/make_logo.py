@@ -1,4 +1,4 @@
-"""The Bozos' logo: a clown face drawn from retro console shapes (cross and triangle eyes, a round red nose, square teeth),
+"""The Bozos' logo (python make_logo.py) and Twisted Metal: Black's variant (python make_logo.py tmb): a clown face drawn from retro console shapes (cross and triangle eyes, a round red nose, square teeth),
 on the PS2 BIOS blue with boot towers, in RecompWatcher's colours. Writes PNGs: the icon, the wordmark, a banner."""
 import math
 import os
@@ -78,8 +78,6 @@ def glow_shape(canvas, draw_fn, blur, strength=1.0):
     from PIL import ImageChops
     pre = Image.merge('RGBA', [ImageChops.multiply(c, a_) for c in (r_, g_, b_)] + [a_]).filter(ImageFilter.GaussianBlur(blur))
     pr, pg, pb, pa = pre.split()
-    def unpremul(c):
-        return Image.eval(Image.merge('LA', (c, pa)).convert('LA').getchannel(0), lambda v: v)
     import numpy as _np
     arr = _np.asarray(pre).astype(_np.float32)
     alpha = arr[..., 3:4]
@@ -92,9 +90,12 @@ def glow_shape(canvas, draw_fn, blur, strength=1.0):
     canvas.alpha_composite(g)
 
 
-def clown(canvas, cx, cy, r):
-    """The clown face, centred at (cx, cy), radius r (in canvas pixels)."""
+def clown(canvas, cx, cy, r, fire=False):
+    """The clown face, centred at (cx, cy), radius r (in canvas pixels). fire: flames for hair and no hat (Twisted Metal:
+    Black's variant)."""
     lw = max(2, int(r * 0.075))
+    if fire:
+        fire_hair(canvas, cx, cy, r)
     # Hair puffs: two clouds of circles, in the cross and square colours.
     def puffs(d):
         for side, col in ((-1, CROSS), (1, SQUARE)):
@@ -102,7 +103,8 @@ def clown(canvas, cx, cy, r):
                 x = cx + side * dx * r
                 y = cy + dy * r
                 d.ellipse([x - rr * r, y - rr * r, x + rr * r, y + rr * r], fill=col + (255,))
-    glow_shape(canvas, puffs, r * 0.12, 0.8)
+    if not fire:
+        glow_shape(canvas, puffs, r * 0.12, 0.8)
     # Head.
     def head(d):
         d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=INK + (255,))
@@ -110,9 +112,14 @@ def clown(canvas, cx, cy, r):
     d = ImageDraw.Draw(canvas)
     # Small cone hat in the accent violet, a pompom on top.
     hx, hy = cx, cy - r * 0.86
-    d.polygon([(hx - r * 0.34, hy + r * 0.1), (hx + r * 0.34, hy + r * 0.1), (hx + r * 0.05, hy - r * 0.78)], fill=ACCENT + (255,))
-    d.line([(hx - r * 0.34, hy + r * 0.1), (hx + r * 0.34, hy + r * 0.1)], fill=(120, 90, 210, 255), width=lw)
-    d.ellipse([hx + r * 0.05 - r * 0.13, hy - r * 0.78 - r * 0.13, hx + r * 0.05 + r * 0.13, hy - r * 0.78 + r * 0.13], fill=TRIANGLE + (255,))
+    if fire:
+        hx = None
+    if hx is not None:
+      d.polygon([(hx - r * 0.34, hy + r * 0.1), (hx + r * 0.34, hy + r * 0.1), (hx + r * 0.05, hy - r * 0.78)], fill=ACCENT + (255,))
+    if hx is not None:
+      d.line([(hx - r * 0.34, hy + r * 0.1), (hx + r * 0.34, hy + r * 0.1)], fill=(120, 90, 210, 255), width=lw)
+    if hx is not None:
+      d.ellipse([hx + r * 0.05 - r * 0.13, hy - r * 0.78 - r * 0.13, hx + r * 0.05 + r * 0.13, hy - r * 0.78 + r * 0.13], fill=TRIANGLE + (255,))
     # Eyes: a cross (left) and a triangle (right).
     ex, ey, es = r * 0.40, cy - r * 0.27, r * 0.16
     lx = cx - ex
@@ -190,17 +197,26 @@ def icon(px):
     return bg.resize((px, px), Image.LANCZOS)
 
 
-def wordmark(w, h, transparent):
+def wordmark(w, h, transparent, title='THE BOZOS', subtitle='PS2 RECOMPILATION  ·  BOUBOU666 & ARZAROTH', fire=False, title_size=0.33):
     W, H = w * SS, h * SS
     img = Image.new('RGBA', (W, H), (0, 0, 0, 0)) if transparent else background(W, H).convert('RGBA')
     if not transparent:
         img.alpha_composite(towers(H * 0.55, W, H, H * 1.04, 16, seed=11, dim=0.55))
     cr = H * 0.25
-    clown(img, H * 0.62, H * 0.58, cr)
-    fnt = font(int(H * 0.33), 800)
+    clown(img, H * 0.62, H * (0.62 if fire else 0.58), cr * (0.92 if fire else 1.0), fire=fire)
     ox, oy = int(H * 1.1), int(H * 0.10)
     tw, th = int(W - ox), int(H * 0.55)
-    text, tmask = gradient_text((tw, th), 'THE BOZOS', fnt, CROSS, ACCENT, H * 0.025)
+    # The title as large as title_size allows, smaller when it would not fit the space right of the clown.
+    size = int(H * title_size)
+    while True:
+        fnt = font(size, 800)
+        probe = ImageDraw.Draw(Image.new('L', (1, 1)))
+        tracking = size * 0.075
+        width = sum(probe.textlength(ch, font=fnt) for ch in title) + tracking * (len(title) - 1)
+        if width <= tw * 0.92 or size <= 8:
+            break
+        size = int(size * 0.95)
+    text, tmask = gradient_text((tw, th), title, fnt, CROSS, ACCENT, tracking)
     # The glow from the letters' shape alone (a blurred mask in the accent colour), so no box shows around them.
     glow = Image.new('RGBA', (tw, th), ACCENT + (0,))
     glow.putalpha(tmask.filter(ImageFilter.GaussianBlur(H * 0.03)).point(lambda v: int(v * 0.7)))
@@ -208,15 +224,59 @@ def wordmark(w, h, transparent):
     img.alpha_composite(text, (ox, oy))
     sub = font(int(H * 0.085), 500)
     d = ImageDraw.Draw(img)
-    line = 'PS2 RECOMPILATION  ·  BOUBOU666 & ARZAROTH'
+    line = subtitle
     lw = d.textlength(line, font=sub)
-    d.text((ox + (tw - lw) / 2, oy + th * 0.98), line, font=sub, fill=DIM + (255,))
+    bottom = tmask.getbbox()[3] if tmask.getbbox() else th
+    d.text((ox + (tw - lw) / 2, oy + bottom + H * 0.07), line, font=sub, fill=DIM + (255,))
     if not transparent:
         img = scanlines(img, SS * 3)
     return img.resize((w, h), Image.LANCZOS)
 
 
-if __name__ == '__main__':
+# ---- per-game variants: the Bozos clown plus a landmark of the game (generic shapes only, no game art) ----
+
+def fire_hair(canvas, cx, cy, r):
+    """Flames standing up from the top half of the head, in three layers (outer red to inner yellow), glowing."""
+    layer = Image.new('RGBA', canvas.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    tongues = [(-1.05, 0.55), (-0.85, 0.95), (-0.55, 1.25), (-0.2, 1.45), (0.2, 1.38), (0.55, 1.2), (0.85, 0.92), (1.05, 0.5)]
+    for k, col in enumerate([(230, 60, 50), (255, 140, 60), (255, 210, 120)]):
+        s = 1.0 - k * 0.24
+        for i, (dx, hgt) in enumerate(tongues):
+            ang = math.atan2(-1.0, dx * 0.9)
+            bx = cx + dx * r * 0.92
+            by = cy - math.sqrt(max(0.0, 1 - min(1.0, abs(dx)) ** 2)) * r * 0.55
+            tip_x = bx + dx * r * 0.35 * s + (0.08 * r if i % 2 else -0.08 * r) * s
+            tip_y = by - hgt * r * s
+            w = r * 0.32 * s
+            d.polygon([(bx - w, by + r * 0.25), (bx - w * 0.6, by - hgt * r * 0.45 * s), (tip_x, tip_y),
+                       (bx + w * 0.6, by - hgt * r * 0.4 * s), (bx + w, by + r * 0.25)], fill=col + (255,))
+    glow = layer.filter(ImageFilter.GaussianBlur(r * 0.14))
+    canvas.alpha_composite(glow)
+    canvas.alpha_composite(layer)
+
+
+def icon_tmb(px):
+    """Twisted Metal: Black: the Bozos clown with its head on fire (car combat), on the team's PS2 blue."""
+    W = px * SS
+    bg = background(W, W).convert('RGBA')
+    bg.alpha_composite(towers(W * 0.4, W, W, W * 1.02, 9))
+    clown(bg, W / 2, W * 0.6, W * 0.25, fire=True)
+    bg = scanlines(bg, SS * 3)
+    mask = Image.new('L', (W, W), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, W - 1], radius=W * 0.18, fill=255)
+    bg.putalpha(mask)
+    return bg.resize((px, px), Image.LANCZOS)
+
+
+if __name__ == '__main__' and len(sys.argv) > 1 and sys.argv[1] == 'tmb':
+    # Twisted Metal: Black's launcher logo: the team clown with its head on fire.
+    icon_tmb(1024).save(os.path.join(OUT, 'tmb_icon_1024.png'))
+    icon_tmb(256).save(os.path.join(OUT, 'tmb_icon_256.png'))
+    wordmark(2000, 600, False, title='TWISTED METAL: BLACK', subtitle='NATIVE PC PORT  ·  THE BOZOS', fire=True,
+             title_size=0.3).save(os.path.join(OUT, 'tmb_banner.png'))
+    print('tmb done')
+elif __name__ == '__main__':
     icon(1024).save(os.path.join(OUT, 'bozos_icon_1024.png'))
     icon(256).save(os.path.join(OUT, 'bozos_icon_256.png'))
     wordmark(2000, 600, False).save(os.path.join(OUT, 'bozos_banner.png'))

@@ -1,4 +1,4 @@
-// TMB Launcher's resources: its icon (The Bozos' logo, launcher/bozos.ico; GLFW_ICON is the name GLFW gives the
+// TMB Launcher's resources: its icon (TMB's variant of The Bozos' logo, launcher/tmb.ico; GLFW_ICON is the name GLFW gives the
 // window's class, so the window and the taskbar show it too), the Exo 2 font and its licence, and version information.
 #include <winver.h>
 

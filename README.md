@@ -49,7 +49,8 @@ The launcher says when a newer release is out (it asks GitHub for the latest ver
 turns that off; nothing is downloaded by itself). After an update, unzip the new release where the old one was (replacing the files): the
 launcher sees the code changed since the game was built and offers **Rebuild now** (also Rebuild in the Maintenance
 tab); only what changed is built again, the files the new release no longer has are removed, and the saves stay. To uninstall, delete the folder (and `%APPDATA%\TMB_Recomp` for the saves
-and settings). Linux players build with `tools/tmb_build.py` (below).
+and settings). Releases are Windows only for now; on Linux the port builds from source (below), but has not been
+tested there since the native work of November 2026.
 
 ## Status
 
@@ -57,9 +58,9 @@ Picking the work up elsewhere: [`docs/HANDOFF.md`](docs/HANDOFF.md) (state, how 
 
 **Playable, at full speed, as a native port, at NTSC's 60 frames per second.** The game boots, runs its own IOP modules,
 plays the movies with their sound, goes through the menus and level loading, and plays matches
-and story levels: driving, weapons, bots, HUD, music and effects, deaths, respawns, saving and loading. With the native
-path (`scripts/run_native.sh`, at twice the PS2's resolution) a match holds 57.7 to 60.4 fps (4 players split screen:
-55.8 to 60.4) on a Ryzen 7 7800X3D with an RTX 5070 Ti. Still being checked: every arena and story level to the endings, and some effects against the PS2 picture
+and story levels: driving, weapons, bots, HUD, music and effects, deaths, respawns, saving and loading. Natively (the default,
+at twice the PS2's resolution) a match holds 57.7 to 60.4 fps (4 players split screen:
+55.8 to 60.4) on a Ryzen 7 7800X3D with an RTX 5070 Ti. Every Challenge arena has been played; still being checked: story levels 2 to 8 to the endings, and some effects against the PS2 picture
 (issues found while playing are fixed as they come: [docs/RECOMP_NOTES.md](docs/RECOMP_NOTES.md)).
 
 <p align="center">
@@ -68,7 +69,7 @@ path (`scripts/run_native.sh`, at twice the PS2's resolution) a match holds 57.7
   <img src="docs/screenshots/intro_movie.jpg" width="49%" alt="The intro movie">
   <img src="docs/screenshots/story_menu.jpg" width="49%" alt="The game-mode menu">
 </p>
-<p align="center"><sub>The USA release on the native path (<code>scripts/run_native.sh</code>), drawn at twice the PS2's resolution.</sub>
+<p align="center"><sub>The USA release, native (the default), drawn at twice the PS2's resolution.</sub>
 </p>
 
 | Milestone | |
@@ -80,7 +81,7 @@ path (`scripts/run_native.sh`, at twice the PS2's resolution) a match holds 57.7
 | Controller input; every button and stick direction rebindable to keys, controllers and the mouse (F2, `input.ini`) | ✅ |
 | Movies (PSS, MPEG-2 decoded with FFmpeg) | ✅ |
 | Title screen and main menu | ✅ |
-| Memory card: save, load, overwrite (`mc0`, `mc1` in the disc folder) | ✅ |
+| Memory card: save, load, overwrite (`mc0`, `mc1` in `%APPDATA%\TMB_Recomp`) | ✅ |
 | Story mode: level 1 of 8 cleared (Junkyard, Midtown Suburbs), progress saved and loaded | ✅ |
 | Menus, level select, level loading | ✅ |
 | First match: HUD, cars, textured 3D, bots | ✅ |
@@ -109,7 +110,7 @@ state machine and no copy of GS memory in between.
 | No IOP hardware: no SIO2, no IOP interrupt controller, DMA or timer registers modelled; the modules reach the IOP through their imports only (`[iop:hw] hardware absent`) | ✅ |
 | Sound and IOP on the PC's clock (`PS2X_SPU2_WALLCLOCK=1`, `PS2X_IOP_WALLCLOCK=1`) | ✅ |
 | No SPU2 emulation: 989SND's libsd calls played by the fork's native mixer (`PS2X_NATIVE_AUDIO=1`), the SPU2 absent | ✅ |
-| No paraLLEl-GS: OpenGL on the GPU (the GS native back end) | ✅ |
+| No paraLLEl-GS and no GS back end: the native renderer draws with OpenGL on the GPU | ✅ |
 | Frame loop on the PC's clock (`FramePacer`; `TMB_NATIVE_FRAMES=0`: the vblanks) | ✅ |
 | Every VU1 program translated to C++ (3D, skinning, effects), no VU interpreter and no sandbox | ✅ |
 | Every VU0 program translated to C++ (the scene traversal's, bit-exact with VU0, and the 2D engine's), no VIF0 packet read, no VU0 interpreter (`runtime/tmb_vu0.cpp`) | ✅ |
@@ -117,7 +118,7 @@ state machine and no copy of GS memory in between.
 | Font, HUD, loading bar, overlays' darkening and movies drawn natively from the game's variables (no GIF packet built or read) | ✅ |
 | 3D meshes from an offline native pack (`tools/tmb_mesh_pack.py`, through the fork's generic pack writer and runtime: `PS2Recomp/docs/native_packs.md`) drawn at the game's per-object hook from its own state, in the game's own order, clipped to its microprograms' clip volume; no VIF stream read | ✅ |
 | Effects (particles, lens flares, rain...) drawn from the game's particle lists (`runtime/tmb_particles.cpp`); no VIF stream read | ✅ |
-| IOP kernel layer (interrupts, timers, SIF) under the recompiled IOP modules: still the fork's model | 🔧 |
+| IOP kernel layer (threads, semaphores, interrupts, timers, SIF RPC, cdvdman) answered natively at its API, under the recompiled modules (the software layer, not hardware) | ✅ |
 | No GS front end, no copy of GS memory, no VIF stream read: the native renderer draws and presents the whole frame (`TMB_GS_FRONTEND=1` and the diagnostic switches bring the GS front end back, headless) | ✅ |
 
 ✅ works · 🔧 in progress · ⏳ not reached yet
@@ -138,7 +139,7 @@ program piece by piece. Each piece below replaces a part of the PS2 that was sim
 | Part of the game | On the PS2 | In the port |
 |---|---|---|
 | Frame timing | the vblank interrupt; the game counts the fields a frame took from a hardware timer | each frame paced on the PC's clock (the fork's `FramePacer`) and shown as soon as it ends, its fields counted from the real time it took (`TMB_NATIVE_FRAMES=0`: the vblanks) |
-| Game code (EE, MIPS R5900) | the EE CPU | 3,572 functions recompiled to C++ (`generated/`), with the ELF's own symbols |
+| Game code (EE, MIPS R5900) | the EE CPU | 3,572 functions recompiled to C++ (`generated_us/`), with the ELF's own symbols |
 | IOP modules (989SND, LIBSD, PADMAN, SIO2MAN, MTAPMAN, MCMAN, MCSERV, USBD, LGDEV) | R3000A code on the IOP | all recompiled to C++ by the fork's `tools/iop_recomp.py` (`scripts/iop_recomp.sh`), switch cases and frameless leaf functions included; none left interpreted (`[iop:hw]`: interpreted instructions 0) |
 | IOP hardware (interrupt controller, DMA channels, root counters, SIO2, CDVD and SIF registers) | devices behind the IOP's registers | none: the IOP kernel (threads, semaphores, events, intrman, timrman, vblank), SIF (sifman, sifcmd, RPC) and cdvdman are answered natively at their API; pad and memory card are the EE's libpad / libmc HLE; the registers a module's start code still touches (LIBSD's bus setup, USBD's probe, SIO2MAN's first write: about 1000 accesses at boot, none after) are plain storage without effect (`PS2X_IOP_HARDWARE=0`, TMB's default; `TMB_IOP_HARDWARE=1` brings the models back) |
 | Sound mixing (SPU2) | the SPU2 chip, at the IOP's pace | no SPU2: libsd's exports (the recompiled 989SND's calls: voices, banks, effects, the movie stream) taken over by the fork's native mixer (`ps2xIOP/src/native_audio`, `PS2X_NATIVE_AUDIO=1`, TMB's default): 48 voices playing the game's ADPCM banks from a native sound memory, ADSR, reverb and the looping sound data input (movie audio), mixed at 48 kHz when the PC's audio device asks; the SPU2 emulation is absent (no sound RAM, no registers, no DMA, never scheduled; `TMB_NATIVE_AUDIO=0` brings it back) |
@@ -151,10 +152,10 @@ program piece by piece. Each piece below replaces a part of the PS2 that was sim
 | Display (vblank, CSR.FIELD, display mode) | GS CRTC | native: the field from the EE scheduler's vblank count, the mode from `sceGsResetGraph` / `SetGsCrt`, `GsPutIMR` kept for `GsGetIMR` (no GS interrupt exists) |
 
 ```
-disc files (game_us/, game/) ──► ps2_analyzer ──► recomp/tmb_scus97101.toml, tmb_sces50360.toml (+ recomp/tmb_manual.toml)
+disc files (game_us/) ──► ps2_analyzer ──► recomp/tmb_scus97101.toml (+ recomp/tmb_manual.toml)
                                            │
-                     ps2_recomp + the ELF's own symbol table ──► C++ (one file per function, generated/)
-   989SND, LIBSD as the IOP loads them ──► iop_recomp.py ──► C++ (generated/iop/)
+                     ps2_recomp + the ELF's own symbol table ──► C++ (one file per function, generated_us/)
+   the disc's IOP modules, loaded offline ──► iop_recomp.py ──► C++ (generated_us/iop/)
                                            │
                  CMakeLists.txt ──► PS2Recomp runtime + generated code + runtime/ (TMB's overrides, native adapter)
                                            │
@@ -182,11 +183,14 @@ Age*, *Jade Cocoon 2*, *Soulcalibur III* and others). Fixes made for this port l
 
 ## Requirements
 
-- Linux (developed on Arch) or Windows 10/11 with [MSYS2](https://www.msys2.org/) (UCRT64, see below)
+Players need none of this: the release's launcher and build kit bring everything ("For players" above). To build
+from the repository:
+
+- Windows 10/11 with [MSYS2](https://www.msys2.org/) (UCRT64, see below), or Linux (developed on Arch at first; not
+  tested since November 2026)
 - CMake 3.21+, Ninja, GCC 13+ or Clang with C++20
 - FFmpeg development libraries (`libavcodec`, `libavutil`, `libswscale`) and `pkg-config` (or a static FFmpeg folder: `PS2X_FFMPEG_ROOT`)
 - X11/Wayland and OpenGL development headers (raylib is fetched and built by the fork)
-- `bsdtar` (libarchive) to extract the disc
 - A CPU with AVX2 (the runtime is built for `x86-64-v3`)
 - Your own copy of `SCUS-97101` (check the hash above)
 
@@ -547,9 +551,11 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `recomp/` | Recompiler config (analyzer output plus manual additions) |
 | `runtime/` | Game override module (game-specific bindings) |
 | `scripts/` | Extract, build tools, analyze, recomp, build runner, run |
-| `tools/` | `tmb_build.py` (disc to game folder), `make_build_kit.py` (the build kit), analysis helpers (`iso_lbn.py`: disc file of a sector; `gs_fb_decode.py`: framebuffer out of a VRAM dump; `irx_disasm.py`: IOP module code) |
+| `tools/` | `tmb_build.py` (disc to game folder), `make_build_kit.py` (the build kit; `build_kit_packages.json` pins its MSYS2 packages), `make_release.py` (the release zip), analysis helpers (`iso_lbn.py`: disc file of a sector; `gs_fb_decode.py`: framebuffer out of a VRAM dump; `irx_disasm.py`: IOP module code) |
 | `launcher/` | `TMB Launcher.exe`: checks the player's disc, builds the game with the kit, starts it (raylib, Dear ImGui) |
-| `docs/` | Bring-up notes |
+| `docs/` | Bring-up notes (`RECOMP_NOTES.md`), `HANDOFF.md`, `RELEASE_CHECKLIST.md` |
+| `.github/workflows/` | `release.yml`: the release, built only on a version tag ("Making a release") |
+| `CHANGELOG.md`, `LICENSE` | What each release changes; TMB_Recomp's own code under the MIT licence (PS2Recomp stays GPL-3.0) |
 | `PS2Recomp/` | PS2Recomp fork (submodule) |
 
 Everything derived from the game (`game_us/`, `game/`, `generated_us/`, `generated/`, `build/`, disc images, captures) is git-ignored. Never commit or
@@ -557,6 +563,7 @@ redistribute it.
 
 ## Credits
 
-- [PS2Recomp](https://github.com/ran-j/PS2Recomp) by ran-j and contributors (GPL), the recompiler and runtime this port is built on.
-- The *Valkyrie Profile 2: Silmeria* and *Drakengard* recompilations, developed on the same PS2Recomp fork; runtime fixes are shared.
+- **The Bozos**: boubou666 and Arzaroth, who make this port and the PS2Recomp fork it runs on ([RecompWatcher](https://boubou666.github.io/RecompWatcher/) shows our projects).
+- [PS2Recomp](https://github.com/ran-j/PS2Recomp) by ran-j and contributors (GPL-3.0), the recompiler and runtime this port is built on.
+- The other recompilations on the same fork (*Valkyrie Profile 2: Silmeria*, *Dark Cloud*, *Soulcalibur III*, *Drakengard*, *The Lord of the Rings: The Third Age*, *Jade Cocoon 2* and others): runtime fixes are shared, and DC_Recomp's native sound mixer plays TMB's sound.
 - *Twisted Metal: Black* © Sony Interactive Entertainment, developed by Incognito Entertainment. This is an unofficial fan project, not affiliated with or endorsed by them.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerates the region's recompiler config (recomp/tmb_scus97101.toml or recomp/tmb_sces50360.toml) from its ELF with
+# Regenerates the region's recompiler config (recomp/tmb_scus97101.toml) from its ELF with
 # ps2_analyzer, then adds the hand-written part shared by both regions (recomp/tmb_manual.toml, by symbol name).
 # WARNING: this overwrites hand edits in the TOML outside the shared part; diff before committing.
 source "$(dirname "$0")/common.sh"

@@ -2,7 +2,7 @@
 """A PS2X_PAD_SCRIPT that plays: the menu presses into the first match (it starts about 150 s in), then accelerating,
 steering both ways, firing (R1, L1, CIRCLE), switching weapons and braking until `end` seconds.
 
-  PS2X_PAD_SCRIPT="$(tools/play_script.py 600)" timeout 600 build/game/PS2Recomp/ps2xRuntime/ps2EntryRunner game/SCES_503.60
+  PS2X_PAD_SCRIPT="$(tools/play_script.py 600)" timeout 600 build/game_us/PS2Recomp/ps2xRuntime/ps2EntryRunner game_us/SCUS_971.01
 
 A car standing still sends few sound commands; this one made the 989snd freeze (fixed in the fork, RECOMP_NOTES
 "Freeze while playing") happen within 5 minutes.

@@ -4,7 +4,7 @@ presses after Suburbs (0 Suburbs, 1 Junkyard, 4 Skyscrapers, 5 Downtown, 6 Highw
 2 Freeway is locked and 3 Prison Passage can't be picked in Challenge), two opponents, then driving and firing as
 tools/play_script.py from 205 s (the match starts about 200 s in) until `end` seconds.
 
-  PS2X_PAD_SCRIPT="$(tools/arena_script.py 4 380)" timeout 380 build/game/PS2Recomp/ps2xRuntime/ps2EntryRunner game/SCES_503.60
+  PS2X_PAD_SCRIPT="$(tools/arena_script.py 4 380)" timeout 380 build/game_us/PS2Recomp/ps2xRuntime/ps2EntryRunner game_us/SCUS_971.01
 """
 import sys
 

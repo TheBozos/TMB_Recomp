@@ -17,8 +17,10 @@ What it reads:
 - its packet: DMA tags (REF: data elsewhere in the file, next tag after it; CNT / RET: data after the tag, RET ends;
   NEXT: data after the tag, next tag at its address), each tag's upper half two VIF codes. The VIF codes:
     UNPACK S-32 @180            pool size
-    UNPACK V3-32 @181 n         pool: n positions (x, y, z floats), drawn by MSCAL 0 (or 2)
-    UNPACK V3-32 @373 n         billboards (3 objects, MSCAL 2): a second value per pool position, kept as "aux"
+    UNPACK V3-32 @181 n         pool: n positions (x, y, z floats), then its vertex pass: MSCAL 0 (rigid) or MSCAL 2
+                                (0x10, the morph pass: position + delta * VU 31, the weight pktAddVu1ObjAsm sends)
+    UNPACK V3-32 @373 n         the morph deltas (3 objects, flag 42, MSCAL 2: CITY, MINICITY, FREEWAY): one per pool
+                                position, kept as "aux"
     per batch, closed by MSCNT: UNPACK V4-32 @0 the GIF tag (NLOOP, EOP, PRE, PRIM; word 3 the material header:
                                 0 = keep the texture, else texture slot (w3 - 1) / 3),
                                 UNPACK V4-8 @1 normal bytes (x, y, z) and the pool index (w)
@@ -44,7 +46,7 @@ What it reads:
   before each); the next starts with its pool's S-32 @180. A bone offset is 4 quadwords per bone: bone = offset / 4.
 
 The pack, all little-endian:
-  "TMBMESH3", u32 file count, then per file:
+  "TMBMESH4", u32 file count, then per file:
     u16 name length, name (upper case, no directory, e.g. "JUNKYARD.NGP"), u32 image size (inflated), u32 image CRC32,
     u32 object count, then per object (sorted by offset):
       u32 offset (obj - 0x980000 in the image), u32 kind (0 rigid, 1 pool-less, 2 sprite, 3 ribbon, 4 skinned),
@@ -54,7 +56,9 @@ The pack, all little-endian:
         then, if has aux, per position f32 x, y, z, 0 (the @373 block; 0 where none),
       u32 pool source count, then per pool the object uses: u32 the image offset of its x, y, z floats (V3-32 @181
         data: the runtime reads the positions there, where a game that moves a mesh's vertices writes them;
-        0xffffffff when they are not in one piece), u32 its first position, u32 its position count,
+        0xffffffff when they are not in one piece), u32 its first position, u32 its position count, u32 its vertex
+        pass (the MSCAL after it, as a VU1 address: 0x00 rigid, 0x10 morph), u32 the image offset of its morph deltas'
+        x, y, z floats (V3-32 @373 data; 0xffffffff: none, or not in one piece: the aux block has them),
       u32 parameter count, then per parameter u32 the index of the strip it comes before, f32[4],
       u32 skin vertex count (skinned: one per position, else 0), then per skin vertex 20 bytes: u8 bones (the vertex
         pass's: 1, 2, 3), u8 normal x, y, z (n = 1 - b / 128), u8 bone 0, 1, 2 (the matrix index), u8 pad, i32 weight
@@ -210,7 +214,9 @@ class Pool:
     def __init__(self, positions, source=None):
         self.positions = positions  # [(x, y, z, 0.0)]
         self.source = source  # the image offset of its x, y, z floats (None: not in one piece)
-        self.aux = None  # V3-32 @373 (billboards): [(x, y, z, 0.0)], one per position
+        self.aux = None  # V3-32 @373 (the morph deltas): [(x, y, z, 0.0)], one per position
+        self.aux_source = None  # the image offset of its x, y, z floats (None: none, or not in one piece)
+        self.vertex_pass = 0  # the MSCAL after it, as a VU1 address (0x00 rigid, 0x10 morph)
 
 
 class Mesh:
@@ -218,8 +224,9 @@ class Mesh:
         self.offset, self.kind, self.flags, self.sphere, self.textures = offset, kind, flags, sphere, textures
         self.pool_from = 0xffffffff
         self.positions = []  # (x, y, z, w)
-        self.sources = []  # (image offset of a pool's x, y, z floats or 0xffffffff, first position, count)
-        self.aux = []  # per position (x, y, z, 0) from a pool's @373 block, or zeros
+        self.sources = []  # (image offset of a pool's x, y, z floats or 0xffffffff, first position, count,
+        #                     vertex pass, image offset of its morph deltas or 0xffffffff)
+        self.aux = []  # per position (x, y, z, 0) from a pool's @373 block (the morph deltas), or zeros
         self.params = []  # (index of the strip it precedes, (f32 x4)): batches with only a V4-32 @0 qword
         self.strips = []  # (prim, gif flags, material header, slot, [(pos index, nx, ny, nz, vflags, rgba, s, t)])
         self.skin = []  # skinned: per position (bones, (nx, ny, nz), (bone 0, 1, 2), (weight 0, 1, 2))
@@ -245,6 +252,7 @@ def decode_strips(image, obj, inherited_pool):
                 pools.append(current_pool)
             elif addr == 373 and fmt == 8 and current_pool is not None and len(current_pool.positions) == num:
                 current_pool.aux = [struct.unpack_from('<3f', data, payload + 12 * i) + (0.0,) for i in range(num)]
+                current_pool.aux_source = image_offset(pieces, payload, 12 * num)
             elif addr == 0 and fmt == 12 and num == 1:
                 strip.tag = struct.unpack_from('<4I', data, payload)
             elif addr == 1 and fmt == 14:
@@ -261,7 +269,12 @@ def decode_strips(image, obj, inherited_pool):
         elif cmd == 0x17:  # MSCNT: one batch
             strips.append((strip, current_pool))
             strip = Strip()
-        elif cmd in (0x00, 0x10, 0x11, 0x13, 0x14, 0x15):  # NOP, FLUSHE / FLUSH / FLUSHA, MSCAL / MSCALF
+        elif cmd in (0x14, 0x15):  # MSCAL / MSCALF: the vertex pass over the pool just sent
+            if current_pool is not None and current_pool in pools:
+                if imm not in (0, 2):
+                    problems.append(f'vertex pass MSCAL {imm:#x} at stream +{at:#x}')
+                current_pool.vertex_pass = imm * 8
+        elif cmd in (0x00, 0x10, 0x11, 0x13):  # NOP, FLUSHE / FLUSH / FLUSHA
             pass
         else:
             problems.append(f'VIF cmd {cmd:#x} at stream +{at:#x}')
@@ -416,7 +429,10 @@ def build_mesh(image, obj, kind, inherited_pool):
             if id(pool) not in pool_base:
                 pool_base[id(pool)] = len(mesh.positions)
                 mesh.sources.append((0xffffffff if pool.source is None else pool.source, len(mesh.positions),
-                                     len(pool.positions)))
+                                     len(pool.positions), pool.vertex_pass,
+                                     0xffffffff if pool.aux_source is None else pool.aux_source))
+                if pool.vertex_pass == 0x10 and pool.aux is None:
+                    problems.append('morph pass without its deltas')
                 mesh.positions.extend(pool.positions)
                 mesh.aux.extend(pool.aux or [(0.0, 0.0, 0.0, 0.0)] * len(pool.positions))
             bad = [w for _, _, _, w in strip.slot1[1] if w >= len(pool.positions)]
@@ -524,7 +540,7 @@ def convert_file(path):
 
 def write_pack(out_path, files):
     with open(out_path, 'wb') as out:
-        out.write(b'TMBMESH3')
+        out.write(b'TMBMESH4')
         out.write(struct.pack('<I', len(files)))
         for name, image, meshes in files:
             encoded = name.encode()
@@ -538,7 +554,7 @@ def write_pack(out_path, files):
                 if has_aux:
                     out.write(b''.join(struct.pack('<4f', *a) for a in m.aux))
                 out.write(struct.pack('<I', len(m.sources)))
-                out.write(b''.join(struct.pack('<III', *src) for src in m.sources))
+                out.write(b''.join(struct.pack('<IIIII', *src) for src in m.sources))
                 out.write(struct.pack('<I', len(m.params)))
                 out.write(b''.join(struct.pack('<I4f', i, *q) for i, q in m.params))
                 out.write(struct.pack('<I', len(m.skin)))
@@ -576,6 +592,9 @@ def dump(game, name, offset):
           f'ntex {m.textures[0]}, textures {list(m.textures[1:1 + m.textures[0]])}')
     if m.pool_from != 0xffffffff:
         print(f'  pool from object {m.pool_from:#x}')
+    for source, first, count, vertex_pass, deltas in m.sources:
+        print(f'  pool: positions {first}-{first + count - 1} at {source:#x}, vertex pass {vertex_pass:#x}' +
+              (f', morph deltas at {deltas:#x}' if deltas != 0xffffffff else ''))
     for i, (bones, normal, ids, weights) in enumerate(m.skin[:400]):
         print(f'  skin [{i:4}] {bones} bones {ids[:bones]} weights {[w / 65536 for w in weights[:bones]]} n {normal}')
     print(f'  {len(m.positions)} positions, {len(m.strips)} strips, '

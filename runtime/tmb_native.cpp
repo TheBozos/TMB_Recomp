@@ -96,6 +96,11 @@ namespace tmb::native
             case 0x0cc8: return Mode::Unlit;
             case 0x0d08: return Mode::Scaled;
             case 0x0ce8: return Mode::Directional;
+            // The morphing objects' setups (flag 42): the same code as 0xcc8, 0xce8, 0xd08 (their pool's vertex pass,
+            // MSCAL 2, is the morph pass).
+            case 0x0d28: return Mode::Unlit;
+            case 0x0d48: return Mode::Directional;
+            case 0x0d68: return Mode::Scaled;
             case 0x1700: return Mode::Point;
             case 0x3000: return Mode::Sprite;
             case 0x3270: return Mode::Ribbon;
@@ -109,7 +114,8 @@ namespace tmb::native
         }
 
         // The microprograms this adapter draws, recognised by the lower instruction at each entry (so only while their
-        // code image is loaded). Setups (and programs that stand alone): the hier image's strip setups, skinned setups
+        // code image is loaded). Setups (and programs that stand alone): the hier image's strip setups (the morphing
+        // objects' 0xd28, 0xd48, 0xd68 among them: the same code as 0xcc8, 0xce8, 0xd08), skinned setups
         // (0x50, 0x70: strips at 0x640; 0x90, 0xb0: unlit), sprites, beams and trails (0x3270), chrome and water (0x1db8),
         // and the effects image's programs (rain, particles, flares, streaks, trails, heat haze, lightning, beams).
         // Vertex passes (0x00 rigid, 0x10 morph, 0x20 / 0x30 / 0x40 skinned with three, two, one bones) run after a setup
@@ -120,6 +126,7 @@ namespace tmb::native
             uint32_t pc, lower;
         };
         constexpr Program kSetups[] = {{0x0cc8u, 0x420f01e7u}, {0x0ce8u, 0x420f01e3u}, {0x0d08u, 0x420f01dfu},
+                                       {0x0d28u, 0x420f01dbu}, {0x0d48u, 0x420f01d7u}, {0x0d68u, 0x420f01d3u},
                                        {0x1700u, 0x420f00a0u}, {0x0050u, 0x420f0376u}, {0x0070u, 0x420f0372u},
                                        {0x3000u, 0x420f0580u}, {0x1d40u, 0x420f07deu}, {0x3270u, 0x420f0532u},
                                        {0x1db8u, 0x420f07c9u},
@@ -2131,7 +2138,8 @@ namespace tmb::native
                 for (uint32_t q = 0; q < 22u; ++q)
                     for (int k = 0; k < 4; ++k)
                     {
-                        if (q >= 6u && q <= 8u && (drawn.resumes ? drawn.resumes : drawn.setupPc) != 0x0ce8u && drawn.setupPc != 0x0070u)
+                        const uint32_t lit = drawn.resumes ? drawn.resumes : drawn.setupPc;
+                        if (q >= 6u && q <= 8u && lit != 0x0ce8u && lit != 0x0d48u && drawn.setupPc != 0x0070u)
                             break; // the light directions: only the directional setup reads them
                         float a, b;
                         std::memcpy(&a, &drawn.check[q][k], 4);
@@ -2160,6 +2168,24 @@ namespace tmb::native
                                          drawn.setupPc, drawn.resumes, i, drawn.matrix[i], s.matrix[i]);
                         break;
                     }
+                // A morphing object's weight (VU 31), which its vertex pass read in the stream.
+                if (drawn.setupPc == 0x0d28u || drawn.setupPc == 0x0d48u || drawn.setupPc == 0x0d68u)
+                {
+                    static uint64_t s_morphs = 0, s_weights = 0;
+                    ++s_morphs;
+                    if (std::memcmp(drawn.check[22], &s.vu.words[31u * 4u], 16) != 0)
+                    {
+                        differs = true;
+                        ++s_weights;
+                    }
+                    float a, b;
+                    std::memcpy(&a, &drawn.check[22][0], 4);
+                    std::memcpy(&b, &s.vu.words[31u * 4u], 4);
+                    if (s_morphs <= 20u || s_morphs % 1000u == 0u)
+                        std::fprintf(stderr, "[tmb:mesh] check: morphing object %#x (setup %#x): weight hook %g, stream %g; %llu of %llu weights differing\n",
+                                     drawn.object, drawn.setupPc, a, b, static_cast<unsigned long long>(s_weights),
+                                     static_cast<unsigned long long>(s_morphs));
+                }
                 s_differing += differs ? 1u : 0u;
                 if (s_objects % 20000u == 0u)
                 {

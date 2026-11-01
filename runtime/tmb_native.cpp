@@ -25,6 +25,7 @@
 #include "runtime/native/native_vu1_sandbox.h"
 #include "runtime/ps2_memory.h"
 #include "tmb_region.h" // TMB_REGION_US / TMB_REGION_PAL
+#include "runtime/native/native_display.h"
 #include "runtime/native/native_gs_hook.h"
 #include "tmb_meshes.h"
 #include "tmb_vu1_shading.h"
@@ -3138,6 +3139,84 @@ namespace tmb::native
         return s_on;
     }
 
+    // No GS front end at all in the default mode (ps2x::native::setGsFrontEndAbsent): the runtime constructs no GS object
+    // (no GS thread, no raster backend, no GL context of its own), allocates no GS memory, and what the game asks of
+    // the display (CSR.FIELD, the vblanks, its display mode, GsPutIMR / GsGetIMR) is answered natively
+    // (runtime/native/native_display.h). Everything else is drawn and presented by the native renderer already: its own
+    // frame (TMB_NATIVE_FRAME), nothing read from the GS / VIF1 / VIF0 packets (setGsDmaSkipped, setVif0Skipped), no VU1
+    // program run. The diagnostic modes that need the GS front end bring it back: TMB_GS_FRONTEND=1 (the GS front end
+    // headless as before, otherwise the default mode), TMB_NATIVE_FRAME=0, TMB_GS_HEADLESS=0, TMB_GS_PACKETS=1,
+    // TMB_NATIVE_VIF=1, TMB_NATIVE_VU1=1, TMB_VIF0_PACKETS=1, TMB_VU0_NATIVE=0, PS2X_VU0_HLE_CHECK=1, a PS2X_GS_RENDERER
+    // other than native, and TMB_NATIVE=0.
+    bool gsFrontEndAbsent()
+    {
+        static const bool s_absent = []
+        {
+            const auto is = [](const char *name, char value)
+            {
+                const char *text = std::getenv(name);
+                return text && *text == value;
+            };
+            if (!enabled() || is("TMB_GS_FRONTEND", '1'))
+                return false;
+            if (is("TMB_NATIVE_FRAME", '0') || is("TMB_GS_HEADLESS", '0') || is("TMB_GS_PACKETS", '1') || vifObserved())
+                return false;
+            if (is("TMB_NATIVE_VU1", '1') || is("TMB_VIF0_PACKETS", '1') || is("TMB_VU0_NATIVE", '0') || is("PS2X_VU0_HLE_CHECK", '1'))
+                return false;
+            const char *renderer = std::getenv("PS2X_GS_RENDERER");
+            return !(renderer && *renderer && std::string_view(renderer) != "native");
+        }();
+        return s_absent;
+    }
+
+    // Decided before main, so before the runtime is constructed (PS2Runtime's constructor makes the GS front end or
+    // not, PS2Memory::initialize allocates GS memory or not).
+    const bool g_gsFrontEndDecided = []
+    {
+        ps2x::native::setGsFrontEndAbsent(gsFrontEndAbsent());
+        return true;
+    }();
+
+    // [tmb:gs] per 250 frames: what reached the GS front end, GS memory or the GS registers (the fork's "gs:" sites,
+    // PS2X_GS_TOUCH), what the native display answered instead ("display:") and the libgraph calls the game made
+    // ("call:"), each with its count since the last line. Logged with TMB_TRACE_PACKETS=1, and always when the GS front
+    // end is absent and something reached a "gs:" site (it should not: the runtime faults on a GS access it missed).
+    void logGsTouches()
+    {
+        static const bool s_always = []
+        {
+            const char *value = std::getenv("TMB_TRACE_PACKETS");
+            return value && *value == '1';
+        }();
+        static std::unordered_map<const void *, uint64_t> s_last;
+        std::string gs, display, calls;
+        uint64_t gsTotal = 0;
+        ps2x::native::forEachGsTouch([&](const char *name, uint64_t count)
+                                     {
+                                         uint64_t &last = s_last[name];
+                                         const uint64_t delta = count - last;
+                                         last = count;
+                                         if (delta == 0u)
+                                             return;
+                                         std::string_view text(name);
+                                         std::string *list = &calls;
+                                         if (text.rfind("gs: ", 0) == 0)
+                                             list = &gs, gsTotal += delta;
+                                         else if (text.rfind("display: ", 0) == 0)
+                                             list = &display;
+                                         const size_t colon = text.find(": ");
+                                         if (colon != std::string_view::npos)
+                                             text.remove_prefix(colon + 2u);
+                                         *list += std::string(list->empty() ? " " : "; ") + std::string(text) + " " + std::to_string(delta);
+                                     });
+        const bool absent = ps2x::native::gsFrontEndAbsent();
+        if (!s_always && !(absent && gsTotal != 0u))
+            return;
+        std::fprintf(stderr, "[tmb:gs] per 250 frames: GS front end %s; reached:%s | native display:%s | libgraph calls:%s\n",
+                     absent ? "absent (no GS object, no GS memory, no GS thread, no raster backend)" : "present",
+                     gs.empty() ? " nothing" : gs.c_str(), display.empty() ? " -" : display.c_str(), calls.empty() ? " -" : calls.c_str());
+    }
+
     // The draws that follow clipped to the view the game draws now (tmb_meshes.cpp, at a view's kick).
     void applyViewClip()
     {
@@ -3264,7 +3343,10 @@ namespace tmb::native
                 g_stats = Stats{};
             }
             if (s_frames % 250u == 0u)
+            {
                 logPacketStats();
+                logGsTouches();
+            }
             tmb::meshes::flushUnsent(); // a view whose chain hier__Fi did not kick itself (the menus): its objects now
             tmb::twod::publish(); // the 2D the game's rewritten builders drew (runtime/tmb_2d.cpp), on this frame's screen
             renderer.endFrame();

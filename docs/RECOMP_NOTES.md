@@ -1118,3 +1118,61 @@ bit-exact (0x808 does not run in 4P). The 2D image's five use the same arithmeti
 interpreter 0, VIF0 interpreter 0, VU0 interpreter 0 runs (0 not run), chains walked 0, PATH3 0, libgraph packets 0, and
 every kick to channels 0, 1 and 2 unread; `[tmb:vu0]` the VIF0 kicks by chain and "programs not native: none". Nothing
 of the GS, VIF0 or VIF1 packets is read and no VU microcode is interpreted in the default mode.
+
+## 2026-11-01: no GS front end
+
+After the packets, the GS front end itself was still there in the default mode, receiving nothing: constructed with
+the runtime (with a CPU raster backend), its 4 MB of GS memory allocated, initialised with its worker thread, the GS
+native raster backend made on its own GL context, the privileged register block written at every vblank. What reached
+it, counted by call site (`PS2X_GS_TOUCH` in the fork, listed by `[tmb:gs]` every 250 frames with
+`TMB_TRACE_PACKETS=1`), over a run with it kept (`TMB_GS_FRONTEND=1`: boot movies, menus with their movie pictures, 1P
+Junkyard, its pause menu, quit to the menus and a second match):
+- Dead in the default mode (built, never used): `GS::GS` with its CPU raster backend, the GS memory, `GS::init`,
+  `GS::enableAsync` (the GS thread), the GS native back end and `setRasterBackend`, `requestParallelRenderer`; each once at
+  start. The per-frame presentation latch: `EeScheduler::latchGuestFrame` -> `GS::latchHostPresentationFrame` /
+  `queueHostPresentationLatch`, 250 per 250 frames, which latched nothing (headless, the native renderer presents its own
+  frame); the FPS counter's `displayFlips` read from it. `sceGsResetGraph`'s display registers and GIF packet (2 at boot).
+- Used only to satisfy the game: the vblank's CSR.FIELD and vsyncTick writes (one per vblank, 252-256 per 250 frames);
+  the game's CSR reads (`GS::fifoEmpty` behind each), one per frame in the menus and movies (vblankHandler,
+  blitLastMovieFrame), a few in a match (4 to 75 per 250 frames); its own writes to PMODE, DISPFB1/2, DISPLAY1/2 (two of
+  each a frame, about 500 per 250 frames; SMODE2 and BGCOLOR 3 at boot), which only the GS front end's presentation read.
+  No GsPutIMR / GsGetIMR, no IMR, BUSDIR or SIGLBLID access, no SetGsCrt.
+- libgraph calls the game makes (they send nothing since setGsDmaSkipped): sceGsPutDrawEnv (one a frame),
+  sceGsSyncPath (8 to 10 a frame: DMA registers only), sceGsExecLoadImage 86 and sceGsSetDefLoadImage 174 while
+  loading, sceGsSetDefClear / DrawEnv / DrawEnv2 / DispEnv and sceGsResetGraph / ResetPath at boot. Never: the
+  SwapDBuff family, sceGsPutDispEnv, sceGsSyncV (TMB's own sceGsSyncVNative).
+- Presentation: nothing; the window, the circuit-2 picture (the menus' movie frame, which the native renderer uploads and
+  composes itself), the movie backdrop, the native frame, the 2D overlay and the window captures were all the native
+  renderer's already.
+
+Now the GS front end is absent by default (fork `ps2x::native::setGsFrontEndAbsent`, set by `runtime/tmb_native.cpp`'s
+static initialiser before main, so before PS2Runtime's constructor and PS2Memory::initialize):
+- PS2Runtime holds the GS as a `std::unique_ptr` it does not construct; no GS memory is allocated (`getGSVRAM()` null),
+  no GS thread, no raster backend, no GL context of its own, no presented-frames provider; the GIF arbiter's packets
+  (none arrive) would be dropped and counted. `gs()` with no GS is a fault (logged, then abort), so a missed caller
+  cannot pass unnoticed; every caller checks `hasGs()` or the switch (VU1 / VU0 interpreter runs, the native GIF chains,
+  the state dump, `ps2GsFifoEmpty`, `pollGsInterrupt`, the debug panel's GS tab, TMB's fill-rate A/B and GPU request).
+- A native display (`runtime/native/native_display.h`), not a register model: the vblank count from the EE scheduler on
+  the frame pacer's clock gives the field (CSR.FIELD), the frames the game ends (`presentGuestFrame`) the FPS counter's
+  count, `sceGsResetGraph` / `SetGsCrt` / the display environments the mode (interlace, field / frame, PAL, which
+  `sceGsSetDefDispEnv` reads), `GsPutIMR` a mask `GsGetIMR` returns. A guest read of the privileged registers gets CSR =
+  FIELD | FIFO empty, anything else 0; a guest write is counted and dropped.
+- The libgraph HLE reaches no GS: the clear packets, drawing environments and display environments are not applied,
+  image transfers send nothing and store images read zeros (as with setGsDmaSkipped), `sceGsResetGraph` sets the
+  display's mode and sends no packet.
+- TMB starts no VIF1 worker thread (nothing is ever queued for it) and no CPU raster threads.
+
+The proof, `[tmb:gs]` in every default run (boot movies, menus, options and memory card screens, story mode's first
+match, 1P Junkyard with its pause menu, quit and a second match, CITY with its pause menu, 4P, the attract demo):
+"GS front end absent (no GS object, no GS memory, no GS thread, no raster backend); reached: nothing" in every line
+(56, 35, 38, 45, 34 lines of 250 frames), the native display's counts beside it (vblanks, frames ended, CSR reads, the
+dropped display register writes), and at start "[tmb:gs] no GS front end: GS object none, GS memory none, ...". The
+pictures are the main build's in each run, 60 fps on the FPS counter, window captures as before.
+
+`TMB_GS_FRONTEND=1` brings the GS front end back (headless, as before), and so do the switches that need it:
+`TMB_GS_HEADLESS=0`, `TMB_GS_PACKETS=1`, `TMB_NATIVE_VIF=1`, `TMB_NATIVE_FRAME=0` (checked: the native draws in the GS
+frame, menus and match as before), `TMB_NATIVE_VU1=1`, `TMB_VIF0_PACKETS=1`, `TMB_VU0_NATIVE=0`,
+`PS2X_VU0_HLE_CHECK=1`, a `PS2X_GS_RENDERER` other than native, `TMB_NATIVE=0`.
+
+Left: PS2Memory still has its `GSRegisters` member (160 bytes, zero, untouched without a GS front end) and the GS code
+is still linked for the diagnostic modes and the other ports.

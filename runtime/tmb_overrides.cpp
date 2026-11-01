@@ -10,6 +10,7 @@
 #include "runtime/gs/gs_cpu_backend.h"
 #include "runtime/gs/gs_draw_estimate.h"
 #include "runtime/ps2_memory.h"
+#include "runtime/native/native_display.h"
 #include "runtime/sampling_profiler_gate.h"
 #include "tmb_host.h"
 #include <string>
@@ -53,6 +54,7 @@ namespace tmb::native
     bool flareDepthNative();
     void setGuestMemory(const uint8_t *rdram);
     bool enabled();
+    bool gsFrontEndAbsent();
 }
 
 namespace tmb::vu0
@@ -557,7 +559,8 @@ namespace
             runtime->eeScheduler().setVBlankHoldLimit(std::chrono::microseconds(on ? 12000 : 6000));
             break;
         case AbExperiment::Fill: // ffop/gs-fill-rate's default against main's, in the GS drawing-time model
-            runtime->gsForPresentation().setDrawRates(GsDrawEstimate::Rates{on ? 256u : 512u, 32u});
+            if (runtime->hasGs())
+                runtime->gsForPresentation().setDrawRates(GsDrawEstimate::Rates{on ? 256u : 512u, 32u});
             break;
         default:
             break;
@@ -1717,12 +1720,19 @@ namespace
         // Draw on the GPU (paraLLEl-GS, Vulkan): 20-23 ms per frame in the match against 24-27 with the CPU rasterizer,
         // and the four raster threads' CPU freed. PS2X_GS_RENDERER=cpu keeps the CPU rasterizer; without a Vulkan
         // device the GS falls back to it by itself.
-        if (runtime.gsForPresentation().requestParallelRenderer())
+        // No GS front end (runtime/tmb_native.cpp gsFrontEndAbsent): said once, with what proves it.
+        if (!runtime.hasGs())
+            std::cerr << "[tmb:gs] no GS front end: GS object none, GS memory "
+                      << (runtime.memory().getGSVRAM() ? "allocated" : "none") << ", GS thread none, raster backend none; "
+                      << "the display (vblanks, CSR.FIELD, frame count, mode, IMR) native (runtime/native/native_display.h), "
+                      << "the frame drawn and presented by the native renderer (TMB_GS_FRONTEND=1: the GS front end, headless)"
+                      << std::endl;
+        else if (runtime.gsForPresentation().requestParallelRenderer())
             std::cout << "[tmb] GS on the GPU (PS2X_GS_RENDERER=cpu for the CPU rasterizer)" << std::endl;
         // The game's frame rate at the top right while the speed work goes on (F3 hides it, PS2X_SHOW_FPS=0 is off).
         tmb::host::setEnvDefault("PS2X_SHOW_FPS", "1");
         // Rasterize on 4 worker threads (TMB_GS_SERIAL=1 keeps the GS thread alone).
-        if (const char *serial = std::getenv("TMB_GS_SERIAL"); !(serial && *serial == '1'))
+        if (const char *serial = std::getenv("TMB_GS_SERIAL"); runtime.hasGs() && !(serial && *serial == '1'))
         {
             tmb::host::setEnvDefault("PS2X_GS_RASTER_THREADS", "4");
             GSCpuBackend::SetAsyncRasterization(true);
@@ -1731,7 +1741,9 @@ namespace
         // (TMB_VIF1_SERIAL=1 keeps them on the game thread). The game waits for them in sceGsSyncPath each frame.
         if (const char *serial = std::getenv("TMB_VIF1_SERIAL"); !(serial && *serial == '1'))
         {
-            runtime.memory().setVif1Threaded(true);
+            // (Without a GS front end nothing is ever queued for VIF1, every kick completing unread: no worker.)
+            if (runtime.hasGs())
+                runtime.memory().setVif1Threaded(true);
             // TMB_GS_LAG=1: ...and finish a frame while the game runs the next. Off by default: bounded to one
             // presented frame (the input latency it adds), it gains nothing measurable; unbounded, its gain was the
             // GS falling several frames behind the controls.

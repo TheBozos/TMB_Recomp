@@ -396,7 +396,7 @@ namespace tmb::native
 
         struct Stats
         {
-            uint64_t chains = 0, objects = 0, strips = 0, triangles = 0, textured = 0, skipped = 0;
+            uint64_t chains = 0, objects = 0, strips = 0, triangles = 0, textured = 0, skipped = 0, directDraws = 0, directStates = 0;
         } g_stats;
 
         // The colour a strip's microprogram writes for one vertex (tmb::vu1::shade).
@@ -2920,6 +2920,7 @@ namespace tmb::native
                     const size_t have = std::min(size, count - i);
                     readDirect(s, words + i, have / 4u);
                     const bool native = s.direct && inMatch() && have == size && drawsOnly(words + i, have / 4u);
+                    ++(native ? g_stats.directDraws : g_stats.directStates);
                     // TMB_NATIVE_LOG_DIRECT=1: the A+D addresses of some DIRECT packets in a match.
                     static const bool s_logDirect = std::getenv("TMB_NATIVE_LOG_DIRECT") != nullptr;
                     static uint32_t s_directLogged = 0;
@@ -3098,10 +3099,11 @@ namespace tmb::native
             if (++s_frames % 250u == 0u)
             {
                 const State &s = state();
-                std::fprintf(stderr, "[tmb:native] per 250 frames: %llu chains, %llu objects (%llu not native), %llu strips, %llu triangles, %llu textured batches, group %llu; matrix col3 (%.1f %.1f %.1f %.1f)\n",
+                std::fprintf(stderr, "[tmb:native] per 250 frames: %llu chains, %llu objects (%llu not native), %llu strips, %llu triangles, %llu textured batches, DIRECT %llu drawing / %llu state only, group %llu; matrix col3 (%.1f %.1f %.1f %.1f)\n",
                              static_cast<unsigned long long>(g_stats.chains), static_cast<unsigned long long>(g_stats.objects),
                              static_cast<unsigned long long>(g_stats.skipped), static_cast<unsigned long long>(g_stats.strips),
-                             static_cast<unsigned long long>(g_stats.triangles), static_cast<unsigned long long>(g_stats.textured), static_cast<unsigned long long>(s.group),
+                             static_cast<unsigned long long>(g_stats.triangles), static_cast<unsigned long long>(g_stats.textured), static_cast<unsigned long long>(g_stats.directDraws),
+                             static_cast<unsigned long long>(g_stats.directStates), static_cast<unsigned long long>(s.group),
                              s.matrix[12], s.matrix[13], s.matrix[14], s.matrix[15]);
                 g_stats = Stats{};
             }

@@ -154,6 +154,18 @@ def sync_tree(src, dst):
 
 # ---- PE imports (the DLLs the runner needs, found in the toolchain's bin) ----
 
+# windres (the runner's icon, version and UTF-8 manifest resources) runs its preprocessor through popen, that is
+# cmd /c: by default as "<its own folder>\gcc" -E ... "<the .rc>". With a space in the toolchain's path (C:\Users\Jean
+# Dupont\..., D:\Games\TMB Recomp\kit) and a second quoted argument, cmd strips the outer quotes and runs
+# "D:\Games\TMB" ("preprocessing failed"). The bare name, found on the PATH tmb_build puts the toolchain first on, has no
+# quotes for cmd to strip.
+RC_FLAGS = '--preprocessor=gcc --preprocessor-arg=-E --preprocessor-arg=-xc --preprocessor-arg=-DRC_INVOKED'
+
+
+def cmake_rc_flags():
+    return ['-DCMAKE_RC_FLAGS=' + RC_FLAGS] if os.name == 'nt' else []
+
+
 def pe_imports(path):
     with open(path, 'rb') as f:
         data = f.read()
@@ -349,7 +361,7 @@ class Build:
                                [file_stamp(os.path.join(ROOT, 'PS2Recomp', 'tools', t)) for t in ('irx_load.py', 'iop_recomp.py')])
         if step == 'configure':
             return fingerprint(self.find_toolchain(), a.build_type, a.debug_info, a.fetch_cache, self.ffmpeg_root,
-                               [self.state.get(s, {}).get('key') for s in ('recompile', 'packs', 'iop')])
+                               cmake_rc_flags(), [self.state.get(s, {}).get('key') for s in ('recompile', 'packs', 'iop')])
         if step == 'compile':
             return fingerprint(self.state.get('configure', {}).get('key'),
                                tree_stamp(os.path.join(ROOT, 'runtime')),
@@ -545,7 +557,7 @@ class Build:
                   '-DCMAKE_BUILD_TYPE=Release', '-DPS2X_BUILD_RUNTIME=OFF', '-DPS2X_BUILD_STUDIO=OFF',
                   '-DPS2X_BUILD_TEST=OFF', '-DPS2X_BUILD_ANALYZER=OFF',
                   '-DCMAKE_C_COMPILER=' + self.tool('gcc'), '-DCMAKE_CXX_COMPILER=' + self.tool('g++'),
-                  '-DCMAKE_MAKE_PROGRAM=' + self.tool('ninja')] + self.fetch_args())
+                  '-DCMAKE_MAKE_PROGRAM=' + self.tool('ninja')] + cmake_rc_flags() + self.fetch_args())
         self.run([self.tool('cmake'), '--build', build, '--target', 'ps2_recomp', 'ps2_vu_aot', '-j', str(self.args.jobs)],
                  percent=ninja_percent, append=True)
 
@@ -640,7 +652,7 @@ class Build:
                '-DCMAKE_BUILD_TYPE=' + self.args.build_type,
                '-DTMB_GENERATED_DIR=' + self.gen.replace('\\', '/'),
                '-DCMAKE_C_COMPILER=' + self.tool('gcc'), '-DCMAKE_CXX_COMPILER=' + self.tool('g++'),
-               '-DCMAKE_MAKE_PROGRAM=' + self.tool('ninja')]
+               '-DCMAKE_MAKE_PROGRAM=' + self.tool('ninja')] + cmake_rc_flags()
         if self.args.debug_info == 'no':
             # The configuration's own flags without -g: the same code (GCC's -g never changes it), the same -O2 and
             # GUI subsystem as RelWithDebInfo; Release would be -O3, which the generated code is too large for.

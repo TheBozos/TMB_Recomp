@@ -41,7 +41,7 @@ import zipfile
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
-from tmb_build import pe_imports  # noqa: E402
+from tmb_build import pe_imports, cmake_rc_flags  # noqa: E402
 
 KIT_VERSION = 1
 
@@ -532,7 +532,7 @@ class Kit:
              '-DCMAKE_BUILD_TYPE=Release', '-DPS2X_BUILD_RUNTIME=OFF', '-DPS2X_BUILD_STUDIO=OFF',
              '-DPS2X_BUILD_TEST=OFF', '-DPS2X_BUILD_ANALYZER=OFF',
              '-DCMAKE_C_COMPILER=' + b('gcc'), '-DCMAKE_CXX_COMPILER=' + b('g++'), '-DCMAKE_MAKE_PROGRAM=' + b('ninja'),
-             '-DCMAKE_EXE_LINKER_FLAGS=-static'] + fetch, env=env, logfile=logf)
+             '-DCMAKE_EXE_LINKER_FLAGS=-static'] + cmake_rc_flags() + fetch, env=env, logfile=logf)
         run([b('cmake'), '--build', build, '--target', 'ps2_recomp', 'ps2_vu_aot', '-j', str(self.args.jobs)],
             env=env, logfile=logf)
         dst = os.path.join(self.out, 'tools')

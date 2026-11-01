@@ -489,7 +489,8 @@ class Release:
              '-DFETCHCONTENT_SOURCE_DIR_IMGUI=' + os.path.join(deps, 'imgui-src').replace('\\', '/'),
              '-DFETCHCONTENT_SOURCE_DIR_RLIMGUI=' + os.path.join(deps, 'rlimgui-src').replace('\\', '/'),
              '-DLAUNCHER_FONT_DIR=' + self.font_dir().replace('\\', '/'),
-             '-DLAUNCHER_VERSION=' + self.version, '-DLAUNCHER_COMMIT=' + self.commit], env=env, logfile=logf)
+             '-DLAUNCHER_VERSION=' + self.version, '-DLAUNCHER_COMMIT=' + self.commit] + self.rc_flags(),
+            env=env, logfile=logf)
         run([b('cmake'), '--build', build, '-j', str(self.args.jobs)], env=env, logfile=logf)
         exe = os.path.join(build, 'TMB Launcher.exe')
         imports = pe_imports_of(exe, os.path.join(self.source, 'tools'))
@@ -499,6 +500,12 @@ class Release:
         shutil.copy2(exe, os.path.join(self.stage, 'TMB Launcher.exe'))
         self.launcher_fonts = os.path.join(build, 'fonts')
         log('  TMB Launcher.exe: %.1f MB, imports %s' % (os.path.getsize(exe) / 1e6, ', '.join(sorted(imports))))
+
+    def rc_flags(self):
+        """tmb_build's windres preprocessor flags (a path with spaces), from the exported source."""
+        text = open(os.path.join(self.source, 'tools', 'tmb_build.py'), encoding='utf-8').read()
+        m = re.search(r"^RC_FLAGS = '([^']*)'", text, re.M)
+        return ['-DCMAKE_RC_FLAGS=' + m.group(1)] if m else []
 
     # -- licences and sources
 

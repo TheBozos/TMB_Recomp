@@ -181,4 +181,4 @@ jobs:
         if: env.WATCHER_TOKEN != ''
         env:
           GH_TOKEN: ${{ env.WATCHER_TOKEN }}
-        run: gh api repos/boubou666/RecompWatcher/dispatches -f event_type=project-updated
+        run: gh api repos/TheBozos/RecompWatcher/dispatches -f event_type=project-updated

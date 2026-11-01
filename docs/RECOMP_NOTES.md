@@ -1611,7 +1611,7 @@ folder) and `game\` (the staged game).
   --good / --wip / --early for states, the focus colour for keyboard navigation (Tab, arrows, Enter; Esc goes back to
   Play). Mouse and keyboard only. Wordmark "The Bozos" (`TEAM_NAME` in `launcher/src/main.cpp`), "by boubou666 &
   Arzaroth" under it, the title in large type with "PC port — your own disc required", a link to
-  https://boubou666.github.io/RecompWatcher/ (no custom domain in the site: GitHub Pages' repository path). Exo 2
+  https://thebozos.github.io/RecompWatcher/ (no custom domain in the site: GitHub Pages' repository path). Exo 2
   from google/fonts at 1796e344 (`ofl/exo2/Exo2[wght].ttf`, SHA-256 205a4486..., SIL OFL 1.1, no reserved font name),
   downloaded and checked at configure time (or `LAUNCHER_FONT_DIR`), embedded as RCDATA with OFL.txt; stb_truetype
   draws the variable font's default instance (weight 400), headings get a faux bold and the glow. Logs in Cascadia

@@ -563,7 +563,7 @@ redistribute it.
 
 ## Credits
 
-- **The Bozos**: boubou666 and Arzaroth, who make this port and the PS2Recomp fork it runs on ([RecompWatcher](https://boubou666.github.io/RecompWatcher/) shows our projects).
+- **The Bozos**: boubou666 and Arzaroth, who make this port and the PS2Recomp fork it runs on ([RecompWatcher](https://thebozos.github.io/RecompWatcher/) shows our projects).
 - [PS2Recomp](https://github.com/ran-j/PS2Recomp) by ran-j and contributors (GPL-3.0), the recompiler and runtime this port is built on.
 - The other recompilations on the same fork (*Valkyrie Profile 2: Silmeria*, *Dark Cloud*, *Soulcalibur III*, *Drakengard*, *The Lord of the Rings: The Third Age*, *Jade Cocoon 2* and others): runtime fixes are shared, and DC_Recomp's native sound mixer plays TMB's sound.
 - *Twisted Metal: Black* © Sony Interactive Entertainment, developed by Incognito Entertainment. This is an unofficial fan project, not affiliated with or endorsed by them.

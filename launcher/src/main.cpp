@@ -43,7 +43,7 @@ using ui::S;
 // The team's wordmark and the credits under it.
 #define TEAM_NAME "The Bozos"
 #define TEAM_CREDITS "by boubou666 & Arzaroth"
-static const char *kSiteUrl = "https://boubou666.github.io/RecompWatcher/";
+static const char *kSiteUrl = "https://thebozos.github.io/RecompWatcher/";
 // The release's version and source commit (CMake's LAUNCHER_VERSION / LAUNCHER_COMMIT, from tools/make_release.py).
 #ifndef TMB_VERSION
 #define TMB_VERSION "dev"

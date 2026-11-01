@@ -33,8 +33,8 @@ You build the game yourself, on your PC, from **your own disc**: nothing of the 
 1. Download the release zip from the [Releases](https://github.com/boubou666/TMB_Recomp/releases) page. Each release
    publishes the zip's SHA-256: check it before running anything
    (`Get-FileHash .\TMB_Recomp-<version>.zip` in PowerShell, or `certutil -hashfile <zip> SHA256`).
-2. Unzip it anywhere with about 10 GB free (for example `D:\Games\TMB_Recomp`), but not in `Program Files` (the
-   launcher writes the game next to itself). Keep its folders together: `TMB Launcher.exe`, `source\` (our code),
+2. Unzip it anywhere with about 10 GB free (into `D:\Games`, say: the zip holds a `TMB_Recomp` folder), but not in
+   `Program Files` (the launcher writes the game next to itself). Keep its folders together: `TMB Launcher.exe`, `source\` (our code),
    `kit\` (the compiler and tools that build the game), `README.txt` (these steps, English and French), `LICENSES\`.
 3. Double-click **TMB Launcher.exe**. The launcher is not signed, so Windows may say *"Windows protected your PC"*:
    click **More info**, then **Run anyway**.
@@ -46,9 +46,9 @@ You build the game yourself, on your PC, from **your own disc**: nothing of the 
    logs are in `%APPDATA%\TMB_Recomp` (the launcher's Maintenance tab opens it).
 
 The launcher says when a newer release is out (it asks GitHub for the latest version number at start; Settings
-turns that off; nothing is downloaded by itself). After an update, unzip the new release over the old one: the
-launcher sees the code changed since the game was built and offers **Rebuild** (also in the Maintenance tab); only what
-changed is built again and the saves stay. To uninstall, delete the folder (and `%APPDATA%\TMB_Recomp` for the saves
+turns that off; nothing is downloaded by itself). After an update, unzip the new release where the old one was (replacing the files): the
+launcher sees the code changed since the game was built and offers **Rebuild now** (also Rebuild in the Maintenance
+tab); only what changed is built again, the files the new release no longer has are removed, and the saves stay. To uninstall, delete the folder (and `%APPDATA%\TMB_Recomp` for the saves
 and settings). Linux players build with `tools/tmb_build.py` (below).
 
 ## Status
@@ -303,7 +303,7 @@ python tools\make_release.py --out D:\tmb_release --kit D:\tmb_kit\kit --with-so
 
 | Output (in `--out`) | Contents |
 |---|---|
-| `TMB_Recomp-<version>.zip` | `TMB_Recomp-<version>\`: `TMB Launcher.exe` (built with the kit, the version and commit in it), `source\` (`git archive` of the commit and of PS2Recomp at its recorded commit, `release.ini`), `kit\`, `README.txt` (players, English and French), `LICENSES\` (every component's licence, `SOURCES.txt`) |
+| `TMB_Recomp-<version>.zip` | `TMB_Recomp\` (the same folder name each release, so a new one unzips over the last): `TMB Launcher.exe` (built with the kit, the version and commit in it), `source\` (`git archive` of the commit and of PS2Recomp at its recorded commit, `release.ini`, `release_files.txt`), `kit\`, `README.txt` (players, English and French), `LICENSES\` (every component's licence, `SOURCES.txt`) |
 | `<zip>.sha256` | `sha256sum` format; the release page quotes it |
 | `TMB_Recomp-<version>-sources.zip` | `--with-sources`: the MSYS2 source packages of every package the kit holds files of (repo.msys2.org only) and FFmpeg's tarball: the GPL / LGPL corresponding source, attached to the same release |
 | `RELEASE_NOTES.md` | a stub (hashes, sizes, versions, the source offer) to finish before publishing |

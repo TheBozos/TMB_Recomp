@@ -373,6 +373,12 @@ class Release:
         fork_dst = os.path.join(self.source, 'PS2Recomp')
         os.makedirs(fork_dst, exist_ok=True)
         extract_tar_stream([find_git(), 'archive', '--format=tar', self.fork_commit], fork_dst, fork_repo)
+        # The list of the source's files: tmb_build removes the ones a newer release unzipped over this one no longer
+        # has (CMake globs runtime/*.cpp: a deleted file left behind would still be compiled).
+        files = sorted(os.path.relpath(os.path.join(d, n), self.source).replace('\\', '/')
+                       for d, _s, names in os.walk(self.source) for n in names)
+        files += ['release.ini', 'release_files.txt']
+        write_text(os.path.join(self.source, 'release_files.txt'), '\n'.join(sorted(set(files))) + '\n')
         write_text(os.path.join(self.source, 'release.ini'),
                    '# The TMB_Recomp release this folder is (tools/make_release.py writes this file).\n'
                    'version = %s\ncommit = %s\nfork_commit = %s\ndate = %s\n'
@@ -721,7 +727,9 @@ class Release:
         if problems:
             raise ReleaseError('the release folder holds what looks like game data:\n  ' + '\n  '.join(problems[:20]))
         t = time.time()
-        zip_dir(self.stage, self.zip, self.name, self.zip_time())
+        # The folder in the zip is TMB_Recomp, not TMB_Recomp-<version>: a new release unzipped where the last one
+        # was replaces it (and keeps build\ and game\, so Rebuild only does what changed).
+        zip_dir(self.stage, self.zip, NAME, self.zip_time())
         # The names once more, as the zip has them.
         with zipfile.ZipFile(self.zip) as zf:
             names = zf.namelist()
@@ -750,8 +758,9 @@ class Release:
             '**TMB Launcher.exe**. It is not signed: on *Windows protected your PC*, click **More info**, then '
             '**Run anyway**.',
             '3. Select your USA disc image (SCUS-97101), **Prepare the game** (a few minutes, once), **Play**.', '',
-            'Updating from an earlier release: unzip this one over it (or next to it and select the same disc), '
-            'then **Rebuild** when the launcher offers it. Saves and settings are in `%APPDATA%\\TMB_Recomp` and stay.',
+            'Updating from an earlier release: unzip this one where you unzipped it (the zip holds a `TMB_Recomp` '
+            'folder; replace the files), then **Rebuild now** when the launcher offers it: only what changed is built '
+            'again. Saves and settings are in `%APPDATA%\\TMB_Recomp` and stay.',
             '',
             '## Build information', '',
             '- Code: %s (`%s`), PS2Recomp fork `%s`' % (REPO, self.commit, self.fork_commit),
@@ -892,8 +901,8 @@ Before you start: check the download
   The hash printed must be the same as on the release page (and in {name}.zip.sha256).
 
 Install
-  1. Unzip the whole zip anywhere you like, with about 10 GB free, for example D:\\Games\\{name}.
-     Not in "Program Files" (the launcher writes the game next to itself).
+  1. Unzip the whole zip anywhere you like, with about 10 GB free, for example into D:\\Games: that makes
+     D:\\Games\\TMB_Recomp. Not in "Program Files" (the launcher writes the game next to itself).
      Keep the folders together: TMB Launcher.exe, source\\ and kit\\.
   2. Double-click "TMB Launcher.exe". It is not signed, so Windows may show
      "Windows protected your PC": click "More info", then "Run anyway".
@@ -906,8 +915,9 @@ Your saves and settings
 
 Updates
   The launcher tells you when a new version is out (Settings: turn that check off; it only asks GitHub
-  for the latest version number). Download the new zip, unzip it over this folder, then click
-  "Rebuild" in the launcher. Your saves stay.
+  for the latest version number). Download the new zip and unzip it where you unzipped this one
+  (replace the files when Windows asks), then click "Rebuild now" in the launcher: only what changed
+  is built again. Your saves stay.
 
 Uninstall
   Delete this folder. Your saves and settings are in %APPDATA%\\TMB_Recomp: delete it too to remove everything.
@@ -934,8 +944,8 @@ Avant de commencer : vérifiez le téléchargement
   L'empreinte affichée doit être la même que sur la page de la version (et dans {name}.zip.sha256).
 
 Installation
-  1. Décompressez tout le zip où vous voulez, avec environ 10 Go libres, par exemple D:\\Jeux\\{name}.
-     Pas dans « Program Files » (le lanceur écrit le jeu à côté de lui).
+  1. Décompressez tout le zip où vous voulez, avec environ 10 Go libres, par exemple dans D:\\Jeux : cela donne
+     D:\\Jeux\\TMB_Recomp. Pas dans « Program Files » (le lanceur écrit le jeu à côté de lui).
      Gardez les dossiers ensemble : TMB Launcher.exe, source\\ et kit\\.
   2. Double-cliquez sur « TMB Launcher.exe ». Il n'est pas signé : si Windows affiche
      « Windows a protégé votre ordinateur », cliquez sur « Informations complémentaires », puis « Exécuter quand même ».
@@ -948,8 +958,9 @@ Vos sauvegardes et réglages
 
 Mises à jour
   Le lanceur vous prévient quand une nouvelle version sort (Réglages : désactivez cette vérification ; elle demande
-  seulement à GitHub le numéro de la dernière version). Téléchargez le nouveau zip, décompressez-le sur ce dossier,
-  puis cliquez sur « Reconstruire » dans le lanceur. Vos sauvegardes restent.
+  seulement à GitHub le numéro de la dernière version). Téléchargez le nouveau zip et décompressez-le au même endroit
+  que celui-ci (remplacez les fichiers quand Windows le demande), puis cliquez sur « Reconstruire maintenant » dans le
+  lanceur : seul ce qui a changé est refait. Vos sauvegardes restent.
 
 Désinstallation
   Supprimez ce dossier. Vos sauvegardes et réglages sont dans %APPDATA%\\TMB_Recomp : supprimez-le aussi pour tout enlever.

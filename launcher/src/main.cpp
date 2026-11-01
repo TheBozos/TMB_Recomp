@@ -931,8 +931,8 @@ static void drawReady(App &app, float inner)
         gap(12);
         std::string what = std::string(L("Version ", "La version ")) + newVersion + L(" is available.", " est disponible.");
         noteBox(what.c_str(),
-                L("Download it from the release page, unzip it over this folder, then Rebuild.",
-                  "Téléchargez-la depuis la page de la version, décompressez-la sur ce dossier, puis Reconstruire."),
+                L("Download it from the release page and unzip it where you unzipped this one (replace the files), then Rebuild.",
+                  "Téléchargez-la depuis la page de la version et décompressez-la au même endroit que celle-ci (remplacez les fichiers), puis Reconstruire."),
                 ui::color::cross, inner);
         gap(6);
         if (ui::button(L("Open the release page", "Ouvrir la page de la version"), ImVec2(0, S(48))))

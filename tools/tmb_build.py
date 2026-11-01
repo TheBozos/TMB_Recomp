@@ -648,6 +648,16 @@ class Build:
         return out
 
     def step_configure(self):
+        # A build folder configured from another path (the release folder moved or renamed, or reached once through
+        # the non-ASCII aliases and once not): CMake refuses its cache or fetches again; start that folder afresh.
+        cache = os.path.join(self.cmake_build, 'CMakeCache.txt')
+        if os.path.isfile(cache):
+            with open(cache, encoding='utf-8', errors='replace') as f:
+                m = re.search(r'^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$', f.read(), re.M)
+            if m and os.path.normcase(os.path.normpath(m.group(1))) != os.path.normcase(os.path.normpath(ROOT)):
+                emit('INFO', 'configure', 'the build folder was configured from %s: configured again' % m.group(1))
+                os.remove(cache)
+                shutil.rmtree(os.path.join(self.cmake_build, 'CMakeFiles'), ignore_errors=True)
         cmd = [self.tool('cmake'), '-S', ROOT, '-B', self.cmake_build, '-G', 'Ninja',
                '-DCMAKE_BUILD_TYPE=' + self.args.build_type,
                '-DTMB_GENERATED_DIR=' + self.gen.replace('\\', '/'),
@@ -865,9 +875,40 @@ def main():
     if args.check:
         sys.exit(check_disc(args.disc))
     os.makedirs(os.path.abspath(args.out), exist_ok=True)
+    if not os.environ.get(ALIAS_ENV):
+        remove_stale_sources()
     if needs_ascii_aliases(args):
         sys.exit(run_through_aliases(args))
     sys.exit(Build(args).main())
+
+
+def remove_stale_sources():
+    """A release's source folder lists its files (release_files.txt, tools/make_release.py). A newer release unzipped
+    over an older one leaves the files it no longer has; CMake globs some folders (runtime/*.cpp, the fork's sources),
+    so they are removed here: regular files under the source folder only, never through a link, never Python's caches;
+    then the folders left empty."""
+    listing = os.path.join(ROOT, 'release_files.txt')
+    if not os.path.isfile(listing):
+        return
+    with open(listing, encoding='utf-8') as f:
+        keep = set(l.strip() for l in f if l.strip())
+    removed = 0
+    # Only the folders a release ships (never a kit, a work folder or anything else put inside the source folder).
+    tops = sorted(set(rel.split('/', 1)[0] for rel in keep if '/' in rel))
+    for dirpath, dirs, names in (w for t in tops for w in os.walk(os.path.join(ROOT, t), topdown=False)):
+        dirs[:] = [d for d in dirs if d != '__pycache__']
+        if '__pycache__' in dirpath.replace('\\', '/').split('/'):
+            continue
+        for n in names:
+            p = os.path.join(dirpath, n)
+            rel = os.path.relpath(p, ROOT).replace('\\', '/')
+            if rel not in keep and not os.path.islink(p) and os.path.isfile(p):
+                os.remove(p)
+                removed += 1
+        if dirpath != ROOT and not os.listdir(dirpath) and not os.path.islink(dirpath):
+            os.rmdir(dirpath)
+    if removed:
+        emit('INFO', 'update', '%d files of an earlier release removed from %s' % (removed, ROOT))
 
 
 # ---- folders whose path is not ASCII (Windows) ----

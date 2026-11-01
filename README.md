@@ -26,6 +26,27 @@ display mode) comes from native code on the PC's clock.
 > |---|---|
 > | `SCUS_971.01` | `3ff17f4897552e355d0bb8c3abfa5125fe3ff2ef` |
 
+## For players (Windows)
+
+You build the game yourself, on your PC, from **your own disc**: nothing of the game is in the download.
+
+1. Download the release zip from the [Releases](https://github.com/boubou666/TMB_Recomp/releases) page. Each release
+   publishes the zip's SHA-256: check it before running anything
+   (`Get-FileHash .\TMB_Recomp-<version>.zip` in PowerShell, or `certutil -hashfile <zip> SHA256`).
+2. Unzip it anywhere with about 10 GB free (for example `D:\Games\TMB_Recomp`). Keep its folders together:
+   `TMB Launcher.exe`, `source\` (our code) and `kit\` (the compiler and tools that build the game).
+3. Double-click **TMB Launcher.exe**. The launcher is not signed, so Windows may say *"Windows protected your PC"*:
+   click **More info**, then **Run anyway**.
+4. Click **Select your disc image…** and pick your image of the USA disc (`SCUS-97101`): a `.iso`, or a `.bin` with
+   its `.cue`. The launcher checks it at once (the European disc and other games are refused with a message saying so).
+5. Click **Prepare the game**. It takes a few minutes, once (about 3.5 minutes on an 8-core PC); you can stop it and it
+   continues where it left off next time.
+6. Click **Play**. In the game, **F2** opens the settings (controls, video, cheats). Your memory cards, settings and
+   logs are in `%APPDATA%\TMB_Recomp` (the launcher's Maintenance tab opens it).
+
+After an update, unzip the new release over the old one and click **Rebuild** in the Maintenance tab: only what
+changed is built again. Linux players build with `tools/tmb_build.py` (below).
+
 ## Status
 
 Picking the work up elsewhere: [`docs/HANDOFF.md`](docs/HANDOFF.md) (state, how to measure, next steps).
@@ -190,6 +211,9 @@ python tools\tmb_build.py --disc "D:\Games\Twisted Metal - Black (USA).iso" --ou
   raw sectors from the image.
 - The game ends up in `<out>/TMB`: `ps2EntryRunner.exe`, the DLLs it loads, the two packs, `disc/` (the disc's files),
   `disc.iso` (a hard link to your image on the same drive, else a copy) and `Play TMB.cmd`.
+- `--game <dir>` stages the game somewhere else; `--check` only checks the disc (`OK ...`, or `ERROR verify ...` and
+  exit code 1). `--debug-info no` (the default with the build kit: a player's build) compiles the runner without
+  debug information, the same code as RelWithDebInfo: 45 MB instead of 613, and the compile about a third faster.
 - Resumable: a step finished with the same inputs is skipped (`--redo <step>` runs it and the ones after again,
   `--stop-after <step>` stops there). For a launcher, stdout has one line per event: `PROGRESS <step> <i>/<n>
   <message>`, `PERCENT <step> <0-100>`, `SKIP <step> <i>/<n>`, `DONE <step> <i>/<n> <seconds>`, `ERROR <step>
@@ -225,6 +249,36 @@ kit\python\python.exe -I TMB_Recomp\tools\tmb_build.py --disc "D:\Games\Twisted 
   PATH of only the Windows folders: 4 minutes to the game folder (compile 3.4), no recompiler build, no downloads.
 - The kit is build output, never committed. GCC, binutils and the other MSYS2 binaries are redistributed unmodified:
   a public kit must also ship or offer their sources (MSYS2's source packages of the versions in the manifest).
+
+### The launcher (Windows)
+
+`launcher/` is `TMB Launcher.exe`, what a player double-clicks: its own small CMake project (raylib, Dear ImGui and
+rlImGui at the fork's tags, linked static: a 4 MB GUI exe that loads only Windows' DLLs).
+
+```bat
+cmake -S launcher -B build\launcher -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build\launcher
+rem offline, with the kit: -DFETCHCONTENT_SOURCE_DIR_RAYLIB=<kit>\depsaylib-src (IMGUI, RLIMGUI likewise)
+rem                        -DLAUNCHER_FONT_DIR=<folder with Exo2[wght].ttf and OFL.txt>
+```
+
+- It expects the release folder: `TMB Launcher.exe`, `source\` (this repository without `.git`), `kit\` (the build
+  kit); it makes `build\` (tmb_build's work folder) and `game\` (the game: `ps2EntryRunner.exe`, `disc\`, `disc.iso`,
+  the packs). `--release <dir>` points it elsewhere.
+- Disc check: `kit\python\python.exe -I -X utf8 source\tools\tmb_build.py --check --disc <image>`; build: the same
+  with `--disc <image> --out build --game game`, in a job object with no console window (Stop ends the whole tree;
+  tmb_build resumes). Its PROGRESS / PERCENT / SKIP / DONE / ERROR / RESULT lines drive the step list, the progress
+  bar and the time estimate; an error shows tmb_build's message, the step's log and "Copy details".
+- Play starts `game\ps2EntryRunner.exe game\disc\SCUS_971.01` with nothing set (the runner's defaults), hides the
+  launcher until the game exits, then offers the crash report if one appeared in the user folder.
+- Settings: the window mode and size written to the user folder's `video.ini` in the runner's own format; launcher.ini
+  (disc, language, background motion, build state) sits next to it. English and French.
+- The look is the team's, from RecompWatcher: the PS2 BIOS's radial blue, glowing boot towers (motion can be turned
+  off), glass cards, Exo 2 (SIL OFL 1.1, google/fonts at a pinned commit, embedded with its licence; downloaded at
+  configure time, never committed). The icon is drawn at build time by `launcher/tools/make_icon.cpp`. No game art.
+- `--selftest <iso> --shots <dir> [--wrong <image>] [--error-demo] [--cancel] [--play-seconds s] [--crash-seconds s]`:
+  the whole flow unattended, a screenshot of each screen and `selftest.log` (with `PS2X_USER_DIR` set, the real user
+  folder is untouched).
 
 ### Step by step (development)
 
@@ -421,6 +475,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `runtime/` | Game override module (game-specific bindings) |
 | `scripts/` | Extract, build tools, analyze, recomp, build runner, run |
 | `tools/` | `tmb_build.py` (disc to game folder), `make_build_kit.py` (the build kit), analysis helpers (`iso_lbn.py`: disc file of a sector; `gs_fb_decode.py`: framebuffer out of a VRAM dump; `irx_disasm.py`: IOP module code) |
+| `launcher/` | `TMB Launcher.exe`: checks the player's disc, builds the game with the kit, starts it (raylib, Dear ImGui) |
 | `docs/` | Bring-up notes |
 | `PS2Recomp/` | PS2Recomp fork (submodule) |
 

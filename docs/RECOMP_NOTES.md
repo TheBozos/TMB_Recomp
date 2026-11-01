@@ -1565,3 +1565,88 @@ What is left for the launcher step:
   together, or tmb_build fall back to building the tools when the fork's recompiler sources changed.
 - GPL / LGPL source availability for the MSYS2 binaries (their source packages), alongside FFmpeg's tarball already in
   the kit.
+
+## The launcher: TMB Launcher.exe (2026-11-01)
+
+What a player double-clicks (README, "For players" and "The launcher"). The release folder: `TMB Launcher.exe`,
+`source\` (this repository without `.git`), `kit\` (the build kit); the launcher makes `build\` (tmb_build's work
+folder) and `game\` (the staged game).
+
+- **Program.** `launcher/`, its own CMake project (the runner's needs the generated code): raylib 5.5, Dear ImGui
+  v1.92.7-docking and rlImGui Raylib_5_5, the tags ps2xRuntime pins (the kit's `deps/` serve them offline), built
+  static (`-static -s`): 4.0 MB, importing only Windows DLLs (kernel32, user32, gdi32, shell32, comdlg32, winmm, the
+  UCRT API sets; OpenGL loaded by GLFW). GUI subsystem. Everything that needs `<windows.h>` is in
+  `src/platform_win.cpp` (raylib's names clash with it): the Open dialog (GetOpenFileNameW: .iso, .bin, .cue), the
+  user folder (`PS2X_USER_DIR`, else `%APPDATA%\TMB_Recomp`, as the runner), processes, Explorer, the font resource.
+  Paths are UTF-8 inside, wide at the Win32 calls; Python runs with `-X utf8` so the lines it prints are UTF-8.
+- **Disc check.** `tmb_build.py --check --disc <image>` (new): the verify step alone, no work folder; `OK ...` or
+  `ERROR verify <message>`. The launcher puts tmb_build's message under a plain one: the European disc, another game,
+  a modified or damaged copy, not a disc image, the file gone.
+- **Build.** `kit\python\python.exe -I -X utf8 source\tools\tmb_build.py --disc <image> --out build --game game`
+  (`--game`, new: the staged folder somewhere else than `<out>/TMB`), started suspended with `CREATE_NO_WINDOW` (a
+  hidden console the build's console programs share: no window flashes), put in a job object with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, then resumed; stdout and stderr through one pipe read by a thread. Stop is
+  `TerminateJobObject`: Python, CMake, Ninja and every GCC go at once (checked: no process of the release folder left
+  but the new build's after a resume), and tmb_build's resume does the rest (the compile resumes where Ninja was).
+  Closing the launcher during a build asks first; launcher.ini's `build_pending` shows "Continue preparing" next time.
+  `--stop-after` now also stops at a step that was skipped.
+- **Progress.** The PROGRESS / PERCENT / SKIP / DONE / ERROR / RESULT lines drive nine rows (pending, running with its
+  percent, done with its time, done earlier, failed), an overall bar weighted by each step's usual share (the compile
+  most of it) and an estimate scaled by how fast this PC did the finished part (with a margin: Ninja's count runs ahead
+  of the time). An ERROR shows the step, tmb_build's message, Try again, Open log (`build\logs\<step>.log`), Copy
+  details (the message, the last output lines and the step log's tail) and Change disc image.
+- **Play.** `game\ps2EntryRunner.exe game\disc\SCUS_971.01`, working folder `game\`, nothing in the environment: the
+  runner's defaults are the native port, it finds the packs and `disc.iso` itself. The launcher hides while the game
+  runs (GLFW hide, no taskbar entry, the loop only polls) and comes back when it exits; a crash report that appeared
+  in `<user>\crashes` meanwhile (or a non-zero exit) is offered with Open crash report / Open log.
+- **Settings.** The window mode (windowed, full screen, borderless) and the size, from the sizes the runner's Video tab
+  offers on this monitor (`ps2_video::resolutions`' list), written to the user folder's `video.ini` in the text
+  `ps2_video::save` writes; F2 named for controls, video and cheats. launcher.ini (disc, language, background motion,
+  build state, last build time) sits next to it. Maintenance: Rebuild (tmb_build again: only what changed), Change
+  disc image, the saves folder, the game's logs, the build's logs.
+- **Identity.** The team's, from RecompWatcher (`src/styles/global.css`, `public/icon.svg`): the PS2 BIOS's radial
+  gradient (#14328f at the bottom centre, #050b26, #01030a, with the site's vignette and faint scanlines) behind
+  glowing "boot towers" drawn with raylib, slowly breathing (Settings turns the motion off); glass cards (--glass,
+  --line), the ink colours, a blue-to-violet (--cross to --a) primary button and progress bar with a soft glow,
+  --good / --wip / --early for states, the focus colour for keyboard navigation (Tab, arrows, Enter; Esc goes back to
+  Play). Mouse and keyboard only. Wordmark "The Bozos" (`TEAM_NAME` in `launcher/src/main.cpp`), "by boubou666 &
+  Arzaroth" under it, the title in large type with "PC port — your own disc required", a link to
+  https://boubou666.github.io/RecompWatcher/ (no custom domain in the site: GitHub Pages' repository path). Exo 2
+  from google/fonts at 1796e344 (`ofl/exo2/Exo2[wght].ttf`, SHA-256 205a4486..., SIL OFL 1.1, no reserved font name),
+  downloaded and checked at configure time (or `LAUNCHER_FONT_DIR`), embedded as RCDATA with OFL.txt; stb_truetype
+  draws the variable font's default instance (weight 400), headings get a faux bold and the glow. Logs in Cascadia
+  Mono or Consolas from Windows. The icon: a rounded square, the radial blue and five glowing towers, drawn at build
+  time by `launcher/tools/make_icon.cpp` (256 to 16 px, 32-bit) so no image is committed; no game art anywhere.
+  English and French (Windows' language by default, switchable).
+- **Player build without debug information.** tmb_build `--debug-info no`, the default with the kit:
+  `CMAKE_<LANG>_FLAGS_RELWITHDEBINFO=-O2 -DNDEBUG` (RelWithDebInfo's flags without `-g`: the same code, since `-g`
+  never changes GCC's output, and the same GUI subsystem; `Release` would be `-O3`, which the generated code is too
+  large for), and the staged copy run through the toolchain's `strip --strip-debug`. The runner: 44.6 MB instead of
+  613; the compile 129-137 s instead of 205 on the same PC; the build folder 531 MB.
+
+Check (D:\tmb_launcher_test, outside the repository: `source\` a copy of this worktree without `.git`, `kit\` hard
+links to D:\tmb_kit\kit, the launcher built with the kit's toolchain; `PS2X_USER_DIR` a scratch folder):
+`--selftest <USA iso> --wrong <European iso> --error-demo --cancel --play-seconds 60 --crash-seconds 25`, 21
+screenshots: the welcome (English, French), the European disc refused, a build error (a hard link to the ISO checked,
+then removed), the disc accepted, each build step, the compile half way, stopped at 40 % of the compile and resumed,
+built, Settings (1280x960 saved), Maintenance, French, after playing, after a crash. From an empty folder: 203.5 s to
+the game including the stop (extract 7.6 s with the image hard-linked, packs 31, configure 4.7, compile 23 before the
+stop and 129 after, stage 0.2). Play: the boot movies and the main menu at 1280x960 from the launcher's video.ini
+(`[video] 1280x960 windowed`), `[tmb] disc image: ...\game\disc.iso`, the nine native IOP modules, no GS front end;
+WM_CLOSE ends it with code 0 and the launcher comes back. `PS2X_TEST_CRASH=25`: exit 0xC0000005, the crash report
+found and offered. The launcher also builds with the kit's toolchain alone (PATH = the kit's `ucrt64\bin` and the
+Windows folders, the kit's deps, the font folder): 19 s, the same 4.0 MB exe.
+
+Sizes: the release folder 493 MB unpacked (the launcher 4, `source\` 26, `kit\` 463), 146 MB as a deflate zip; after
+the build, `build\` 531 MB and `game\` 233 MB besides the disc's files (3.6 GB) and `disc.iso` (a hard link on the
+same drive, else another 3.6 GB).
+
+What is left for step 5:
+- The release itself: a zip (or an installer) made by a script from a clean checkout (`git archive` with the
+  submodule) plus the kit and the launcher, its SHA-256 published with it; a kit is tied to the code version (the
+  prebuilt recompilers), so they ship together.
+- An update check (the launcher asking GitHub for a newer release, then Rebuild); the user folder already lives
+  outside the release folder.
+- A clean-VM test: a fresh Windows 10/11 with nothing installed, SmartScreen's prompt, a non-ASCII path, a disc image
+  on another drive (the copy instead of the hard link), a 4-core PC's build time, a high-DPI monitor.
+- GPL / LGPL source availability for the kit's MSYS2 binaries; code signing if it ever becomes possible.

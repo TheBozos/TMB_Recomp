@@ -34,6 +34,11 @@ as C:/msys64/ucrt64), else the PATH, else C:/msys64/ucrt64; FFmpeg through pkg-c
 network (git) unless --fetch-cache <dir> holds <name>-src folders. --toolchain, --tools and --fetch-cache also
 override the kit's.
 
+A player's build (the default with the kit, --debug-info no): the runner without debug information, the same code as
+RelWithDebInfo (its -O2 flags without -g; GCC's -g never changes the code), stripped again when staged: 45 MB instead
+of 613. --game <dir> stages the game somewhere else than <out>/TMB (the launcher: <release>/game). --check only checks
+the disc (no work folder): OK <message>, or ERROR verify <message> and exit code 1.
+
 Output for a launcher, one line each on stdout (everything else goes to <out>/logs/<step>.log):
   PROGRESS <step> <i>/<n> <message>     a step starts
   PERCENT <step> <0-100>                within a long step (extract, packs, compile)
@@ -214,7 +219,7 @@ class Build:
     def __init__(self, args):
         self.args = args
         self.out = os.path.abspath(args.out)
-        self.game = os.path.join(self.out, 'TMB')
+        self.game = os.path.abspath(args.game) if args.game else os.path.join(self.out, 'TMB')
         self.disc_dir = os.path.join(self.game, 'disc')
         self.gen = os.path.join(self.out, 'generated')
         self.cmake_build = os.path.join(self.out, 'build')
@@ -237,6 +242,8 @@ class Build:
             args.tools = args.tools or os.path.join(self.kit, 'tools')
             args.fetch_cache = args.fetch_cache or os.path.join(self.kit, 'deps')
             self.ffmpeg_root = os.path.join(self.kit, 'ffmpeg')
+        if args.debug_info is None:  # a player's build (the kit): no debug information, a 613 MB runner otherwise
+            args.debug_info = 'no' if self.kit else 'yes'
 
     def save_state(self):
         tmp = self.state_path + '.tmp'
@@ -339,14 +346,14 @@ class Build:
                                file_stamp(os.path.join(ROOT, 'recomp', 'tmb_iop_modules.json')),
                                [file_stamp(os.path.join(ROOT, 'PS2Recomp', 'tools', t)) for t in ('irx_load.py', 'iop_recomp.py')])
         if step == 'configure':
-            return fingerprint(self.find_toolchain(), a.build_type, a.fetch_cache, self.ffmpeg_root,
+            return fingerprint(self.find_toolchain(), a.build_type, a.debug_info, a.fetch_cache, self.ffmpeg_root,
                                [self.state.get(s, {}).get('key') for s in ('recompile', 'packs', 'iop')])
         if step == 'compile':
             return fingerprint(self.state.get('configure', {}).get('key'),
                                tree_stamp(os.path.join(ROOT, 'runtime')),
                                tree_stamp(os.path.join(ROOT, 'PS2Recomp'), ('.cpp', '.h', '.hpp', '.inl', '.txt', '.cmake')))
         if step == 'stage':
-            return fingerprint(self.state.get('compile', {}).get('key'))
+            return fingerprint(self.state.get('compile', {}).get('key'), self.game)
         raise AssertionError(step)
 
     def step_verify(self):
@@ -632,6 +639,11 @@ class Build:
                '-DTMB_GENERATED_DIR=' + self.gen.replace('\\', '/'),
                '-DCMAKE_C_COMPILER=' + self.tool('gcc'), '-DCMAKE_CXX_COMPILER=' + self.tool('g++'),
                '-DCMAKE_MAKE_PROGRAM=' + self.tool('ninja')]
+        if self.args.debug_info == 'no':
+            # The configuration's own flags without -g: the same code (GCC's -g never changes it), the same -O2 and
+            # GUI subsystem as RelWithDebInfo; Release would be -O3, which the generated code is too large for.
+            flags = {'Release': '-O3 -DNDEBUG', 'RelWithDebInfo': '-O2 -DNDEBUG', 'Debug': '-O0'}[self.args.build_type]
+            cmd += ['-DCMAKE_%s_FLAGS_%s=%s' % (lang, self.args.build_type.upper(), flags) for lang in ('C', 'CXX')]
         if self.ffmpeg_root:
             cmd += ['-DPS2X_FFMPEG_ROOT=' + self.ffmpeg_root.replace('\\', '/'), '-DPS2X_ENABLE_PARALLEL_GS=OFF']
         else:
@@ -653,7 +665,16 @@ class Build:
             raise BuildError('no runner at %s' % exe)
         os.makedirs(self.game, exist_ok=True)
         staged = [exe]
-        shutil.copy2(exe, os.path.join(self.game, os.path.basename(exe)))
+        dest = os.path.join(self.game, os.path.basename(exe))
+        strip = os.path.join(self.find_toolchain(), 'strip' + EXE)
+        if self.args.debug_info == 'no' and os.path.isfile(strip):
+            # What debug information is left (the libraries' own -g, if any) out of the player's copy.
+            if os.path.exists(dest):
+                os.remove(dest)
+            self.run([strip, '--strip-debug', '-o', dest, exe])
+            shutil.copystat(exe, dest)
+        else:
+            shutil.copy2(exe, dest)
         if os.name == 'nt':
             for dll in runtime_dlls(exe, [os.path.dirname(exe), self.find_toolchain()]):
                 shutil.copy2(dll, os.path.join(self.game, os.path.basename(dll)))
@@ -678,7 +699,7 @@ class Build:
             os.chmod(sh, 0o755)
         with open(os.path.join(self.game, 'tmb_build.json'), 'w') as f:
             json.dump({'built': time.strftime('%Y-%m-%d %H:%M:%S'), 'elf_sha1': ELF_SHA1,
-                       'build_type': self.args.build_type, 'toolchain': self.find_toolchain(), 'kit': self.kit,
+                       'build_type': self.args.build_type, 'debug_info': self.args.debug_info, 'toolchain': self.find_toolchain(), 'kit': self.kit,
                        'files': [os.path.basename(p) for p in staged],
                        'env': dict(LAUNCH_ENV)}, f, indent=1)
         emit('INFO', 'stage', '%d DLLs staged' % (len(staged) - 1))
@@ -697,6 +718,9 @@ class Build:
                 st = self.state.get(step, {})
                 if not dirty and i - 1 < redo_from and st.get('done') and st.get('key') == key:
                     emit('SKIP', step, '%d/%d' % (i, n))
+                    if step == self.args.stop_after:
+                        emit('INFO', 'stopped', 'after ' + step)
+                        return 0
                     continue
                 dirty = True  # every later step runs again
                 emit('PROGRESS', step, '%d/%d' % (i, n), STEP_TITLES[step])
@@ -766,10 +790,29 @@ def ninja_percent(line):
     return None
 
 
+def check_disc(path):
+    """--check: the verify step alone, for a launcher checking the image the player picked."""
+    b = Build.__new__(Build)
+    b.args = argparse.Namespace(disc=path)
+    try:
+        b.step_verify()
+    except BuildError as e:
+        emit('ERROR', 'verify', e)
+        return 1
+    except Exception as e:  # noqa: BLE001 (an unreadable file: still one line)
+        emit('ERROR', 'verify', '%s: %s' % (os.path.basename(path), e))
+        return 1
+    emit('OK', 'USA disc (SCUS-97101)')
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description='Builds Twisted Metal: Black (USA) as a native PC game from your own disc.')
     ap.add_argument('--disc', required=True, help='the disc image (.iso, .bin, .cue) or an extracted disc folder')
     ap.add_argument('--out', default='tmb_build', help='the work folder; the game ends up in <out>/TMB')
+    ap.add_argument('--game', help='the game folder to stage (default: <out>/TMB)')
+    ap.add_argument('--check', action='store_true', help='only check the disc (no work folder): OK <message> or '
+                    'ERROR verify <message>')
     ap.add_argument('--kit', help='the build kit folder (default: <TMB_Recomp>/kit or <its parent>/kit if present)')
     ap.add_argument('--no-kit', action='store_true', help='do not use a build kit even if one is found')
     ap.add_argument('--toolchain', help='compiler folder (with bin/g++, cmake, ninja), default: the kit, PATH, '
@@ -777,10 +820,14 @@ def main():
     ap.add_argument('--tools', help='folder with prebuilt ps2_recomp and ps2_vu_aot (default: built here)')
     ap.add_argument('--fetch-cache', help='folder with the FetchContent sources (<name>-src) instead of git')
     ap.add_argument('--build-type', default='RelWithDebInfo', choices=['Release', 'RelWithDebInfo', 'Debug'])
+    ap.add_argument('--debug-info', choices=['yes', 'no'], help='debug information in the runner (default: no with '
+                    'the build kit, a player build; yes without it)')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--redo', choices=STEPS, help='run this step and the ones after it again')
     ap.add_argument('--stop-after', choices=STEPS, help='stop once this step is done')
     args = ap.parse_args()
+    if args.check:
+        sys.exit(check_disc(args.disc))
     os.makedirs(os.path.abspath(args.out), exist_ok=True)
     sys.exit(Build(args).main())
 

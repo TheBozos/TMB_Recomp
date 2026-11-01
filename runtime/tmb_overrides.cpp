@@ -1705,6 +1705,11 @@ namespace
             tmb::host::setEnvDefault("PS2X_IOP_NATIVE", "1");
             tmb::host::setEnvDefault("PS2X_SPU2_WALLCLOCK", "1");
             tmb::host::setEnvDefault("PS2X_IOP_WALLCLOCK", "1");
+            // Native audio: 989SND's calls to libsd act on the fork's native mixer (ps2xIOP native_libsd.cpp, read
+            // as the IOP is constructed, after this), the SPU2 emulation absent. TMB_NATIVE_AUDIO=0 (or
+            // PS2X_NATIVE_AUDIO=0) keeps libsd recompiled on the emulated SPU2.
+            const char *audio = std::getenv("TMB_NATIVE_AUDIO");
+            tmb::host::setEnvDefault("PS2X_NATIVE_AUDIO", audio && *audio == '0' ? "0" : "1");
         }
         // The runtime's debugger window starts hidden (F1 shows it, PS2X_DEBUG_UI=1 starts with it): here, before the
         // window opens, where the debug panel reads it (applyTmb comes later, with the ELF).

@@ -1176,3 +1176,46 @@ frame, menus and match as before), `TMB_NATIVE_VU1=1`, `TMB_VIF0_PACKETS=1`, `TM
 
 Left: PS2Memory still has its `GSRegisters` member (160 bytes, zero, untouched without a GS front end) and the GS code
 is still linked for the diagnostic modes and the other ports.
+
+## Native audio: no SPU2 emulation (2026-11-01)
+
+The sound no longer goes through the emulated SPU2. The recompiled 989SND keeps calling libsd, but libsd's exports are
+taken over at its API by the fork's native audio (DC_Recomp's work on `dc/native`, brought in by cherry-pick: a92ec82
+native libsd and mixer, timrman's timer interrupts and status bits; 33ee909 reverb; fe78cbf the transfer handler /
+callback after a transfer; 73a8c15 the sound data input, `sceSdBlockTrans`, and MMIX). `PS2X_NATIVE_AUDIO=1` is now
+TMB's default with `TMB_NATIVE=1` (`runtime/tmb_overrides.cpp`); `TMB_NATIVE_AUDIO=0` keeps the emulated SPU2.
+- What 989SND imports from libsd (exports 4-11, 13, 15, 17, 18, 20, 21, 23, 25, 26) is native except 13
+  (sceSdNote2Pitch, pure arithmetic, left recompiled): voice and core parameters, switches and addresses act on the
+  mixer's voices (pitch, ADSR, volumes and sweeps, key on / off, ENDX, dry / wet masks), `sceSdVoiceTrans` copies a
+  bank into the mixer's 2 MB sound memory and queues the transfer handler as an interrupt call (989SND's command server
+  waits on it), `sceSdSetEffectAttr` sets libsd's reverb presets in an effect area below the effect end address.
+- Banks: uploaded at boot (1.88 MB) and at each level load; in-match music is streamed through sound memory by 989SND
+  itself (about 100 KB/s of uploads during a match, voices looping over the ring it refills, which it polls through NAX).
+- Movie audio: the ezmpeg player hands the PSS PCM to 989SND's 24 KiB buffer (0x856b0, see "Movie sound" above), which
+  plays it with `sceSdBlockTrans(0, 0x13, 0x856b0, 0x6000)` (looping, from the buffer's start; a 1 KiB one-shot of
+  silence first, mode 2 at a stop or skip). The native mixer reads the buffer in IOP memory as it plays (256 left then
+  256 right samples per 1 KiB) and raises the transfer handler at each half, as the AutoDMA interrupt would.
+- The SPU2 is absent (`IopSpu2::setAbsent`): no sound RAM, never scheduled, its registers and DMA channels counted and
+  ignored. Proof in every run: `[audio] native mixer: ... SPU2 absent: register accesses 0, DMA register accesses 0,
+  samples mixed 0, advances 0` every 10 s (nothing touches it: libsd's own module code never reaches the chip once its
+  exports are taken over).
+- Native in the fork (generic): PS2X_NATIVE_AUDIO read as the IOP is constructed (a game override can set it), the
+  absent SPU2 and its counters, the mixer's report line, `PS2X_AUDIO_RECORD=<wav>` for either path (header refreshed
+  every second). Nothing TMB-specific was needed: 989SND imports no IRQ call (libsd export 22), and none of its
+  logged libsd calls (`PS2X_NATIVE_AUDIO_LOG=1`, the first 200) sets pitch modulation or noise, which the mixer does
+  not do yet (kept as set).
+
+Checked without ears: the same scripted stretch (boot movies, menus, a Challenge match in Junkyard with its pause menu;
+`sc.py 1 175 118 130`, 180 s) recorded twice on each path. Per 10 s, aligned by envelope cross-correlation:
+- movies and menus (10-110 s), emulated against native: loudness within +0.0 to +0.9 dB (native slightly louder in
+  the menus, +0.3 dB 500 Hz-8 kHz), log-spectrum cosine 0.95-0.998, sample-level correlation up to 0.99 (menu music);
+  emulated against emulated 0.97-0.99 / up to 0.98, native against native 0.98-0.998 / up to 0.997;
+- silent seconds identical on all four (0-10, 103-104, 130-133: boot, the load, the pause); clipped samples in the
+  match 5575 / 3257 emulated, 1575 / 3544 native (the match's explosions; gameplay differs run to run there);
+- the logo movie (11-17 s): the emulated SPU2's input clicks every 256 samples (the energy of sample-to-sample jumps
+  at one phase of the 256-sample period 50 times the median; 4-5 times in the intro movie), the native input is flat
+  (1.1-1.3): the emulated recording's 4-24 kHz band is 6-18 dB above the native one there, entirely those clicks.
+No hang: boot, then four times main menu -> Challenge -> Junkyard -> pause -> quit to the menus (520 s, `cycles.py 1 4
+110`), and a three-cycle run: the sound throughout (silent only at loads and pauses), key ons and uploads rising, the
+same 989SND "still running ... letting the other threads run" lines as the emulated path (its command server polling;
+22 in the 180 s run on either path).

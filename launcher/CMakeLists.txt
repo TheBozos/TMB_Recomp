@@ -70,11 +70,9 @@ endif()
 # windres does not like brackets in names.
 configure_file("${_font_dir}/Exo2[wght].ttf" "${_font_dir}/exo2.ttf" COPYONLY)
 
-# The icon, drawn by a small program at build time (launcher/tools/make_icon.cpp): no image committed.
-add_executable(launcher_make_icon tools/make_icon.cpp)
-set(_icon "${CMAKE_BINARY_DIR}/launcher.ico")
-add_custom_command(OUTPUT "${_icon}" COMMAND launcher_make_icon "${_icon}" DEPENDS launcher_make_icon VERBATIM)
-add_custom_target(launcher_icon DEPENDS "${_icon}")
+# The icon: The Bozos' logo (docs/branding/bozos_icon_1024.png, drawn by docs/branding/make_logo.py), as a
+# multi-size .ico (16 to 256 px).
+set(_icon "${CMAKE_CURRENT_SOURCE_DIR}/bozos.ico")
 
 # The release's version and source commit (tools/make_release.py passes them): shown in the footer, compared with
 # GitHub's latest release by the update check, in the exe's version information. "dev" builds skip the check at start.
@@ -99,7 +97,6 @@ enable_language(RC)
 add_executable(tmb_launcher WIN32
     src/main.cpp src/ui.cpp src/build_model.cpp src/config.cpp src/platform_win.cpp
     "${CMAKE_BINARY_DIR}/launcher.rc")
-add_dependencies(tmb_launcher launcher_icon)
 set_target_properties(tmb_launcher PROPERTIES OUTPUT_NAME "TMB Launcher")
 target_link_libraries(tmb_launcher PRIVATE launcher_imgui raylib comdlg32 shell32 ole32 winhttp)
 target_compile_definitions(tmb_launcher PRIVATE TMB_VERSION="${LAUNCHER_VERSION}" TMB_COMMIT="${LAUNCHER_COMMIT}")

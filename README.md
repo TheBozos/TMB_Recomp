@@ -284,7 +284,7 @@ rem                        -DLAUNCHER_FONT_DIR=<folder with Exo2[wght].ttf and O
   (disc, language, background motion, build state) sits next to it. English and French.
 - The look is the team's, from RecompWatcher: the PS2 BIOS's radial blue, glowing boot towers (motion can be turned
   off), glass cards, Exo 2 (SIL OFL 1.1, google/fonts at a pinned commit, embedded with its licence; downloaded at
-  configure time, never committed). The icon is drawn at build time by `launcher/tools/make_icon.cpp`. No game art.
+  configure time, never committed). The icon is The Bozos' logo (`launcher/bozos.ico`, from `docs/branding/`). No game art.
 - Updates: at start (Settings: "Check for updates at start") and from Maintenance's "Check for updates", one HTTPS
   GET of `api.github.com/repos/TheBozos/TMB_Recomp/releases/latest` through WinHTTP; a newer `tag_name` shows
   "Version X is available" with a link to its release page (built from the tag). Offline or no release: silent. When

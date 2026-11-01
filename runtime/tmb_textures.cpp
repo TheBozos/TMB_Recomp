@@ -204,6 +204,14 @@ namespace tmb::textures
             std::vector<std::string> &files = tex ? s.texFiles : s.resFiles;
             if (only)
                 files.clear();
+            // A new list of .TEX files: its records are set up from the first. The shell sets up its textures without
+            // texmInit (back from a match the count would go on from the level's, past the shell's records).
+            if (only && tex)
+            {
+                s.texOrdinal = 0;
+                s.byId.clear();
+                s.decoded.clear();
+            }
             const auto it = s.nameAt.find(getRegU32(ctx, 4));
             files.push_back(it != s.nameAt.end() ? it->second : std::string("?"));
         }

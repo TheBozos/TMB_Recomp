@@ -1650,3 +1650,102 @@ What is left for step 5:
 - A clean-VM test: a fresh Windows 10/11 with nothing installed, SmartScreen's prompt, a non-ASCII path, a disc image
   on another drive (the copy instead of the hard link), a 4-core PC's build time, a high-DPI monitor.
 - GPL / LGPL source availability for the kit's MSYS2 binaries; code signing if it ever becomes possible.
+
+## The release: make_release.py, updates, the source offer (2026-11-01)
+
+What a player downloads, and how it is made (README, "The release"; `docs/RELEASE_CHECKLIST.md` for the checks on a
+clean PC).
+
+- **`tools/make_release.py`** (standard library; the kit's embeddable Python runs it too). From a commit (committed
+  files only): `git archive` of TMB_Recomp and of PS2Recomp at the commit the submodule records into `source\`, with
+  `release.ini` (version, both commits, date) and `release_files.txt`; the build kit hard-linked from `--kit` (the
+  files make_build_kit rewrites are copied, so the original kit never changes); its recompilers rebuilt in that copy
+  when `tools.fork_commit` is not the release's fork commit (make_build_kit `--only tools --only manifest`, reading the
+  commits from `release.ini` since an export has no `.git`); the kit's FFmpeg, Python and library pins checked against
+  the exported make_build_kit.py and its `DEP_PRUNE` applied (ELFIO's tests, examples and doc and libdwarf's `test/`
+  are now left out: never built, and their sample ELF files were the only ELF files in a release); the launcher built
+  with the kit's toolchain alone, offline, with `LAUNCHER_VERSION` / `LAUNCHER_COMMIT`; `LICENSES\`, `README.txt`;
+  then the zip.
+- **Nothing of the game.** The export and the release folder are audited before zipping (the script stops): no ELF
+  (magic), no ISO9660 volume (`CD001` at 0x8001), no IRX / ISO / BIN / CUE / pack / PSS / VAG..., no disc file names
+  (`SCUS_971.01`...), no `generated/`, `game/`, `disc/` or `build/` folder outside the kit's third-party sources
+  (rabbitizer has its own `generated/` headers); the zip's names are checked again. On the test zip: 8467 entries, 0
+  ELF files; the only names matching `elf|irx|SCUS|generated|iso|pack|cue` are rabbitizer's MIPS tables and
+  `recomp/tmb_scus97101.toml` (our configuration).
+- **The zip.** `TMB_Recomp-<version>.zip` holds `TMB_Recomp\` (the same name every release, so a new one unzips over
+  the last): `TMB Launcher.exe`, `source\`, `kit\`, `README.txt` (English and French: what it is, the USA disc, not in
+  Program Files, SmartScreen's More info / Run anyway, Get-FileHash, saves, updates, uninstalling, GitHub issues,
+  credits), `LICENSES\`. Deflate 9, entries sorted, every timestamp the commit's, no Unix permissions; `<zip>.sha256`
+  in sha256sum's format; `RELEASE_NOTES.md` a stub with the hashes, sizes, versions and the source offer. 145.7 MB
+  (489.6 MB unpacked), about 70 s for the whole script with a kit (25 of them rebuilding the recompilers, 22 the
+  launcher, 18 the zip). Not bit-reproducible yet: the rebuilt recompilers and the launcher carry link timestamps and
+  the manifest its date.
+- **The source offer.** The kit redistributes unmodified MSYS2 binaries (GCC, binutils, mingw-w64, winpthreads, CMake,
+  Ninja and 27 more packages for the DLLs they load) and a static LGPL FFmpeg. `LICENSES\` has each package's licence
+  folder, the share/doc licence files MSYS2 installs elsewhere (mpfr, cmake), the libraries' and the font's, and the
+  code's GPL-3.0; `LICENSES\SOURCES.txt` lists every package with its version, licence and exact source package on
+  repo.msys2.org (`mingw-w64-<base>-<version>.src.tar.zst`) with its SHA-256, FFmpeg's tarball and configure line,
+  Python, the libraries' repositories and commits, and a written offer. `--with-sources` downloads the 36 source
+  packages (repo.msys2.org only, cached, hashed), reads the licence files of the packages that install none (gmp,
+  isl, libidn2, lz4, mpc) out of their upstream tarballs (Python 3.14 reads `.tar.zst`; windows-default-manifest,
+  public domain, gets a NOTE), and writes `TMB_Recomp-<version>-sources.zip` (stored, with SHA256SUMS): **452.3 MB**,
+  to attach to the same release. Shipping the source next to the binaries is GPL-3 section 6(a)'s / LGPL-2.1
+  section 6(a)'s way; the written offer covers anyone who gets the zip elsewhere.
+- **Publishing.** `--publish` runs `gh release create v<version> --draft --target <commit> [--prerelease] --notes-file
+  RELEASE_NOTES.md` with the zips and their `.sha256`; `--dry-run` prints it. Never run against GitHub here: the commit
+  must be pushed first and the owner publishes the draft.
+- **Launcher: version and updates.** The footer shows `TMB_Recomp <version> · <commit>`; the exe's version resource
+  too. At start (launcher.ini `update_check`, a Settings toggle; not in a "dev" build) and from Maintenance's "Check for
+  updates": one GET of `https://api.github.com/repos/boubou666/TMB_Recomp/releases/latest` through WinHTTP (the
+  system's proxy and certificates, 5 s timeouts) in a thread. A newer `tag_name` (semantic versions, 1.0.0-rc <
+  1.0.0) shows "Version X is available" on the Play tab with "Open the release page"; the link is built from the tag
+  (only `[A-Za-z0-9._+-]`), never taken from the response; nothing is downloaded. Offline, no release yet (404), a
+  rate limit: silent unless the button was pressed.
+- **Launcher: after an update.** tmb_build writes `game\built_from.ini` (the source's release.ini) after every
+  successful run; when `source\release.ini`'s commit differs, the Play tab says "Version X is installed" and offers
+  **Rebuild now**. Unzipped over the old release, the source files the new one no longer has are removed by tmb_build
+  (`release_files.txt`, only the folders a release ships, never through a link), and a build folder configured from
+  another path is configured afresh.
+- **"Prepared in"** is the sum of the build's runs (launcher.ini `pending_build_seconds` keeps the stopped and failed
+  runs, quitting during a build included). Test: stopped at 40 % of the compile and resumed, "Prepared in 3:07" for
+  186.6 s from the first start to the end.
+- **`gs_scale`.** The runner logged `GS scale 2` with `gs_scale = 1` in video.ini: TMB's overrides set
+  `PS2X_GS_SCALE=2` as a default, and `ps2_video::loadAtStartup` reads the environment over the file. A real bug of
+  ours, not the fork's: the default is gone (the GS back end draws nothing in the native port; a GS front end
+  diagnostic takes the scale from video.ini or the variable). The release test logs `[video] 1280x960 windowed, render
+  scale 1.00, GS scale 1`.
+
+### Paths with spaces and non-ASCII characters (found by the release test)
+
+Unzipped into `D:\tmb_rel_test\Jérôme Jeux\`, the build failed three times before reaching the game:
+
+1. **ps2_recomp** read the TOML but not the ELF it names ("Could not load ELF file"): TOML is UTF-8, ELFIO opens it
+   with a narrow `std::ifstream`, which Windows reads in the ANSI code page. Fork 9382d27 / 1466e9d: a manifest with
+   `activeCodePage UTF-8` (Windows 10 1903+; plus asInvoker and the Windows 10/11 supportedOS ids, since it replaces
+   MSYS2's default manifest) for ps2_recomp, ps2_vu_aot and ps2EntryRunner (`cmake/windows/Ps2xUtf8CodePage.cmake`,
+   `PS2X_WINDOWS_UTF8`); the resource script names the manifest copied beside it (windres opens a script's files in
+   the ANSI code page too).
+2. **windres** ("preprocessing failed"): it runs `"<its folder>\gcc" -E ... "<file>.rc"` through popen, that is
+   `cmd /c`, which strips the outer quotes of a line with more than two and ran `D:\tmb_rel_test\Jérôme`. The space is
+   the cause, not the accent: any `D:\Games\TMB Recomp` or `C:\Users\Jean Dupont` hit it. `CMAKE_RC_FLAGS =
+   --preprocessor=gcc --preprocessor-arg=-E --preprocessor-arg=-xc --preprocessor-arg=-DRC_INVOKED` (tmb_build,
+   make_build_kit, make_release): the bare name, on the PATH, has no quotes to strip.
+3. **ld** ("cannot find ...Jérôme_Jeux...obj", the kit's FFmpeg libraries): MSYS2's binutils open files in the ANSI
+   code page and read CMake's UTF-8 response file as such. Not ours to rebuild: tmb_build now runs itself again through
+   directory junctions with plain names (`%ProgramData%\TMB_Recomp\paths\<hash>-source|build|game|kit`, stable so
+   CMake's cache stays valid, no administrator rights) when one of those folders is not ASCII, and removes them
+   afterwards (the links only).
+
+With the three, from the unzipped release in `D:\tmb_rel_test\Jérôme Jeux\TMB_Recomp`, the launcher's selftest
+(`PS2X_USER_DIR` = `D:\tmb_rel_test\user Jérôme`, the USA ISO hard-linked as `game\disc.iso`, the European ISO
+refused, a stop at 40 % of the compile): 186.6 s to the game (extract 3.5, recompile 5, packs 33, iop 2.7, configure
+5.4, compile 20 + 114.4, stage 0.2), Play to the boot movies and the main menu (11 window captures,
+`[tmb] disc image: D:\tmb_rel_test\Jérôme Jeux\...\game\disc.iso`, no GS front end), closed with code 0;
+`PS2X_TEST_CRASH=25`: exit 0xC0000005 and the crash report offered. `C:\ProgramData\TMB_Recomp\paths` empty afterwards.
+
+UPDATE_TEST_PLACEHOLDER
+
+What is left for the owner: push the branches, tag, `make_release.py --with-sources --publish` (a draft), finish the
+notes, attach nothing else, publish; a LICENSE file at the repository's root (the code is GPL-3.0 through PS2Recomp;
+the release ships PS2Recomp's); the clean-PC run of `docs/RELEASE_CHECKLIST.md` (SmartScreen, Defender, a 4-core PC,
+a real 150 % / 200 % display, offline); code signing if it ever becomes possible.

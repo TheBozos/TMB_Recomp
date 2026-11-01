@@ -1279,3 +1279,28 @@ start code above; the whole-run total stays 1012 to the end.
   throughout. 4P split screen (multitap, `main4p.sh`): four views at 60 fps, sound. Memory card: main menu LOAD GAME ->
   the slot list (1-A to 1-D, 2) -> "TWISTED METAL STORY DATA DOES NOT EXIST" on an empty card (libmc HLE as before).
   `TMB_IOP_HARDWARE=1`: `[iop:hw] hardware modelled`, the same counts.
+
+## Cheats: weapons, energy, health and players in the game's data (2026-11-01)
+The Cheats tab (F2, `runtime/tmb_cheats.cpp`) acts on what the game's own code reads and writes:
+- Players. `TheGame::gameCheckPlayerHealth` (0x133360) walks the human players' cars: pointers at TheGame + 0x1B28B0,
+  their count at TheGame + 0x1B3DB8, and computes each one's health fraction as `+0x3F4 / +0x3F0`, so +0x3F0 is the
+  car's maximum health (180 for the default single-player car, 120 and 100 for the two cars of a 2P match). Player 1's
+  car is not always 0x257B50 (TheGame's vehicle 0): in a 2P match the players were 0x2B7550 and 0x2BA250. Who drives a
+  car is at + 0x580: `vehicleUpdate` calls `playerUpdateInputs` for 1 and `aiUpdateInputs` (0x1014A0) for 2.
+- Weapons. `Weapons::DecrementWeaponCount` (0x1BA050; `a1` the car, `a2` the slot) is the one place a count goes down:
+  slot `i`'s count at car + 0x22C4 + 4 * i (slots 1 to 8; slot 0, the machine gun, has none), the selected slot at
+  + 0x2140; at 0 it moves the selection to the next slot with ammo. Slot 1 is the car's special (`Launcher::FireSpecial`
+  spends slot 1; its count also grows back during a match: 1 to 5 over a few minutes). Every caller
+  (`FireCurrentWeapon`, `FireSpecial`, `UpdateSpecial`, `UpdateLauncher`, `UpdateEnvWeapon`, `UpdateZoomies`,
+  `UpdateWeaponToggle`, `KillWeapon`) reaches it with a JAL to `TheGame::DecrementWeaponCount` (0x1515A8), which adds
+  the Weapons offset (TheGame + 0x190C20) and jumps on; that J is a direct C++ call in the recompiled code, so the hook
+  is on 0x1515A8 (dispatched), not 0x1BA050. Infinite ammo returns from it at once for the players who have it.
+- Energy: an int at car + 0x2214 of + 0x2218 (1000), `Hud::build4PEnergyBar`'s fill; turbo a float at + 0x410 of 100.
+- Checked (scripted, `TMB_CHEATS_LOG=1`): L2 fires the selected pickup. Without the cheat the player's slot 2 went
+  2 -> 1 -> 0, slot 3 2 -> 1 -> 0, then the special 3 -> 2 -> 1; with it (switched on in the match,
+  `TMB_CHEATS_TOGGLE=30`) nine specials and eight slot-2 shots were fired with the counts unchanged, the HUD at SPECIAL
+  01 and FIRE 02. Health back at its maximum in the frame the cheat goes on, then held while the bots hit the car (off:
+  180 -> 47 over 20 s); energy held at 1000 (off: down to 127); weak enemies at 10 each; with No AI alone the player's
+  health stayed 180 for the whole match. 2P split screen (`PS2X_PAD2_SCRIPT`, MULTI-PLAYER with the defaults),
+  `TMB_INFINITE_AMMO=2`: at each shot player 1's counts went down (2 -> 1, special 4 -> 1) and player 2's slot 2 stayed
+  at 2 for 21 shots; 60 fps.

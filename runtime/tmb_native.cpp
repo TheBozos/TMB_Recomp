@@ -559,7 +559,11 @@ namespace tmb::native
             uint32_t background;
             std::memcpy(&background, g_rdram + kBgColour, 4);
             static uint32_t s_logged = 0;
-            if (s_logged++ < 4u)
+            static const bool s_logViews = std::getenv("TMB_NATIVE_LOG_VIEWS") != nullptr;
+            if (s_logViews && s_logged++ < 400u)
+                std::fprintf(stderr, "[tmb:native] view clear %.0f %.0f %.0f %.0f (%llu)\n", clip[0], clip[1], clip[2], clip[3],
+                             0ull);
+            else if (!s_logViews && s_logged++ < 4u)
                 std::fprintf(stderr, "[tmb:native] view clear: background %06x, fog %06x\n", background & 0xffffffu, gameFogColour(0u));
             const uint32_t colour = gameFogColour(background & 0xffffffu) | 0x80000000u;
             ps2x::native::Vertex corner[4];

@@ -39,9 +39,10 @@
 // before the particles drawn after it (particleDraw). The GS state of each draw (ALPHA_1, TEST_1, ZBUF_1.ZMSK) follows
 // the objects in that order: the traversal's GS context block when the header brings one (a node's: its writes from the
 // pack, recorded offline from the NGP files; the game's default one, ctxGetDefaultGSCtx: from EE memory), then the
-// strips' register blocks. Not drawn: hierObjectNode's C path (pktAddVu1Obj: not called in the arenas and menus seen),
-// skinned objects without bones, resumes the pack path does not follow, and the skid marks (SkidMarks::draw builds
-// their object in skidBuffer each frame: no pack entry); their context blocks still count for the state.
+// strips' register blocks. The skid marks' object (skidBuffer, which SkidMarks::draw fills each frame) is drawn from the
+// marks themselves (skidSnapshot). Not drawn: hierObjectNode's C path (pktAddVu1Obj: not called in the arenas and
+// menus seen), skinned objects without bones and resumes the pack path does not follow; their context blocks still
+// count for the state.
 //
 // TMB_NATIVE_VIF=1 (runtime/tmb_native.cpp): the adapter follows the VIF1 stream again; the hook marks the header's
 // last qword (its VIF NOP's unused immediate) and the adapter submits the draws at that object's setup in the stream,
@@ -402,7 +403,7 @@ namespace tmb::meshes
             uint64_t calls = 0, cCalls = 0, drawn = 0, taken = 0, unclaimed = 0, noFile = 0, noObject = 0, kindOther = 0,
                      program = 0, extra = 0, unmarked = 0, triangles = 0, idMismatch = 0, resumed = 0, resumeOther = 0, sprites = 0, ribbons = 0,
                      skinned = 0, reflective = 0, morphed = 0, contextsPack = 0, contextsDefault = 0, contextsMissing = 0,
-                     contextsDiffering = 0;
+                     contextsDiffering = 0, skid = 0;
         } g_stats;
 
         void vf(const R5900Context *ctx, int reg, float out[4]) { _mm_storeu_ps(out, ctx->vu0_vf[reg]); }
@@ -1050,6 +1051,134 @@ namespace tmb::meshes
                 g_stats.triangles += b.vertices.size() / 3u;
         }
 
+        // ---- the skid marks ----
+        //
+        // SkidMarks::draw (rtMain, after the views) builds one hier object in skidBuffer from the marks, which the
+        // next frame's traversal sends (its header from the template at this+0x203a0, ALPHA_1 0x44 in its register
+        // block): per batch of up to 47 marks a pool of their four corners (this + 64 * mark: x, y, z at +0, +0x10,
+        // +0x20, +0x30), then per mark a strip of four vertices (unlit, setup 0xcc8: PRIM 0x7c, a triangle strip, textured,
+        // fogged, blended; the batch's first strip brings the texture of slot 0), colour the mark's (this+0x26168 + 4 *
+        // mark), alpha min(smcSkidColors[material].a, (0x1e0 - age) / 2) (material this+0x278d8 + 4 * mark, age
+        // this+0x29048 + 4 * mark), texture coordinates (1, 1), (0, 1), (1, 0), (0, 0) for the corners 0-3. The marks
+        // follow a list from this+0x2a7b8 (next: this+0x17708 + 12 * mark, -1 ends it), this+0x2a7c0 of them. Kept here
+        // as draw sees them (the update after it moves them), in the pack's object format, for the hook.
+        constexpr uint32_t kSkidDraw = TMB_ADDR(0x00169610u);
+        constexpr uint32_t kSkidBuffer = TMB_ADDR(0x00448D70u);
+        constexpr uint32_t kSkidColors = TMB_ADDR(0x00448AC0u);
+        struct Skid
+        {
+            bool valid = false;
+            std::vector<uint8_t> body;
+            std::vector<PackObject> objects; // one: the skid object
+        } g_skid;
+
+        template <typename T>
+        void put(std::vector<uint8_t> &out, T value)
+        {
+            const size_t at = out.size();
+            out.resize(at + sizeof(T));
+            std::memcpy(out.data() + at, &value, sizeof(T));
+        }
+
+        void skidSnapshot(const Ee &ee, uint32_t self)
+        {
+            g_skid.valid = false;
+            const int32_t count = static_cast<int32_t>(ee.u32(self + 0x2a7c0u));
+            if (ee.u32(self + 0x203a0u) == 0u || count <= 0)
+                return;
+            const auto next = [&](int32_t mark) { return static_cast<int32_t>(ee.u32(self + 0x17708u + 12u * static_cast<uint32_t>(mark))); };
+            const int32_t head = static_cast<int32_t>(ee.u32(self + 0x2a7b8u));
+            std::vector<float> positions;
+            struct Strip
+            {
+                bool first;
+                uint8_t rgba[4];
+            };
+            std::vector<Strip> strips;
+            int32_t remaining = count, corners = head, mark = head;
+            while (remaining > 0)
+            {
+                const int32_t batch = remaining < 48 ? remaining : 47;
+                remaining = remaining < 48 ? 0 : remaining - 47;
+                // The pool: the marks' corners while the list lasts (VU memory keeps what was there past its end: zeros).
+                for (int32_t k = 0; k < batch; ++k)
+                {
+                    for (uint32_t c = 0; c < 4u; ++c)
+                    {
+                        const bool have = corners != -1;
+                        const uint32_t at = self + static_cast<uint32_t>(corners) * 64u + c * 16u;
+                        positions.push_back(have ? ee.f32(at) : 0.0f);
+                        positions.push_back(have ? ee.f32(at + 4u) : 0.0f);
+                        positions.push_back(have ? ee.f32(at + 8u) : 0.0f);
+                        positions.push_back(0.0f);
+                    }
+                    if (corners != -1)
+                        corners = next(corners);
+                }
+                for (int32_t k = 0; k < batch; ++k)
+                {
+                    const uint32_t m = static_cast<uint32_t>(mark);
+                    const uint32_t colour = ee.u32(self + 0x26168u + 4u * m);
+                    const uint32_t material = ee.u32(self + 0x278d8u + 4u * m);
+                    const int32_t fade = (0x1e0 - static_cast<int32_t>(ee.u32(self + 0x29048u + 4u * m))) / 2;
+                    const int32_t limit = ee.at(kSkidColors + 4u * material + 3u)[0];
+                    const uint32_t word = colour | (static_cast<uint32_t>(std::min(limit, fade)) << 24);
+                    Strip strip;
+                    strip.first = k == 0;
+                    std::memcpy(strip.rgba, &word, 4);
+                    strips.push_back(strip);
+                    mark = next(mark);
+                }
+            }
+            std::vector<uint8_t> &body = g_skid.body;
+            body.clear();
+            const uint32_t positionCount = static_cast<uint32_t>(positions.size() / 4u);
+            put<uint32_t>(body, positionCount);
+            put<uint32_t>(body, 0u); // no aux
+            for (float f : positions)
+                put<float>(body, f);
+            put<uint32_t>(body, 0u); // no pool sources: the positions are the pack's
+            put<uint32_t>(body, 0u); // no parameters
+            put<uint32_t>(body, 0u); // not skinned
+            put<uint32_t>(body, static_cast<uint32_t>(strips.size()));
+            for (size_t k = 0; k < strips.size(); ++k)
+            {
+                put<uint16_t>(body, 0x7cu); // PRIM: triangle strip, Gouraud, textured, fogged, blended
+                put<uint16_t>(body, 3u);    // PRE, EOP
+                put<uint32_t>(body, strips[k].first ? 1u : 0u);
+                put<int32_t>(body, strips[k].first ? 0 : -1);
+                put<uint32_t>(body, 4u);
+                for (uint32_t v = 0; v < 4u; ++v)
+                {
+                    put<uint16_t>(body, static_cast<uint16_t>(k * 4u + v));
+                    for (int b = 0; b < 4; ++b) // normal, flags
+                        put<uint8_t>(body, 0u);
+                    for (int b = 0; b < 4; ++b)
+                        put<uint8_t>(body, strips[k].rgba[b]);
+                    put<int16_t>(body, static_cast<int16_t>((v & 1u) ? 0 : 0x1000));
+                    put<int16_t>(body, static_cast<int16_t>(v < 2u ? 0x1000 : 0));
+                    put<uint16_t>(body, 0u);
+                }
+            }
+            if (g_skid.objects.empty())
+                g_skid.objects.resize(1);
+            PackObject &object = g_skid.objects[0];
+            object.offset = kSkidBuffer; // its "file" starts at 0
+            object.kind = 0u;
+            object.body = body.data();
+            g_skid.valid = true;
+        }
+
+        void skidDrawOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (active() && hookOrder())
+            {
+                const Ee ee{rdram, runtime->memory().getScratchpad()};
+                skidSnapshot(ee, getRegU32(ctx, 4));
+            }
+            draw__9SkidMarks_0x169610(rdram, ctx, runtime);
+        }
+
         // An object this path does not draw: its GS context still changes the GS state for those after it (in the
         // chain's order): kept in the view's list without draws.
         void stateOnly(const Ee &ee, uint32_t extra, bool opaque)
@@ -1265,7 +1394,9 @@ namespace tmb::meshes
                     if (obj >= l.base && obj < l.base + l.size)
                         file = &l;
             }
-            if (!file || !file->file)
+            // The skid marks' object (skidBuffer, which SkidMarks::draw fills): drawn from the marks themselves.
+            const bool skid = obj == kSkidBuffer && g_skid.valid && !resume;
+            if (!skid && (!file || !file->file))
             {
                 ++g_stats.noFile;
                 static std::unordered_map<uint32_t, bool> s_seen;
@@ -1278,8 +1409,9 @@ namespace tmb::meshes
                 stateOnly(ee, extra, opaque);
                 return;
             }
-            const uint32_t offset = obj - file->base;
-            const std::vector<PackObject> &objects = file->file->objects;
+            const uint32_t fileIndex = skid ? 0xffffu : file->index, fileBase = skid ? 0u : file->base;
+            const uint32_t offset = obj - fileBase;
+            const std::vector<PackObject> &objects = skid ? g_skid.objects : file->file->objects;
             const auto it = std::lower_bound(objects.begin(), objects.end(), offset, [](const PackObject &o, uint32_t v) { return o.offset < v; });
             if (it == objects.end() || it->offset != offset)
             {
@@ -1297,7 +1429,7 @@ namespace tmb::meshes
             }
             // A resume draws a pool-less object with the pool (and setup) the object before it left: that object must be
             // its pool's (or another pool-less object of that pool).
-            if (resume && (it->kind != 1u || previous.file != file->index ||
+            if (resume && (it->kind != 1u || previous.file != fileIndex ||
                            (it->poolFrom != previous.offset && it->poolFrom != previous.poolFrom)))
             {
                 ++g_stats.resumeOther;
@@ -1344,7 +1476,7 @@ namespace tmb::meshes
             drawn.resumes = resume ? drawPc : 0u;
             drawn.frame = g_frame;
             drawn.object = obj;
-            drawn.file = file->index;
+            drawn.file = fileIndex;
             drawn.offset = offset;
             // The setup's matrix: this object's, or (a resume) the one before it, which 0xc78 keeps (it runs 0x1700's
             // setup again, which makes it anew).
@@ -1353,18 +1485,19 @@ namespace tmb::meshes
                 std::memcpy(screen, previous.screen, sizeof(screen));
             else
                 tmb::vu1::objectToScreen(g_vu, screen, false);
-            buildStrips(ee, obj, file->base, *it, drawPc, drawn, screen, it->kind == 4u ? bones : 0u);
+            buildStrips(ee, obj, fileBase, *it, drawPc, drawn, screen, it->kind == 4u ? bones : 0u);
+            g_stats.skid += skid ? 1u : 0u;
             if (opaque)
             {
                 g_previous.valid = true;
-                g_previous.file = file->index;
+                g_previous.file = fileIndex;
                 g_previous.offset = offset;
                 g_previous.poolFrom = it->kind == 1u ? it->poolFrom : offset;
                 g_previous.pc = drawPc;
                 std::memcpy(g_previous.screen, screen, sizeof(screen));
                 std::memcpy(g_previous.pointLights, &g_vu.words[165u * 4u], sizeof(g_previous.pointLights));
             }
-            const uint64_t hash = (static_cast<uint64_t>(file->index) << 32 | offset) * 0x9e3779b97f4a7c15ull;
+            const uint64_t hash = (static_cast<uint64_t>(fileIndex) << 32 | offset) * 0x9e3779b97f4a7c15ull;
             const uint32_t occurrence = g_keysThisFrame[hash]++;
             drawn.key = (hash ^ (static_cast<uint64_t>(occurrence) * 0xc2b2ae3d27d4eb4full)) | 1u;
             for (uint32_t q = 0; q < 22u; ++q)
@@ -1567,6 +1700,10 @@ namespace tmb::meshes
                 ++s_objects;
                 if (!record.streamSeen)
                 {
+                    static uint32_t s_logged = 0;
+                    if (s_logged++ < 30u)
+                        std::fprintf(stderr, "[tmb:order] mark %u: object %#x (%s, #%u in its view, frame %u) not reached in the stream\n", mark,
+                                     record.object, record.alphaList ? "alpha" : "opaque", record.index, record.frame);
                     ++s_unreached;
                     continue;
                 }
@@ -1704,7 +1841,7 @@ namespace tmb::meshes
                          "%llu taken in the stream, %llu unclaimed; left to the stream: %llu by program (%llu drawn with a group GS-state block), %llu outside "
                          "the loaded files, %llu not in the pack, %llu of another kind in the pack, %llu unmarked; %llu texture number mismatches; "
                          "%llu resumes drawn, %llu resumes not after their pool's object; %llu sprites, %llu ribbons, %llu skinned, %llu environment-mapped, "
-                         "%llu morphing drawn; GS contexts: %llu from the pack, %llu the game's default, %llu not in the pack, %llu differing from EE memory\n",
+                         "%llu morphing drawn, %llu skid marks' objects; GS contexts: %llu from the pack, %llu the game's default, %llu not in the pack, %llu differing from EE memory\n",
                          static_cast<unsigned long long>(g_stats.calls), static_cast<unsigned long long>(g_stats.cCalls),
                          static_cast<unsigned long long>(g_stats.drawn), static_cast<unsigned long long>(g_stats.triangles),
                          static_cast<unsigned long long>(g_stats.taken), static_cast<unsigned long long>(g_stats.unclaimed),
@@ -1715,7 +1852,7 @@ namespace tmb::meshes
                          static_cast<unsigned long long>(g_stats.resumeOther), static_cast<unsigned long long>(g_stats.sprites),
                          static_cast<unsigned long long>(g_stats.ribbons), static_cast<unsigned long long>(g_stats.skinned),
                          static_cast<unsigned long long>(g_stats.reflective), static_cast<unsigned long long>(g_stats.morphed),
-                         static_cast<unsigned long long>(g_stats.contextsPack), static_cast<unsigned long long>(g_stats.contextsDefault),
+                         static_cast<unsigned long long>(g_stats.skid), static_cast<unsigned long long>(g_stats.contextsPack), static_cast<unsigned long long>(g_stats.contextsDefault),
                          static_cast<unsigned long long>(g_stats.contextsMissing), static_cast<unsigned long long>(g_stats.contextsDiffering));
             g_stats = Stats{};
         }
@@ -1733,6 +1870,7 @@ namespace tmb::meshes
         runtime.registerFunction(kPktAddVu1Obj, &pktAddVu1ObjOverride);
         runtime.registerFunction(kPktLinkAlphaObjAsm, &pktLinkAlphaObjAsmOverride);
         runtime.registerFunction(kHierCheckVifComplete, &hierCheckVifCompleteOverride);
+        runtime.registerFunction(kSkidDraw, &skidDrawOverride);
         runtime.registerFunction(kHier2pFlushDma, &hier2pFlushDmaOverride);
         std::fprintf(stderr, "[tmb:mesh] TMB_NATIVE_MESHES=1: hier objects drawn from the mesh pack at pktAddVu1ObjAsm\n");
     }

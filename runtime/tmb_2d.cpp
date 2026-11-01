@@ -756,7 +756,8 @@ namespace tmb::twod
 
         // ---- the loading bar (Shell::LoadLevelFiles): buildProgressBar and, on the loads without the shell, the vblank
         // callback that sends it between the load's steps; drawn and published here, as no game frame ends meanwhile ----
-        constexpr uint32_t kBuildProgressBar = TMB_ADDR(0x001FD4B8u), kBarVSync = TMB_ADDR(0x00203448u);
+        constexpr uint32_t kBuildProgressBar = TMB_ADDR(0x001FD4B8u), kBarVSync = TMB_ADDR(0x00203448u),
+                           kInformProgressBar = TMB_ADDR(0x001FDAE0u);
 #if TMB_REGION_US
         constexpr int32_t kGpBarMode = -0x3290, kGpBarFlip = -0x328c, kGpBarShown = -0x3280, kGpBarProgress = -0x327c;
 #else
@@ -812,6 +813,21 @@ namespace tmb::twod
             setWord(rdram, gp + kGpBarProgress, std::min<uint32_t>(getRegU32(ctx, 4), 0x400u));
             loadingBar(rdram, gp);
             ctx->pc = getRegU32(ctx, 31); // jr $ra
+        }
+
+        // informProgressBar(fraction): a load's step done; it works out the progress and hands it to buildProgressBar
+        // with a tail jump, which the recompiled code makes a direct call (past buildProgressBarOverride): the game's
+        // own buildProgressBar runs and keeps the progress (gp - 0x327c), its packet sent unread; the bar drawn here.
+        void informProgressBarOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t gp = getRegU32(ctx, 28);
+            informProgressBar__Ff_0x1fdae0(rdram, ctx, runtime);
+            if (!on())
+                return;
+            noteGp(gp);
+            g_barGp.store(gp, std::memory_order_relaxed);
+            g_rdram.store(rdram, std::memory_order_relaxed);
+            loadingBar(rdram, gp);
         }
 
         // finishShellLoop (a memory card save started from a match's overlay): the current view darkened by a quarter
@@ -1059,6 +1075,7 @@ namespace tmb::twod
         runtime.registerFunction(kHealth4p, &health4pOverride);
         runtime.registerFunction(kChargeUp, &chargeUpOverride);
         runtime.registerFunction(kBuildProgressBar, &buildProgressBarOverride);
+        runtime.registerFunction(kInformProgressBar, &informProgressBarOverride);
         runtime.registerFunction(kBarVSync, &barVSyncOverride);
         runtime.registerFunction(kFinishShellLoop, &finishShellLoopOverride);
         ps2x::setStorePatch(&dialogKick);

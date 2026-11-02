@@ -3464,14 +3464,33 @@ namespace tmb::native
         ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
         renderer.wantDepth();
         const ps2x::native::Screen view = screen();
+        uint32_t found = 0;
         for (uint32_t y = 0; y < 4u; ++y)
             for (uint32_t x = 0; x < 4u; ++x)
             {
                 uint32_t sample = 0;
                 if (renderer.depthAt(view.originX + static_cast<float>((x0 + x) & 0x7ffu) + 0.5f,
                                      view.originY + static_cast<float>((y0 + y) & 0x7ffu) + 0.5f, sample))
+                {
                     z[y * 4u + x] = std::min<uint32_t>(sample, 0xffffffu);
+                    ++found;
+                }
             }
+        // TMB_NATIVE_LOG_FLARES=1: every 300 blocks, how many of their samples the native depth had (not read yet: far).
+        static const bool s_log = std::getenv("TMB_NATIVE_LOG_FLARES") != nullptr;
+        static uint32_t s_blocks = 0, s_found = 0, s_near = 0;
+        if (s_log)
+        {
+            s_found += found;
+            for (uint32_t i = 0; i < 16u; ++i)
+                s_near += z[i] != 0u && z[i] < 0xffffffu ? 1u : 0u;
+            if (++s_blocks % 300u == 0u)
+            {
+                std::fprintf(stderr, "[tmb:native] flare depth: %u blocks, %u of %u samples read, %u in front of the far plane\n", 300u,
+                             s_found, 300u * 16u, s_near);
+                s_found = s_near = 0;
+            }
+        }
         return true;
     }
 

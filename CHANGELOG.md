@@ -7,6 +7,8 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
 ### Added
 
 - **The launcher updates the game itself**: when a new version is out, "Update" on the Play tab downloads it, checks
@@ -18,6 +20,15 @@ under "Unreleased" as they land, then move them under the new version's heading 
 - **Smoother frame times**: the game does less work each frame (about 2 ms less per frame in our tests), so slower PCs
   drop fewer frames in busy fights. The lens flares no longer read the whole picture back from the graphics card
   each frame.
+
+### Known limits
+
+- Players on 0.1.0 or 0.2.0 update to this version by hand one last time (unzip it over the old one, then Rebuild);
+  from 0.3.0 on, the launcher's Update button does it.
+- Story levels 2 to 8 are not checked to the end yet.
+- No widescreen yet.
+- Only the USA disc (SCUS-97101) is supported.
+- The launcher and the game are not signed: Windows SmartScreen asks for "More info", then "Run anyway".
 
 ## [0.2.0] - 2026-11-02
 
@@ -74,6 +85,7 @@ The first release. You build the game on your own PC from your own USA disc; not
 - Technical: built from TMB_Recomp's code and the PS2Recomp fork (`native/renderer`) with the build kit's GCC 16.2,
   FFmpeg 9.0.2 and Python 3.14; the default mode has no GS, VU or SPU2 emulation and no IOP hardware model.
 
-[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.1.0

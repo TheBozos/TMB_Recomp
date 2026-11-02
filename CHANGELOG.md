@@ -7,6 +7,8 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-02
+
 ### Added
 
 - **Story: start at** (F2, Cheats): a new story can begin at any of its stages, Midtown Suburbs to Warhawk's Rooftop,
@@ -17,6 +19,15 @@ under "Unreleased" as they land, then move them under the new version's heading 
 - **Black Vista Highway** (story stage 3) had no road: most of the level's ground and walls were not drawn. Some
   pieces of three Challenge arenas (DEATH1, DEATH2, DEATH5) were missing for the same reason. "Rebuild now" after
   updating fixes them.
+- **Movie sound volume**: the movies' sound now plays at the volume the game sets for it (it used a default
+  volume before; a fix from the Valkyrie Profile 2 port, which shares the sound code).
+
+### Known limits
+
+- Story stages past the first are reachable and load correctly, but most have not been played to the end yet.
+- No widescreen yet.
+- Only the USA disc (SCUS-97101) is supported.
+- The launcher and the game are not signed: Windows SmartScreen asks for "More info", then "Run anyway".
 
 ## [0.3.1] - 2026-11-02
 
@@ -112,7 +123,8 @@ The first release. You build the game on your own PC from your own USA disc; not
 - Technical: built from TMB_Recomp's code and the PS2Recomp fork (`native/renderer`) with the build kit's GCC 16.2,
   FFmpeg 9.0.2 and Python 3.14; the default mode has no GS, VU or SPU2 emulation and no IOP hardware model.
 
-[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.1.0...v0.2.0

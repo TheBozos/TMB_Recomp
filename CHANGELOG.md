@@ -12,6 +12,12 @@ under "Unreleased" as they land, then move them under the new version's heading 
 - **Story: start at** (F2, Cheats): a new story can begin at any of its stages, Midtown Suburbs to Warhawk's Rooftop,
   instead of the Junkyard, then goes on from there as usual. Handy to try the later stages without playing through.
 
+### Fixed
+
+- **Black Vista Highway** (story stage 3) had no road: most of the level's ground and walls were not drawn. Some
+  pieces of three Challenge arenas (DEATH1, DEATH2, DEATH5) were missing for the same reason. "Rebuild now" after
+  updating fixes them.
+
 ## [0.3.1] - 2026-11-02
 
 ### Changed

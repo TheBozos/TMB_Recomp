@@ -11,7 +11,8 @@ What it reads:
 - the NGP files (LVL/*.NGP, SHELL/*.NGP: a zip entry, "IE" instead of "PK", raw deflate after the local header;
   ACAR/PCAR car files: raw). Each is a memory image linked at EE 0x980000: a pointer is (value - 0x980000) in the file.
   The .PTR file next to it lists the pointer words (its first count, then their byte offsets); a hierobject is a node
-  of type 0 (word 0 bits 0-5) whose +4 (a listed pointer) is its own prebuilt packet, at obj + 0x70 + 0x30 * ntex.
+  of type 0 (word 0 bits 0-5) whose +4 (a listed pointer) is its own prebuilt packet, at obj + 0x70 + 0x30 * ntex
+  or a little after it, zeros between (LOOP pads some packets to an alignment).
 - the hierobject: +8 u64 flags (VU1 program choice), +0x10 bounding sphere, +0x50 u16[5] texture numbers (the file's
   own, before the game adds the file's texture base), +0x5a ntex, +0x64 skeleton (0 = rigid).
 - its packet: DMA tags (REF: data elsewhere in the file, next tag after it; CNT / RET: data after the tag, RET ends;
@@ -104,16 +105,25 @@ def load_pointers(path):
 
 
 def find_objects(image, pointers):
-    """Every hierobject: a type 0 node whose listed +4 pointer is its own packet."""
+    """Every hierobject: a type 0 node whose listed +4 pointer is its own packet: right after its texture blocks, or up
+    to 0x100 bytes later with only zeros between (an aligned packet: LOOP's)."""
     found = []
     for slot in pointers:
         obj = slot - 4
         if obj < 0 or obj + 0x70 > len(image) or u32(image, obj) & 0x3f:
             continue
         ntex = u16(image, obj + 0x5a)
-        if ntex <= 5 and u32(image, obj + 4) - LINK == obj + 0x70 + 0x30 * ntex:
+        if ntex > 5:
+            continue
+        after, packet = obj + 0x70 + 0x30 * ntex, u32(image, obj + 4) - LINK
+        if packet == after or (after < packet < after + 0x100 and packet % 16 == 0 and not any(image[after:packet])):
             found.append(obj)
     return sorted(set(found))
+
+
+def packet_start(image, obj):
+    """Where an object's packet is: its +4 pointer (find_objects checked it)."""
+    return u32(image, obj + 4) - LINK
 
 
 def packet_segments(image, start):
@@ -129,7 +139,7 @@ def packet_stream(image, obj):
 
 def packet_stream_mapped(image, obj):
     """The same, with where each piece of it is in the image: (stream, [(stream offset, image offset, length)])."""
-    return chain_stream(image, obj + 0x70 + 0x30 * u16(image, obj + 0x5a), LINK)
+    return chain_stream(image, packet_start(image, obj), LINK)
 
 
 class Strip:

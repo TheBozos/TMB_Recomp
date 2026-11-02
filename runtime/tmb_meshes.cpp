@@ -1286,6 +1286,15 @@ namespace tmb::meshes
             if (!it)
             {
                 ++g_stats.noObject;
+                // TMB_NATIVE_MESHES_LOG_MISSING=1: the first objects of a loaded file the pack does not have.
+                static const bool s_logMissing = std::getenv("TMB_NATIVE_MESHES_LOG_MISSING") != nullptr;
+                static std::unordered_map<uint32_t, bool> s_seen;
+                if (s_logMissing && !s_seen[obj] && s_seen.size() < 40u)
+                {
+                    s_seen[obj] = true;
+                    std::fprintf(stderr, "[tmb:mesh] object %#x (%s + %#x, setup %#x, flags %#x, %s): not in the pack\n", obj,
+                                 file.file->name.c_str(), offset, pc, fp, opaque ? "opaque" : "alpha");
+                }
                 stateOnly(ee, extra, opaque);
                 return;
             }

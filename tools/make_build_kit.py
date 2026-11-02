@@ -55,10 +55,13 @@ from tmb_build import pe_imports, cmake_rc_flags  # noqa: E402
 
 KIT_VERSION = 1
 
-# ---- pinned downloads (official upstream only) ----
+# ---- pinned downloads (official upstream; a mirror of ours only as a fallback, held to the same SHA-256) ----
 FFMPEG = {
     'version': '9.0.2',
     'url': 'https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz',
+    # Tried only when the upstream address fails: the same file on our build-deps pre-release (ffmpeg.org dropped
+    # the release runner's connections), held to the same SHA-256.
+    'mirrors': ['https://github.com/TheBozos/TMB_Recomp/releases/download/build-deps/ffmpeg-9.0.2.tar.xz'],
     'sha256': '8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e',
     # ffmpeg-9.0.2.tar.xz.asc checked once with gpg against https://ffmpeg.org/ffmpeg-devel.asc:
     'signing_key': 'FCF986EA15E6E293A5644F10B4322F04D67658D8 (FFmpeg release signing key)',
@@ -246,18 +249,26 @@ def download(spec, downloads):
     if not (os.path.isfile(path) and sha256_file(path) == spec['sha256']):
         # A few tries, further apart each time: an upstream site sometimes drops or times out a CI runner's connection
         # (GitHub's release runs start with an empty download cache: a tag's run cannot read another tag's cache).
+        # Then the spec's mirrors, if any; a file from any of them must have the pinned SHA-256.
         tmp = path + '.part'
-        for attempt, wait in enumerate((0, 20, 60, 120, 240)):
+        tries = [(spec['url'], wait) for wait in (0, 20, 60, 120)]
+        tries += [(mirror, wait) for mirror in spec.get('mirrors', ()) for wait in (0, 20, 60)]
+        error = None
+        for url, wait in tries:
             if wait:
-                log('  %s failed (%s): again in %d s' % (spec['url'], error, wait))
+                log('  %s failed (%s): again in %d s' % (url, error, wait))
                 time.sleep(wait)
-            log('  downloading %s' % spec['url'])
+            log('  downloading %s' % url)
             try:
-                with urllib.request.urlopen(spec['url'], timeout=120) as r, open(tmp, 'wb') as f:
+                with urllib.request.urlopen(url, timeout=120) as r, open(tmp, 'wb') as f:
                     shutil.copyfileobj(r, f, 1 << 20)
-                break
             except (urllib.error.URLError, OSError) as e:
                 error = e
+                continue
+            digest = sha256_file(tmp)
+            if digest == spec['sha256']:
+                break
+            error = 'SHA-256 %s, expected %s' % (digest, spec['sha256'])
         else:
             raise KitError('%s: could not download (%s)' % (spec['url'], error))
         os.replace(tmp, path)

@@ -25,6 +25,7 @@
 #include "runtime/native/native_vu1_sandbox.h"
 #include "runtime/ps2_memory.h"
 #include "runtime/native/native_display.h"
+#include "runtime/ps2_determinism.h"
 #include "runtime/native/native_gs_hook.h"
 #include "tmb_host.h"
 #include "tmb_meshes.h"
@@ -198,9 +199,13 @@ namespace tmb::native
         }
 
         // A match is under way while its frames end (the end of real-time processing, onFrameEnd) less than 100 ms
-        // apart on the host's clock; the menus (the shell overlay's loop) end none.
+        // apart on the host's clock; the menus (the shell overlay's loop) end none. PS2X_DETERMINISTIC=1: the clock is
+        // the game frames ended (a sixtieth of a second each), so which frames count as a match's or a menu's is the
+        // kinds of the frames before, never the host's timing.
         double hostSeconds()
         {
+            if (ps2x::det::enabled())
+                return static_cast<double>(ps2x::det::frame()) / 60.0;
             static const auto s_start = std::chrono::steady_clock::now();
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - s_start).count();
         }
@@ -3401,6 +3406,9 @@ namespace tmb::native
         }
         if (!s_on || !enabled() || !inMatch())
             return;
+        // Deterministic mode: every sample far (as the caller cleared them): the GPU's depth is host timing.
+        if (ps2x::det::enabled())
+            return;
         ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
         renderer.wantDepth();
         uint64_t bitbltbuf = 0, trxpos = 0, trxreg = 0;
@@ -3461,6 +3469,8 @@ namespace tmb::native
         std::fill(z, z + 16, 0u);
         if (!flareDepthNative())
             return false;
+        if (ps2x::det::enabled()) // deterministic mode: all far (the GPU's depth is host timing)
+            return true;
         ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
         renderer.wantDepth();
         const ps2x::native::Screen view = screen();

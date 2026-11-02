@@ -9,6 +9,8 @@
 #include "runtime/gs/gs_draw_estimate.h"
 #include "runtime/ps2_memory.h"
 #include "runtime/native/native_display.h"
+#include "runtime/ps2_determinism.h"
+#include "runtime/ps2_reference.h"
 #include "runtime/sampling_profiler_gate.h"
 #include "tmb_host.h"
 #include <string>
@@ -41,6 +43,11 @@ namespace tmb
 {
     extern std::atomic<bool> g_rainLiftOff; // runtime/vu1/tmb_vu1_rain.cpp
     extern std::atomic<uint64_t> g_rainLiftedStrips;
+    // The build's name and the game's stub addresses for the reference records (tmb_call_names.cpp, which CMake
+    // generates in the build tree from the generated code's stub list).
+    extern const char *const kBuildName;
+    extern const ps2x::reference::CallName kCallNames[];
+    extern const size_t kCallNameCount;
 }
 
 namespace tmb::native
@@ -1125,7 +1132,10 @@ namespace
             s_last = now;
         }
         EeScheduler &scheduler = runtime->eeScheduler();
-        const uint64_t real = static_cast<uint64_t>(step * static_cast<double>(EeScheduler::kEeClockHz));
+        // PS2X_DETERMINISTIC=1: exactly one field's EE cycles (the step is one field too).
+        const uint64_t real = ps2x::det::enabled()
+                                  ? EeScheduler::kEeClockHz / static_cast<uint64_t>(fieldRate(rdram, gp))
+                                  : static_cast<uint64_t>(step * static_cast<double>(EeScheduler::kEeClockHz));
         const uint64_t accounted = scheduler.currentCycle() - g_frameEndCycle;
         for (uint64_t debt = real > accounted ? real - accounted : 0u; debt != 0u;)
         {
@@ -1722,6 +1732,16 @@ namespace
             g_traceIdle = true;
             runtime.eeScheduler().setIdleObserver([](const EeScheduler::IdleRecord &record) { g_frameIdle.push_back(record); });
         }
+        // PS2X_REFERENCE (the reference harness, docs/REFERENCE_HARNESS.md): the build, and the game's library and
+        // kernel stubs whose calls the records hash (their addresses from the generated stub list: tmb_call_names.cpp).
+        if (ps2x::reference::active())
+        {
+            ps2x::reference::setBuild(tmb::kBuildName);
+            ps2x::reference::setCallNames(tmb::kCallNames, tmb::kCallNameCount);
+        }
+        if (ps2x::det::enabled())
+            std::cout << "[tmb] deterministic mode (PS2X_DETERMINISTIC=1): a field per frame, fixed date, pad scripts in frames"
+                      << std::endl;
         runtime.registerFunction(kVblankHandler, &vblankHandlerOverride);
         runtime.registerFunction(kHier, &hierOverride);
         tmb::native::install(); // TMB_NATIVE

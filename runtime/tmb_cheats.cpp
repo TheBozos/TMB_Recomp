@@ -28,6 +28,7 @@
 #include "ps2_runtime.h"
 #include "ps2_recompiled_functions.h"
 #include "runtime/ps2_debug_ui.h"
+#include "runtime/ps2_determinism.h"
 #if defined(PS2X_ENABLE_DEBUG_UI)
 #include "imgui.h"
 #endif
@@ -242,6 +243,12 @@ namespace tmb::cheats
 
         void drawTab()
         {
+            // Deterministic mode: nothing the user does may change the run (only the environment's cheats, from launch).
+            if (ps2x::det::enabled())
+            {
+                ImGui::TextDisabled("Off in deterministic mode (PS2X_DETERMINISTIC=1): the environment's cheats only.");
+                return;
+            }
             const uint8_t *rdram = g_rdram.load(std::memory_order_relaxed);
             const uint32_t game = g_theGame.load(std::memory_order_relaxed);
             const int players = rdram ? playerCount(rdram, game) : 0;
@@ -354,7 +361,7 @@ namespace tmb::cheats
             const char *value = std::getenv("TMB_CHEATS_TOGGLE");
             return value && *value ? std::atof(value) : 0.0;
         }();
-        if (s_toggle > 0.0)
+        if (s_toggle > 0.0 && !ps2x::det::enabled())
         {
             const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
             static double s_next = now + s_toggle;

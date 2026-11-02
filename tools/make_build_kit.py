@@ -45,6 +45,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -243,10 +244,22 @@ def download(spec, downloads):
     os.makedirs(downloads, exist_ok=True)
     path = os.path.join(downloads, spec['url'].rsplit('/', 1)[1])
     if not (os.path.isfile(path) and sha256_file(path) == spec['sha256']):
-        log('  downloading %s' % spec['url'])
+        # A few tries, further apart each time: an upstream site sometimes drops or times out a CI runner's connection
+        # (GitHub's release runs start with an empty download cache: a tag's run cannot read another tag's cache).
         tmp = path + '.part'
-        with urllib.request.urlopen(spec['url']) as r, open(tmp, 'wb') as f:
-            shutil.copyfileobj(r, f, 1 << 20)
+        for attempt, wait in enumerate((0, 20, 60, 120, 240)):
+            if wait:
+                log('  %s failed (%s): again in %d s' % (spec['url'], error, wait))
+                time.sleep(wait)
+            log('  downloading %s' % spec['url'])
+            try:
+                with urllib.request.urlopen(spec['url'], timeout=120) as r, open(tmp, 'wb') as f:
+                    shutil.copyfileobj(r, f, 1 << 20)
+                break
+            except (urllib.error.URLError, OSError) as e:
+                error = e
+        else:
+            raise KitError('%s: could not download (%s)' % (spec['url'], error))
         os.replace(tmp, path)
     digest = sha256_file(path)
     if digest != spec['sha256']:

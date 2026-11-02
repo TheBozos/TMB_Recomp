@@ -64,6 +64,25 @@ namespace tmb::cheats
         std::atomic<uint32_t> g_infiniteHealth{0}, g_infiniteAmmo{0}, g_infiniteEnergy{0};
         std::atomic<bool> g_noAi{false};
         std::atomic<bool> g_unlockAll{false};
+        // Story: start at a level (-1: off). The story's state is the level being played, Shell + 0x18000 + 0x2354 (the
+        // index of the game's level table: GetLevelName, LoadLevelDB), the one last won at + 0x2358, the mode at
+        // + 0x235C (1: one-player story); a new story sets the level to 1, the Junkyard, and each level won sets the
+        // next (EvaluateOnePlayerStoryStatus).
+        std::atomic<int> g_storyStart{-1};
+        constexpr uint32_t kStoryLevel = 0x2354u, kStoryLastWon = 0x2358u, kGameMode = 0x235Cu;
+        constexpr int kLevelCount = 21;
+        // The levels by the level table's index (its names at 0x426070, 16 bytes each), with the card the story shows
+        // when it starts there (the stage, of 8). Two stages have two arenas (the story picks one); ASYLUM and ROOFTOP2
+        // show no card (reached from inside another level); the others are arenas the story does not use.
+        constexpr const char *kLevelNames[kLevelCount] = {
+            "Stage 2: Midtown Suburbs (SUBURB)", "Stage 1: Junkyard (JUNKYARD)", "Stage 2: Midtown Expressway 104 (FREEWAY)",
+            "Stage 5: Prison Passage to Blackfield Asylum (PRISON)", "Stage 7: Abandoned Skyscrapers (ROOFTOP)",
+            "Stage 3: Downtown Business District (CITY)", "Stage 3: Black Vista Highway (LOOP)", "Arena DEATH1", "Arena DEATH2",
+            "Arena DEATH3", "Arena DEATH4", "Arena DEATH5", "Arena DEATH6", "Rooftops, second part (ROOFTOP2)",
+            "Stage 4: Minion's Stadium (STADIUM)", "Arena SHIP", "Blackfield Asylum (ASYLUM)", "Arena MINICITY", "Arena MINIBURB",
+            "Arena JUNK2", "Stage 8: Warhawk's Rooftop (ROOFBOSS)"};
+        // The picker's order: the story's, then the rest.
+        constexpr int kLevelOrder[kLevelCount] = {1, 0, 2, 5, 6, 14, 3, 16, 4, 13, 20, 7, 8, 9, 10, 11, 12, 15, 17, 18, 19};
         std::vector<uint32_t> g_unlocked; // the lock words Unlock everything opened (put back when it goes off)
         std::atomic<float> g_enemyCap{-1.0f};  // weak enemies: every computer vehicle's health held at most this; < 0 off
         std::atomic<float> g_playerCap{-1.0f}; // TMB_PLAYER_HEALTH_CAP (testing)
@@ -233,6 +252,20 @@ namespace tmb::cheats
                 g_unlockAll.store(unlock, std::memory_order_relaxed);
             ImGui::TextDisabled("Opened in the menus; saving the game while it is on keeps them on the card.");
 
+            int start = g_storyStart.load(std::memory_order_relaxed);
+            ImGui::SetNextItemWidth(420.0f);
+            if (ImGui::BeginCombo("Story: start at", start < 0 ? "the first level (as the game)" : kLevelNames[start]))
+            {
+                if (ImGui::Selectable("the first level (as the game)", start < 0))
+                    start = -1;
+                for (const int i : kLevelOrder)
+                    if (ImGui::Selectable(kLevelNames[i], start == i))
+                        start = i;
+                ImGui::EndCombo();
+            }
+            g_storyStart.store(start, std::memory_order_relaxed);
+            ImGui::TextDisabled("For testing: a new story begins at this level, then goes on as the game chains them.");
+
             ImGui::SeparatorText("Players");
             perPlayer("Infinite health", g_infiniteHealth, players);
             perPlayer("Infinite ammo", g_infiniteAmmo, players);
@@ -267,6 +300,47 @@ namespace tmb::cheats
     void setTheGame(uint32_t game) { g_theGame.store(game, std::memory_order_relaxed); }
 
     // Once a frame (timerEndOfRealTimeProcessing, the frame's processing done).
+    // TMB_LOG_PROGRESS=1 (finding the story's state): each word of Shell + 0x18000 + 0x2180 to + 0x2500 that changes,
+    // with the time, from every frame end (the menus' too).
+    void logProgress(uint8_t *rdram, uint32_t gp)
+    {
+        const uint32_t shell = word(rdram, gp - kGpShell);
+        if (shell == 0u)
+            return;
+        // Story: start at a level. When a new story sets its first level (the Junkyard, nothing won yet), that level
+        // is replaced, before the game loads it (it does once the character is chosen); the game's own chain goes on
+        // from there.
+        {
+            const uint32_t progress = shell + kShellProgress;
+            const int level = static_cast<int32_t>(word(rdram, progress + kStoryLevel));
+            static int s_lastLevel = -2;
+            const int start = g_storyStart.load(std::memory_order_relaxed);
+            if (start >= 0 && level == 1 && s_lastLevel != 1 && word(rdram, progress + kGameMode) == 1u &&
+                word(rdram, progress + kStoryLastWon) == 0u && start != 1)
+            {
+                setWord(rdram, progress + kStoryLevel, static_cast<uint32_t>(start));
+                std::fprintf(stderr, "[tmb:cheats] story starts at level %s\n", kLevelNames[start]);
+            }
+            s_lastLevel = static_cast<int32_t>(word(rdram, progress + kStoryLevel));
+        }
+        static const bool s_on = std::getenv("TMB_LOG_PROGRESS") != nullptr;
+        if (!s_on)
+            return;
+        static uint32_t s_last[0xE0] = {};
+        static bool s_seen = false;
+        static const auto s_start = std::chrono::steady_clock::now();
+        const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - s_start).count();
+        for (uint32_t i = 0; i < 0xE0u; ++i)
+        {
+            const uint32_t value = word(rdram, shell + kShellProgress + 0x2180u + i * 4u);
+            if (s_seen && value != s_last[i])
+                std::fprintf(stderr, "[tmb:progress] t=%.1f +0x%x: %d -> %d\n", t, 0x2180u + i * 4u, static_cast<int32_t>(s_last[i]),
+                             static_cast<int32_t>(value));
+            s_last[i] = value;
+        }
+        s_seen = true;
+    }
+
     void onFrame(uint8_t *rdram)
     {
         g_rdram.store(rdram, std::memory_order_relaxed);
@@ -368,6 +442,8 @@ namespace tmb::cheats
     {
         g_noAi.store(std::getenv("TMB_NO_AI") && *std::getenv("TMB_NO_AI") == '1');
         g_unlockAll.store(std::getenv("TMB_UNLOCK_ALL") && *std::getenv("TMB_UNLOCK_ALL") == '1');
+        if (const char *level = std::getenv("TMB_STORY_LEVEL"); level && *level)
+            g_storyStart.store(std::clamp(std::atoi(level), -1, kLevelCount - 1));
         g_infiniteHealth.store(envMask("TMB_PLAYER_GOD"));
         g_infiniteAmmo.store(envMask("TMB_INFINITE_AMMO"));
         g_infiniteEnergy.store(envMask("TMB_INFINITE_ENERGY"));

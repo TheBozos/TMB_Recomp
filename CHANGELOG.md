@@ -7,6 +7,11 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+### Added
+
+- **Story: start at** (F2, Cheats): a new story can begin at any of its stages, Midtown Suburbs to Warhawk's Rooftop,
+  instead of the Junkyard, then goes on from there as usual. Handy to try the later stages without playing through.
+
 ## [0.3.1] - 2026-11-02
 
 ### Changed

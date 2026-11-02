@@ -75,6 +75,7 @@ namespace tmb::cheats
     void install(PS2Runtime &runtime);
     void setTheGame(uint32_t game);
     void onFrame(uint8_t *rdram);
+    void logProgress(uint8_t *rdram, uint32_t gp);
 }
 
 namespace tmb::meshes
@@ -1104,6 +1105,7 @@ namespace
         tmb::native::onMenuFrameEnd(); // TMB_NATIVE: publishes a menu frame's native draws (not in a match)
         const double step = pacer.frameEnd();
         g_lastFrameEndSeconds.store(hitchClock(), std::memory_order_relaxed);
+        tmb::cheats::logProgress(rdram, gp); // TMB_LOG_PROGRESS
         // The fps overlay in the menus (a match's frames are counted at timerEndOfRealTimeProcessing).
         if (hitchClock() - g_lastMatchFrameNoted.load(std::memory_order_relaxed) > 0.5)
             runtime->noteGameFrame();

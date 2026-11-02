@@ -467,6 +467,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | Cheat | | Variable |
 |---|---|---|
 | Unlock everything | every level (Freeway, Prison Passage, Skyscrapers, Minion's Stadium...), every vehicle (Yellow Jacket, Axel, Warthog, Manslaughter, Minion...) and every movie, opened in the menus; switched off, put back; saving while it is on keeps them on the card | `TMB_UNLOCK_ALL=1` |
+| Story: start at | a new story begins at the chosen level instead of the Junkyard (every stage: Midtown Suburbs or Expressway 104, Downtown or Black Vista Highway, Minion's Stadium, Prison Passage, Blackfield Asylum, Abandoned Skyscrapers, Warhawk's Rooftop; and the other arenas), then goes on as the game chains them; for testing the later stages without playing through | `TMB_STORY_LEVEL=<level number>` (the game's level table: 1 Junkyard, 0 Suburbs, 2 Expressway, 5 Downtown, 6 Black Vista, 14 Stadium, 3 Prison, 16 Asylum, 4 Skyscrapers, 13 their second part, 20 Warhawk's Rooftop) |
 | Infinite health | per player: the car's health held at its maximum (the game's own, as its health bar shows it) | `TMB_PLAYER_GOD=<players>` |
 | Infinite ammo | per player: pickup weapons and the special are not spent (the HUD's counts stay) | `TMB_INFINITE_AMMO=<players>` |
 | Infinite energy | per player: the energy bar (freeze, mines, shield...) held full | `TMB_INFINITE_ENERGY=<players>` |

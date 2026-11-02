@@ -307,6 +307,29 @@ namespace tmb::meshes
         bool g_inHier2pFlush = false;
         uint64_t g_unsentFlushes = 0; // views submitted at the frame's end (not kicked by hier__Fi)
         uint64_t g_listDrops = 0, g_submitted[2] = {}, g_built[2] = {}, g_kicks[2] = {};
+        // The vertex arrays of the objects drawn last, kept (cleared) for the next objects' batches: each one grew from
+        // nothing every frame, a few hundred objects' worth of allocations and copies (the game thread only).
+        std::vector<std::vector<ps2x::native::Vertex>> g_vertexPool;
+
+        void recycleVertices(Drawn &drawn)
+        {
+            for (auto &batch : drawn.batches)
+                if (batch.vertices.capacity() != 0u && g_vertexPool.size() < 8192u)
+                {
+                    batch.vertices.clear();
+                    g_vertexPool.push_back(std::move(batch.vertices));
+                }
+        }
+
+        std::vector<ps2x::native::Vertex> pooledVertices()
+        {
+            if (g_vertexPool.empty())
+                return {};
+            std::vector<ps2x::native::Vertex> vertices = std::move(g_vertexPool.back());
+            g_vertexPool.pop_back();
+            return vertices;
+        }
+
         struct ViewList : ps2x::native::MeshViewList<Drawn>
         {
             // Built by hier2p: sent only by hier2pFlushDma. On the frame a split screen ends hier2p builds its view once
@@ -314,6 +337,11 @@ namespace tmb::meshes
             bool hier2p = false;
             void clear()
             {
+                for (Drawn &drawn : opaque)
+                    recycleVertices(drawn);
+                for (std::vector<Drawn> &bucket : buckets)
+                    for (Drawn &drawn : bucket)
+                        recycleVertices(drawn);
                 MeshViewList<Drawn>::clear();
                 hier2p = false;
             }
@@ -638,7 +666,9 @@ namespace tmb::meshes
             bool textured = false;
             uint32_t texnum = ~0u;
             Batch *batch = nullptr;
-            std::vector<ps2x::native::Vertex> strip;
+            static thread_local std::vector<ps2x::native::Vertex> s_strip; // kept from call to call (its capacity)
+            std::vector<ps2x::native::Vertex> &strip = s_strip;
+            strip.clear();
             static const bool s_check = std::getenv("TMB_NATIVE_MESHES_CHECK") != nullptr;
             for (uint32_t si = 0; si < strips; ++si)
             {
@@ -691,6 +721,7 @@ namespace tmb::meshes
                 {
                     out.batches.emplace_back(std::move(writes));
                     batch = &out.batches.back();
+                    batch->vertices = pooledVertices();
                     batch->tex0 = tex0;
                     batch->textured = textured;
                     batch->blended = blended;

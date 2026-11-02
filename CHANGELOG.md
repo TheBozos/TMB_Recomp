@@ -7,6 +7,22 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-02
+
+### Changed
+
+- **Faster**: the game now needs about a third less processor time per frame than in 0.3.0 (in our tests a busy
+  match went from about 7.5 to 5 milliseconds of work per frame, out of the 16.7 a frame lasts at 60 frames per
+  second). Older or slower PCs that dropped below 60 in big fights or in split screen should hold it much better.
+  Nothing changes in how the game looks or plays.
+
+### Known limits
+
+- Story levels 2 to 8 are not checked to the end yet.
+- No widescreen yet.
+- Only the USA disc (SCUS-97101) is supported.
+- The launcher and the game are not signed: Windows SmartScreen asks for "More info", then "Run anyway".
+
 ## [0.3.0] - 2026-11-02
 
 ### Added
@@ -85,7 +101,8 @@ The first release. You build the game on your own PC from your own USA disc; not
 - Technical: built from TMB_Recomp's code and the PS2Recomp fork (`native/renderer`) with the build kit's GCC 16.2,
   FFmpeg 9.0.2 and Python 3.14; the default mode has no GS, VU or SPU2 emulation and no IOP hardware model.
 
-[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.1.0

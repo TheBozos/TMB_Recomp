@@ -1,0 +1,31 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Twisted Metal: Black",
+  "wikidata": "Q2978434",
+  "system": "PS2",
+  "type": "recomp",
+  "original": {
+    "region": "USA",
+    "serial": "SCUS-97101"
+  },
+  "project": "TMB_Recomp",
+  "status": "released",
+  "targets": ["Windows"],
+  "toolchain": "Ps2recomp",
+  "approach": "Static recompilation with a PS2Recomp fork; native PC renderer, sound and timing, no GS, VU or SPU2 emulation in the default mode.",
+  "started": "2026-10-22",
+  "maintainers": [
+    { "name": "boubou666", "link": "https://github.com/boubou666" },
+    { "name": "Arzaroth", "link": "https://github.com/Arzaroth" }
+  ],
+  "links": [
+    { "label": "Releases", "url": "https://github.com/TheBozos/TMB_Recomp/releases" },
+    { "label": "RecompWatcher (The Bozos' projects)", "url": "https://thebozos.github.io/RecompWatcher/" }
+  ],
+  "help": [
+    "Playtesting story levels 2 to 8 to the endings",
+    "Testing on high-refresh monitors (the experimental smoothed frame rate)",
+    "Testing on Linux"
+  ],
+  "notes": "Playable at 60 fps on Windows, built by the launcher from the player's own USA disc. Every Challenge arena played, split screen for 2 to 4 players, memory card saves, rebindable controls including keyboard and mouse, video settings and cheats. Next: story levels 2 to 8 checked to the end, widescreen."
+}

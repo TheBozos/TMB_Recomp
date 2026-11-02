@@ -48,8 +48,9 @@ You build the game yourself, on your PC, from **your own disc**: nothing of the 
    logs are in `%APPDATA%\TMB_Recomp` (the launcher's Maintenance tab opens it).
 
 The launcher says when a newer release is out (it asks GitHub for the latest version number at start; Settings
-turns that off; nothing is downloaded by itself). After an update, unzip the new release where the old one was (replacing the files): the
-launcher sees the code changed since the game was built and offers **Rebuild now** (also Rebuild in the Maintenance
+turns that off; nothing is downloaded by itself). Its **Update** button downloads the new release's zip, checks it against the
+release's SHA-256, installs it over this one and restarts (`tools/apply_update.py`); unzipping the new release where the old
+one was (replacing the files) does the same by hand. The launcher then sees the code changed since the game was built and offers **Rebuild now** (also Rebuild in the Maintenance
 tab); only what changed is built again, the files the new release no longer has are removed, and the saves stay. To uninstall, delete the folder (and `%APPDATA%\TMB_Recomp` for the saves
 and settings). Releases are Windows only for now; on Linux the port builds from source (below), but has not been
 tested there since the native work of November 2026.
@@ -290,13 +291,19 @@ rem                        -DLAUNCHER_FONT_DIR=<folder with Exo2[wght].ttf and O
   configure time, never committed). The icon is TMB's variant of The Bozos' logo, the clown with its head on fire (`launcher/tmb.ico`; the game's window uses the same, `runtime/app/tmb.ico`; drawn by `docs/branding/make_logo.py`). No game art.
 - Updates: at start (Settings: "Check for updates at start") and from Maintenance's "Check for updates", one HTTPS
   GET of `api.github.com/repos/TheBozos/TMB_Recomp/releases/latest` through WinHTTP; a newer `tag_name` shows
-  "Version X is available" with a link to its release page (built from the tag). Offline or no release: silent. When
+  "Version X is available" with a link to its release page (built from the tag). Offline or no release: silent. Update
+  downloads `releases/download/<tag>/TMB_Recomp-<version>.zip` and its `.sha256` (addresses built from the tag, not read
+  from the API's answer) into `update\`, then runs `source\tools\apply_update.py` with the kit's Python: it checks the
+  SHA-256 and every name in the zip (one `TMB_Recomp\` folder, no `..`, nothing under `build\` or `game\`, the version
+  asked for), unpacks it whole to `update\staging`, then moves the files over the release; a file in use (the launcher
+  itself) is renamed `*.tmb-old` first and deleted at the next start. The launcher then starts its new exe. When
   `source\release.ini`'s commit differs from the one in `game\built_from.ini` (written by tmb_build), the Play tab
   offers "Rebuild now".
 - `--selftest <iso> --shots <dir> [--wrong <image>] [--error-demo] [--cancel] [--play-seconds s] [--crash-seconds s]`:
   the whole flow unattended, a screenshot of each screen and `selftest.log` (with `PS2X_USER_DIR` set, the real user
   folder is untouched). `--screens`: the tabs' screenshots only; `--ui-scale <x>`: another DPI scale; `--update-url
-  <url>`: the update check asks another address (a test server).
+  <url>`: the update check asks another address (a test server); `--download-prefix <url>` downloads the release from
+  there, `--update-now` presses Update once a newer release is found.
 
 ### The release (maintainers)
 

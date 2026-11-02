@@ -7,6 +7,18 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+### Added
+
+- **The launcher updates the game itself**: when a new version is out, "Update" on the Play tab downloads it, checks
+  it, installs it over this one and restarts the launcher; then "Rebuild now" prepares the game again (only what
+  changed). Your saves and settings stay. Unzipping a new release by hand still works too.
+
+### Changed
+
+- **Smoother frame times**: the game does less work each frame (about 2 ms less per frame in our tests), so slower PCs
+  drop fewer frames in busy fights. The lens flares no longer read the whole picture back from the graphics card
+  each frame.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added

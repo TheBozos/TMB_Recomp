@@ -24,6 +24,7 @@
 #include "rlImGui.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -56,6 +57,9 @@ static const char *kCommit = TMB_COMMIT;
 // The update check: GitHub's latest release of the main repository (drafts and pre-releases are never "latest").
 static const char *kLatestReleaseApi = "https://api.github.com/repos/TheBozos/TMB_Recomp/releases/latest";
 static const char *kReleasePagePrefix = "https://github.com/TheBozos/TMB_Recomp/releases/tag/";
+// A release's files (the Update button): <prefix><tag>/TMB_Recomp-<version>.zip and its .sha256, the address made
+// here from the tag like the page's, never one read from the API's response.
+static const char *kReleaseDownloadPrefix = "https://github.com/TheBozos/TMB_Recomp/releases/download/";
 
 // ---- language ----
 
@@ -171,7 +175,7 @@ struct UpdateCheck
     };
     std::mutex mutex;
     State state = State::Idle;
-    std::string version, page, error;
+    std::string version, page, error, tag;
     bool manual = false; // the button: say the outcome, even "you have the latest"
     std::thread worker;
 
@@ -203,13 +207,17 @@ struct UpdateCheck
                 return;
             }
             version = tag[0] == 'v' || tag[0] == 'V' ? tag.substr(1) : tag;
+            this->tag = tag;
             page = kReleasePagePrefix + tag;
             state = newerVersion(tag, kVersion) ? State::Available : State::Latest; });
     }
 
-    State get(std::string *v = nullptr, std::string *p = nullptr, std::string *e = nullptr, bool *byHand = nullptr)
+    State get(std::string *v = nullptr, std::string *p = nullptr, std::string *e = nullptr, bool *byHand = nullptr,
+              std::string *t = nullptr)
     {
         std::lock_guard<std::mutex> lock(mutex);
+        if (t)
+            *t = tag;
         if (v)
             *v = version;
         if (p)
@@ -371,6 +379,36 @@ struct App
     // The update check, and the code the game was built from (an update unzipped over the release: Rebuild).
     UpdateCheck updates;
     std::string updateUrl = kLatestReleaseApi;
+
+    // Installing an update (the Update button): the release's zip and .sha256 downloaded into the update folder (a
+    // thread), then source/tools/apply_update.py (the kit's Python) checks and installs them, and the launcher starts
+    // its new self.
+    enum class UpdateStep
+    {
+        Idle,
+        Downloading,
+        Installing,
+        Restarting,
+        Failed
+    };
+    UpdateStep updateStep = UpdateStep::Idle;
+    std::string updateVersion, updateError, updatePhase; // updatePhase: apply_update's step (verify, extract...)
+    std::string downloadPrefix = kReleaseDownloadPrefix;
+    std::vector<std::string> restartArgs; // this launcher's arguments, given to the new one
+    std::atomic<uint64_t> updateDone{0}, updateTotal{0};
+    std::atomic<bool> updateCancel{false}, downloadFinished{false};
+    std::mutex downloadMutex;
+    bool downloadOk = false;
+    std::string downloadError;
+    std::thread downloader;
+    plat::Process installer;
+
+    ~App()
+    {
+        updateCancel = true; // a download stops at its next block
+        if (downloader.joinable())
+            downloader.join();
+    }
     std::string sourceCommit, sourceVersion, builtCommit;
     bool runCounted = false; // this build run's time is already in cfg.pendingSeconds
     // "What's new": CHANGELOG.md's section for the installed version (the release's top folder, else source\).
@@ -415,6 +453,171 @@ struct App
             missingPart = "kit\\";
         phase = !missingPart.empty() ? Phase::Incomplete : cfg.disc.empty() ? Phase::Welcome : Phase::Ready;
         readStamps();
+        cleanUpdateLeftovers();
+    }
+
+    // -- updates
+
+    std::string updateDir() const { return plat::str(plat::path(p.release) / L"update"); }
+
+    // An update's leftovers: the files apply_update.py set aside because they were in use (this launcher's old exe,
+    // the kit's Python), listed in update/old_files.txt; deleted now, or at a later start if still in use.
+    void cleanUpdateLeftovers()
+    {
+        const fs::path list = plat::path(updateDir()) / L"old_files.txt";
+        std::error_code ec;
+        if (!fs::exists(list, ec))
+            return;
+        std::ifstream in(list);
+        std::string line, kept;
+        while (std::getline(in, line))
+        {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            // Only what it set aside in this release folder.
+            if (line.rfind(p.release, 0) != 0 || line.find(".tmb-old") == std::string::npos)
+                continue;
+            const fs::path file = plat::path(line);
+            if (!fs::remove(file, ec) && fs::exists(file, ec))
+                kept += line + "\n";
+        }
+        in.close();
+        if (kept.empty())
+        {
+            fs::remove(list, ec);
+            fs::remove(plat::path(updateDir()), ec); // only when empty (a stopped download's files stay)
+        }
+        else if (std::ofstream out{list, std::ios::trunc})
+            out << kept;
+    }
+
+    bool updating() const
+    {
+        return updateStep == UpdateStep::Downloading || updateStep == UpdateStep::Installing || updateStep == UpdateStep::Restarting;
+    }
+
+    void startUpdate(const std::string &tag, const std::string &version)
+    {
+        if (updating() || building || gameRunning || checking || tag.empty() || version.empty())
+            return;
+        std::error_code ec;
+        fs::create_directories(plat::path(updateDir()), ec);
+        updateVersion = version;
+        updateError.clear();
+        updatePhase.clear();
+        updateCancel = false;
+        downloadFinished = false;
+        updateDone = 0;
+        updateTotal = 0;
+        updateStep = UpdateStep::Downloading;
+        if (downloader.joinable())
+            downloader.join();
+        const std::string name = "TMB_Recomp-" + version + ".zip";
+        const std::string url = downloadPrefix + tag + "/" + name;
+        const std::string zip = plat::str(plat::path(updateDir()) / plat::path(name));
+        downloader = std::thread([this, url, zip]
+                                 {
+            const std::string agent = std::string("TMB-Launcher/") + kVersion;
+            std::atomic<uint64_t> shaDone{0}, shaTotal{0};
+            std::string error;
+            const bool ok = plat::httpDownload(url + ".sha256", agent, zip + ".sha256", shaDone, shaTotal, updateCancel, error, 4096) &&
+                            plat::httpDownload(url, agent, zip, updateDone, updateTotal, updateCancel, error);
+            {
+                std::lock_guard<std::mutex> lock(downloadMutex);
+                downloadOk = ok;
+                downloadError = error;
+            }
+            downloadFinished = true; });
+    }
+
+    void cancelUpdate()
+    {
+        if (updateStep == UpdateStep::Downloading)
+            updateCancel = true;
+    }
+
+    void pollUpdate()
+    {
+        if (updateStep == UpdateStep::Downloading && downloadFinished)
+        {
+            downloader.join();
+            bool ok;
+            std::string error;
+            {
+                std::lock_guard<std::mutex> lock(downloadMutex);
+                ok = downloadOk;
+                error = downloadError;
+            }
+            if (!ok)
+            {
+                updateStep = updateCancel ? UpdateStep::Idle : UpdateStep::Failed;
+                updateError = std::string(L("The download failed: ", "Le téléchargement a échoué : ")) + error + ".";
+                return;
+            }
+            const std::string zip = plat::str(plat::path(updateDir()) / plat::path("TMB_Recomp-" + updateVersion + ".zip"));
+            const std::vector<std::string> args = {"-I", "-X", "utf8", plat::str(plat::path(p.source) / L"tools" / L"apply_update.py"),
+                                                   "--zip", zip, "--sha256", zip + ".sha256", "--version", updateVersion,
+                                                   "--install", p.release};
+            updateDone = 0;
+            updateTotal = 0;
+            std::string startError;
+            if (!installer.start(p.python, args, p.release, true, startError))
+            {
+                updateStep = UpdateStep::Failed;
+                updateError = std::string(L("The update could not start: ", "La mise à jour n'a pas pu démarrer : ")) + startError;
+                return;
+            }
+            updateStep = UpdateStep::Installing;
+            return;
+        }
+        if (updateStep != UpdateStep::Installing)
+            return;
+        auto feed = [&](const std::string &line)
+        {
+            unsigned long long a = 0, b = 0;
+            if (line.rfind("step ", 0) == 0)
+            {
+                updatePhase = line.substr(5);
+                updateDone = 0;
+                updateTotal = 0;
+            }
+            else if (line.rfind("progress ", 0) == 0 && std::sscanf(line.c_str() + 9, "%llu %llu", &a, &b) == 2)
+            {
+                updateDone = a;
+                updateTotal = b;
+            }
+            else if (line.rfind("error ", 0) == 0)
+                updateError = line.substr(6);
+            else if (line.rfind("done ", 0) == 0)
+                updatePhase = "done";
+        };
+        for (const std::string &line : installer.takeLines())
+            feed(line);
+        if (installer.running())
+            return;
+        installer.drain(2000);
+        for (const std::string &line : installer.takeLines())
+            feed(line);
+        if (installer.exitCode() != 0 || updatePhase != "done")
+        {
+            updateStep = UpdateStep::Failed;
+            if (updateError.empty())
+                updateError = std::string(L("The update stopped (exit code ", "La mise à jour s'est arrêtée (code ")) +
+                              std::to_string(installer.exitCode()) + ").";
+            return;
+        }
+        // Installed: the new launcher (now at this exe's path) takes over, and offers Rebuild.
+        plat::Process next;
+        std::string startError;
+        if (next.start(plat::exePath(), restartArgs, p.release, false, startError))
+        {
+            updateStep = UpdateStep::Restarting;
+            quit = true;
+            return;
+        }
+        updateStep = UpdateStep::Failed;
+        updateError = std::string(L("Version ", "La version ")) + updateVersion +
+                      L(" is installed: start the launcher again. ", " est installée : relancez le lanceur. ") + startError;
     }
 
     // The source's commit (source\release.ini, else the launcher's own) and the one the game was built from.
@@ -1005,16 +1208,50 @@ static void drawReady(App &app, float inner)
     // One note at a time (both do not fit the card at the window's smallest size): Rebuild first; the footer and
     // Maintenance still say a newer release is out.
     const bool rebuildShown = built && !app.cfg.buildPending && app.codeChanged() && !app.building;
-    if (!rebuildShown && app.updates.get(&newVersion, &page) == UpdateCheck::State::Available &&
-        newVersion != app.sourceVersion)
+    std::string newTag;
+    if (app.updating())
+    {
+        // Downloading, then apply_update.py's steps, each with its bar.
+        gap(12);
+        const std::string what = std::string(L("Updating to version ", "Mise à jour vers la version ")) + app.updateVersion + "\xE2\x80\xA6";
+        const uint64_t done = app.updateDone, total = app.updateTotal;
+        char detail[160];
+        if (app.updateStep == App::UpdateStep::Downloading)
+            std::snprintf(detail, sizeof(detail), L("Downloading: %.0f of %.0f MB.", "Téléchargement : %.0f sur %.0f Mo."), done / 1e6, total / 1e6);
+        else
+            std::snprintf(detail, sizeof(detail), "%s",
+                          app.updatePhase == "verify"    ? L("Checking the download.", "Vérification du téléchargement.")
+                          : app.updatePhase == "extract" ? L("Unpacking.", "Décompression.")
+                          : app.updatePhase == "install" ? L("Installing.", "Installation.")
+                                                         : L("Finishing.", "Finalisation."));
+        noteBox(what.c_str(), detail, ui::color::wip, inner);
+        gap(6);
+        ui::progressBar(total ? static_cast<float>(static_cast<double>(done) / static_cast<double>(total)) : 0.0f, ImVec2(inner, S(18)), app.time);
+        if (app.updateStep == App::UpdateStep::Downloading)
+        {
+            gap(6);
+            if (ui::button(L("Stop", "Arrêter"), ImVec2(0, S(48))))
+                app.cancelUpdate();
+        }
+    }
+    else if (!rebuildShown && app.updates.get(&newVersion, &page, nullptr, nullptr, &newTag) == UpdateCheck::State::Available &&
+             newVersion != app.sourceVersion)
     {
         gap(12);
+        const bool failed = app.updateStep == App::UpdateStep::Failed;
         std::string what = std::string(L("Version ", "La version ")) + newVersion + L(" is available.", " est disponible.");
         noteBox(what.c_str(),
-                L("Download it from the release page and unzip it where you unzipped this one (replace the files), then Rebuild.",
-                  "Téléchargez-la depuis la page de la version et décompressez-la au même endroit que celle-ci (remplacez les fichiers), puis Reconstruire."),
-                ui::color::cross, inner);
+                failed ? app.updateError
+                       : std::string(L("Update downloads and installs it here, then the launcher restarts and Rebuild prepares the game again "
+                                       "(only what changed). Your saves and settings stay.",
+                                       "Mettre à jour la télécharge et l'installe ici, puis le lanceur redémarre et Reconstruire prépare "
+                                       "à nouveau le jeu (seulement ce qui a changé). Vos sauvegardes et réglages restent.")),
+                failed ? ui::color::early : ui::color::cross, inner);
         gap(6);
+        if (ui::button(failed ? L("Try again", "Réessayer") : L("Update", "Mettre à jour"), ImVec2(0, S(48)), ui::Kind::Primary,
+                       !app.building && !app.gameRunning))
+            app.startUpdate(newTag, newVersion);
+        ImGui::SameLine(0, S(12));
         if (ui::button(L("Open the release page", "Ouvrir la page de la version"), ImVec2(0, S(48))))
             plat::open(page);
     }
@@ -1765,8 +2002,8 @@ int main(int argc, char **argv)
     bool errorDemo = false, cancel = false, screensOnly = false;
     double playSeconds = 40, crashSeconds = 0;
     float uiScale = 0;
-    std::string updateUrl, selfCheckFile, reportPath;
-    bool versionOnly = false;
+    std::string updateUrl, selfCheckFile, reportPath, downloadPrefix;
+    bool versionOnly = false, updateNow = false;
     (void)argc;
     (void)argv;
     const std::vector<std::string> args = plat::arguments(); // UTF-8, from the wide command line
@@ -1796,6 +2033,10 @@ int main(int argc, char **argv)
             uiScale = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--update-url") // a test: another address answering as GitHub's latest-release API
             updateUrl = next();
+        else if (a == "--download-prefix") // a test: another address serving <tag>/TMB_Recomp-<version>.zip
+            downloadPrefix = next();
+        else if (a == "--update-now") // a test: presses Update once the check finds a newer release
+            updateNow = true;
         else if (a == "--self-check") // no window: the release folder and the disc check on a file (see selfCheck)
             selfCheckFile = next();
         else if (a == "--report")
@@ -1841,6 +2082,9 @@ int main(int argc, char **argv)
     // The update check at start (setting "update_check"): not for a development launcher, unless pointed somewhere.
     if (!updateUrl.empty())
         app.updateUrl = updateUrl;
+    if (!downloadPrefix.empty())
+        app.downloadPrefix = downloadPrefix;
+    app.restartArgs = args;
     if (app.cfg.updateCheck && (std::strcmp(kVersion, "dev") != 0 || !updateUrl.empty()))
         app.updates.start(app.updateUrl, false);
 
@@ -1870,12 +2114,22 @@ int main(int argc, char **argv)
         {
             if (app.building)
                 app.wantQuit = true;
-            else
+            else if (app.updateStep != App::UpdateStep::Installing) // installing: not stopped half way
                 break;
         }
         app.time = plat::now() - t0;
         app.pollCheck();
         app.pollBuild();
+        app.pollUpdate();
+        if (updateNow && app.updateStep == App::UpdateStep::Idle)
+        {
+            std::string version, tag;
+            if (app.updates.get(&version, nullptr, nullptr, nullptr, &tag) == UpdateCheck::State::Available)
+            {
+                updateNow = false;
+                app.startUpdate(tag, version);
+            }
+        }
         app.pollGame();
         if (!selftestIso.empty())
             test.tick(app);

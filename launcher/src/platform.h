@@ -3,6 +3,7 @@
 // The launcher's operating-system layer (platform_win.cpp): everything that needs <windows.h>, kept out of the
 // raylib / ImGui translation units (their names clash: CloseWindow, DrawText, Rectangle...). Strings are UTF-8.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -80,4 +81,14 @@ namespace plat
     // Blocking, with short timeouts: call it from a thread.
     bool httpGet(const std::string &url, const std::string &userAgent, std::string &body, long &status,
                  std::string &error, size_t maxBytes = 1 << 20);
+
+    // The same GET streamed into a file (a release's zip, through GitHub's redirect to its storage): bytes written so
+    // far and the size the server announced (0 when it did not) into done and total, stopped when cancel turns true.
+    // False with error set on a failure, a status other than 200 or a stop; the file is then removed.
+    bool httpDownload(const std::string &url, const std::string &userAgent, const std::string &file, std::atomic<uint64_t> &done,
+                      std::atomic<uint64_t> &total, const std::atomic<bool> &cancel, std::string &error,
+                      uint64_t maxBytes = uint64_t(1) << 31);
+
+    // This program's own file (the launcher's exe, to start it again after an update).
+    std::string exePath();
 }

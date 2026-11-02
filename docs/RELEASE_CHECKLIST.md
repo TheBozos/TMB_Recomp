@@ -53,6 +53,8 @@ Release: `TMB_Recomp-<version>.zip`, SHA-256 `<from the .sha256>`, commit `<comm
 
 - [ ] With an older release published: "Version X is available" on the Play tab, "Open the release page" opens it.
 - [ ] Settings, "Check for updates at start: off": no request at start (a proxy log, or offline: nothing changes).
+- [ ] With an older release installed: **Update** on the Play tab downloads, installs and restarts the launcher on the
+      new version (Maintenance shows it); no `update\` folder or `*.tmb-old` file is left after the next start.
 - [ ] Unzip the new release over the old one: the Play tab says the new version is installed and offers **Rebuild
       now**; after it, the notice is gone, the memory cards (`%APPDATA%\TMB_Recomp\mc0`, `mc1`) and settings are
       unchanged, the game plays.

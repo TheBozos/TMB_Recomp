@@ -5,6 +5,8 @@
 # copied over, so ninja rebuilds just the affected unity batches instead of the whole game.
 source "$(dirname "$0")/common.sh"
 [ -f "$ELF" ] || { echo "missing $ELF, run scripts/extract_iso.sh first"; exit 1; }
+# Without rsync the copy below fails inside a pipeline and generated_us/ silently keeps the old code.
+command -v rsync > /dev/null || { echo "rsync not found (MSYS2: pacman -S rsync, with /usr/bin on PATH)"; exit 1; }
 [ -x "$TOOLS_BUILD/ps2xRecomp/ps2_recomp" ] && [ -x "$TOOLS_BUILD/ps2xRecomp/ps2_vu_aot" ] || "$ROOT/scripts/build_tools.sh"
 cd "$ROOT"
 

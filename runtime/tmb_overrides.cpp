@@ -568,6 +568,7 @@ namespace
     uint32_t g_syncVParity = 0;
     uint64_t g_frameEndCycle = 0;
     double g_fieldCarry = 0.0;
+    uint64_t g_clockDebt = 0; // EE cycles the EE clock is ahead of the PC's (paced runs: nativeFrameEnd)
     bozo::app::FramePacer g_pacer;
 
     int32_t *gpWord(uint8_t *rdram, uint32_t gp, int32_t offset)
@@ -614,8 +615,26 @@ namespace
                                   ? bozo::port::kEeClockHz / static_cast<uint64_t>(fieldRate(rdram, gp))
                                   : static_cast<uint64_t>(step * static_cast<double>(bozo::port::kEeClockHz));
         const uint64_t accounted = bozo::port::now(runtime) - g_frameEndCycle;
+        // Paced (a window, not deterministic): the EE clock follows the PC's over the long run. A frame whose guest
+        // code accounted more than the real time it took (it waited past a 59.94 Hz vblank while frames are held to
+        // 60.0) leaves the EE that much ahead: kept as a debt, paid back from the real time later frames would charge.
+        // Without it the EE ran about 1 % fast (TMB_TRACE_CLOCK), so the sound, made on the EE clock, was made 1 %
+        // faster than the device played it. Headless and checked runs are not paced and charge as before.
+        const bool paced = bozo::port::realTime(runtime) && !bozo::det::enabled();
+        if (paced && accounted > real)
+            g_clockDebt += accounted - real;
         if (real > accounted)
-            bozo::port::accountCycles(runtime, ctx, real - accounted);
+        {
+            uint64_t charge = real - accounted;
+            if (paced)
+            {
+                const uint64_t pay = std::min(charge, g_clockDebt);
+                g_clockDebt -= pay;
+                charge -= pay;
+            }
+            if (charge)
+                bozo::port::accountCycles(runtime, ctx, charge);
+        }
         bozo::port::frameEnd(runtime, ctx);
         // The frame's end as the host has it (a checked run moves the clock to the reference's frame end).
         g_frameEndCycle = bozo::port::now(runtime);
@@ -632,9 +651,15 @@ namespace
             if (++s_frames % 300u == 0u)
             {
                 const double ee = static_cast<double>(g_frameEndCycle - s_firstCycle) / static_cast<double>(bozo::port::kEeClockHz);
-                std::fprintf(stderr, "[tmb:clock] frame %llu: EE %.3f s, PC %.3f s, EE ahead %.3f s (%.2f%%)\n",
-                             static_cast<unsigned long long>(s_frames), ee, wall - s_firstTime, ee - (wall - s_firstTime),
-                             wall > s_firstTime ? 100.0 * (ee / (wall - s_firstTime) - 1.0) : 0.0);
+                static double s_lastEe = 0.0, s_lastPc = 0.0;
+                const double pc = wall - s_firstTime;
+                std::fprintf(stderr,
+                             "[tmb:clock] frame %llu: EE %.3f s, PC %.3f s, EE ahead %.3f s (%.2f%%); last 300 frames EE/PC %.4f; debt %.1f ms\n",
+                             static_cast<unsigned long long>(s_frames), ee, pc, ee - pc, pc > 0.0 ? 100.0 * (ee / pc - 1.0) : 0.0,
+                             pc > s_lastPc ? (ee - s_lastEe) / (pc - s_lastPc) : 0.0,
+                             1000.0 * static_cast<double>(g_clockDebt) / static_cast<double>(bozo::port::kEeClockHz));
+                s_lastEe = ee;
+                s_lastPc = pc;
             }
         }
         return step;

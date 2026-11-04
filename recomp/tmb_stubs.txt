@@ -1,0 +1,12 @@
+# Functions of TMB's executable the BozoEngine build answers as stubs beyond the libraries BozoEngine implements
+# (bozo-externals --stubs): the Logitech wheel's library, answered by runtime/tmb_overrides.cpp (returnZero), as the
+# PS2Recomp build's TOML stubs did.
+lgDevInit
+inputLgUpdate__Fv
+inputSetLgSpringOffset__Fii
+inputSetLgSpringEffect__Fiiiii
+inputSetLgCollisionEffect__Fiiii
+inputSetLgSmallActuatorEffect__Fiii
+inputSetLgLargeActuatorEffect__Fiiiiii
+inputStartLgEffect__FiPi
+inputSetLgTurningFriction__Fif

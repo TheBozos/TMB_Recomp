@@ -2,10 +2,10 @@
 // adapter (runtime/tmb_native.cpp) at their place in the frame.
 #pragma once
 
-#include "ps2_runtime.h"
-#include "runtime/native/native_mesh_draw.h"
-#include "runtime/native/native_renderer.h"
-#include "runtime/native/native_texture_cache.h"
+#include "tmb_port.h"
+#include "bozo/render/mesh_draw.h"
+#include "bozo/render/renderer.h"
+#include "bozo/render/texture.h"
 
 #include <cstdint>
 #include <memory>
@@ -17,11 +17,11 @@ namespace tmb::meshes
     // One batch of an object (the fork's, runtime/native/native_mesh_draw.h): its material as the strip program keeps
     // it (the GS state around it, ALPHA_1, TEST_1, ZBUF_1, FOGCOL, is the adapter's at the object's place) and its
     // triangles in the object's space.
-    using Batch = ps2x::native::MeshBatch;
+    using Batch = bozo::render::MeshBatch;
 
     // One object drawn from the pack, waiting for its place in the stream: the fork's MeshDraw (matrix, clip volume,
     // batches, context block, key) and what TMB's checks and the stream path add.
-    struct Drawn : ps2x::native::MeshDraw
+    struct Drawn : bozo::render::MeshDraw
     {
         uint32_t setupPc = 0;
         uint32_t resumes = 0; // a resume (setupPc 0xc78): the setup it goes on with, which the stream's must be
@@ -31,7 +31,7 @@ namespace tmb::meshes
         bool alphaList = false; // sent through the depth-sorted alpha list (pktLinkAlphaObjAsm), after the view's opaque ones
         // TMB_NATIVE_MESHES_CHECK: each strip's vertices before triangles (sprites and ribbons: its triangles; the
         // adapter compares its own translation).
-        std::vector<std::vector<ps2x::native::Vertex>> checkStrips;
+        std::vector<std::vector<bozo::render::Vertex>> checkStrips;
     };
 
     // Where a pack is (the mesh pack, the texture pack): the environment's <envName>, else the path built in when it
@@ -54,5 +54,5 @@ namespace tmb::meshes
     void flushUnsent();
     // A published frame's end.
     void endFrame();
-    void install(PS2Runtime &runtime);
+    void install(tmb::Registry &runtime);
 }

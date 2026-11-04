@@ -1,5 +1,4 @@
-// Host OS services the TMB overrides need (thread CPU times, environment), for Linux and Windows. Compiled
-// outside the unity build: <windows.h> clashes with raylib names.
+// Host OS services the TMB overrides need (thread CPU times, environment, folders), for Linux and Windows.
 #pragma once
 
 #include <cstdint>
@@ -26,4 +25,10 @@ namespace tmb::host
 
     // setenv(name, value, 0): sets the variable unless it is already set.
     void setEnvDefault(const char *name, const char *value);
+
+    // The folder this executable is in, and the game's ELF's (set by the executable's main: the packs may sit beside
+    // either).
+    std::string executableDirectory();
+    std::string elfDirectory();
+    void setElfDirectory(const std::string &folder);
 }

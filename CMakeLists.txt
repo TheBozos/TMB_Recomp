@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.21)
 project(TMB_Recomp LANGUAGES C CXX)
 
+# Phase 4: TMB on BozoEngine instead of the PS2Recomp fork (cmake/bozo.cmake; milestone M0, headless). On this branch
+# the runtime is adapted to BozoEngine, so the fork build below no longer builds it.
+option(TMB_BOZO "Build TMB on BozoEngine (BOZO_ENGINE_DIR) instead of the PS2Recomp fork" OFF)
+if(TMB_BOZO)
+    include(cmake/bozo.cmake)
+    return()
+endif()
+
 # Twisted Metal: Black (USA, SCUS-97101) static recompilation on top of PS2Recomp.
 #
 # Build the tools first (scripts/build_tools.sh), generate code (scripts/recomp.sh),

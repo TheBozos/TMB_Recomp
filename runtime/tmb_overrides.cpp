@@ -1,47 +1,32 @@
-// Game-specific runtime setup for Twisted Metal: Black (USA, SCUS-97101: the addresses are its executable's).
+// Game-specific runtime setup for Twisted Metal: Black (USA, SCUS-97101: the addresses are its executable's), on
+// BozoEngine (bozo/port.h). The fork's scheduler experiments, GS lag, VIF1 thread and IOP defaults stayed behind with
+// the emulation (BozoEngine's phase4-inventory.md section 3).
 
-#include "game_overrides.h"
-#include "ps2_runtime.h"
-#include "ps2_recompiled_functions.h"
-#include "Stubs/MPEG.h"
-#include "runtime/ee_scheduler.h"
-#include "runtime/gs/gs_cpu_backend.h"
-#include "runtime/gs/gs_draw_estimate.h"
-#include "runtime/ps2_memory.h"
-#include "runtime/native/native_display.h"
-#include "runtime/sampling_profiler_gate.h"
+#include "tmb_port.h"
+
+#include "bozo/app/determinism.h"
+#include "bozo/app/frame_pacer.h"
+#include "bozo/ee/kernel.h"
+#include "bozo/libs/libraries.h"
 #include "tmb_host.h"
-#include <string>
-#include <thread>
-#include <atomic>
-#include <ctime>
-#include <mutex>
-#include <chrono>
-#include <algorithm>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <vector>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <map>
-#include <sstream>
-#include <unordered_map>
 #include <iostream>
-
-namespace ps2_stubs
-{
-    std::string mpegDebugSummary(); // Stubs/MPEG.cpp
-}
-
-namespace tmb
-{
-    extern std::atomic<bool> g_rainLiftOff; // runtime/vu1/tmb_vu1_rain.cpp
-    extern std::atomic<uint64_t> g_rainLiftedStrips;
-}
+#include <map>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <unordered_map>
+#include <vector>
 
 namespace tmb::native
 {
@@ -52,27 +37,16 @@ namespace tmb::native
     bool flareDepthNative();
     void setGuestMemory(const uint8_t *rdram);
     bool enabled();
-    bool gsFrontEndAbsent();
-}
-
-namespace tmb::vu0
-{
-    void install();
-}
-
-namespace tmb::textures
-{
-    void install(PS2Runtime &runtime);
 }
 
 namespace tmb::twod
 {
-    void install(PS2Runtime &runtime);
+    void install(tmb::Registry &runtime);
 }
 
 namespace tmb::cheats
 {
-    void install(PS2Runtime &runtime);
+    void install(tmb::Registry &runtime);
     void setTheGame(uint32_t game);
     void onFrame(uint8_t *rdram);
     void logProgress(uint8_t *rdram, uint32_t gp);
@@ -80,12 +54,17 @@ namespace tmb::cheats
 
 namespace tmb::meshes
 {
-    void install(PS2Runtime &runtime);
+    void install(tmb::Registry &runtime);
 }
 
 namespace tmb::particles
 {
-    void install(PS2Runtime &runtime);
+    void install(tmb::Registry &runtime);
+}
+
+namespace tmb::textures
+{
+    void install(tmb::Registry &runtime);
 }
 
 namespace
@@ -178,18 +157,15 @@ namespace
         return {};
     }
 
-    // Movie skip. The player (Sony's ezmpeg sample) aborts a movie with videoDecAbort, then
-    // videoDecFlush appends a sequence_end_code to the IPU ring and waits until the decode
-    // thread reaches it. With libmpeg HLE'd that code never reaches the host decoder, so
-    // sceMpegIsEnd stays false and updateMpegMovieDecoding waits forever. Tell the HLE the
-    // playback is over at the abort; the VideoDec starts with its sceMpeg, so a0 is both.
+    // Movie skip. The player (Sony's ezmpeg sample) aborts a movie with videoDecAbort, then videoDecFlush appends a
+    // sequence_end_code to the IPU ring and waits until the decode thread reaches it. The fork's libmpeg HLE had to be
+    // told the playback was over here; BozoEngine's libmpeg sees the stream's end itself (its decoder-feeding protocol:
+    // libraries.md section 9), so the override only runs the game's own.
     constexpr uint32_t kVideoDecAbort = 0x001FE710u;
 
     void videoDecAbortOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        const uint32_t videoDec = getRegU32(ctx, 4);
         videoDecAbort__FP8VideoDec_0x1fe710(rdram, ctx, runtime);
-        ps2_stubs::abortMpegPlayback(runtime, videoDec);
     }
 
     // The movie player's switchThread is RotateThreadReadyQueue(1): Sony's ezmpeg sample runs its main loop at
@@ -201,43 +177,40 @@ namespace
     // scheduled again, through kSwitchThreadReturn (padding after readMpeg, never executed).
     constexpr uint32_t kSwitchThread = 0x001DF4C0u;
     constexpr uint32_t kSwitchThreadReturn = 0x001DF4BCu;
-    constexpr int kMoviePriority = 1;
-    std::unordered_map<int, std::pair<int, uint32_t>> g_switchThreadSaved; // thread -> (priority, return address)
+    constexpr uint32_t kMoviePriority = 1;
+    std::unordered_map<int, std::pair<uint32_t, uint32_t>> g_switchThreadSaved; // thread -> (priority, return address)
 
     void switchThreadOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        EeScheduler &ee = runtime->eeScheduler();
-        const GuestThread *self = ee.currentThread();
-        if (!self || self->currentPriority >= kMoviePriority)
+        const int32_t id = bozo::port::currentThread(runtime);
+        if (id <= 0 || bozo::port::currentPriority(runtime) >= kMoviePriority)
         {
             switchThread__Fv_0x1df4c0(rdram, ctx, runtime);
             return;
         }
-        const int id = ee.currentThreadId();
-        int oldPriority = 0;
-        if (ee.changePriority(id, kMoviePriority, false, oldPriority) != 0) // KE_OK
+        uint32_t oldPriority = 0;
+        if (bozo::port::changePriority(runtime, id, kMoviePriority, oldPriority) != 0) // KE_OK
         {
             switchThread__Fv_0x1df4c0(rdram, ctx, runtime);
             return;
         }
         g_switchThreadSaved[id] = {oldPriority, getRegU32(ctx, 31)};
         ctx->pc = kSwitchThreadReturn;
-        SET_GPR_U32(ctx, 2, static_cast<uint32_t>(ee.rotateReadyQueue(kMoviePriority, false)));
-        ee.transferIfRequested(false);
+        SET_GPR_U32(ctx, 2, static_cast<uint32_t>(bozo::port::rotateReadyQueue(runtime, kMoviePriority)));
+        bozo::port::transfer(runtime, ctx);
     }
 
-    void switchThreadReturn(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    void switchThreadReturn(uint8_t *, R5900Context *ctx, PS2Runtime *runtime)
     {
-        EeScheduler &ee = runtime->eeScheduler();
-        const auto saved = g_switchThreadSaved.find(ee.currentThreadId());
+        const auto saved = g_switchThreadSaved.find(bozo::port::currentThread(runtime));
         if (saved == g_switchThreadSaved.end())
             return;
         const auto [priority, ret] = saved->second;
         g_switchThreadSaved.erase(saved);
         ctx->pc = ret;
-        int oldPriority = 0;
-        ee.changePriority(0, priority, false, oldPriority);
-        ee.transferIfRequested(false);
+        uint32_t oldPriority = 0;
+        bozo::port::changePriority(runtime, 0, priority, oldPriority);
+        bozo::port::transfer(runtime, ctx);
     }
 
     // TMB_TRACE_MOVIE=1: log the movie player's thread teardown (temporary bring-up aid).
@@ -251,9 +224,9 @@ namespace
         termAll__Fv_0x1df738(rdram, ctx, runtime);
         for (int id : ids)
         {
-            const GuestThread *t = runtime->eeScheduler().thread(id);
+            const bozo::ee::Thread *t = bozo::port::kernel(runtime).thread(id);
             std::cerr << "[tmb:termAll] thread " << id << " after terminate: "
-                      << (t ? std::to_string(static_cast<int>(t->status)) : std::string("gone"))
+                      << (t ? std::to_string(static_cast<int>(t->state)) : std::string("gone"))
                       << (t ? " entry=0x" : "") << std::hex << (t ? t->entry : 0u) << std::dec << std::endl;
         }
     }
@@ -404,349 +377,30 @@ namespace
 
     constexpr uint32_t kVblankHandler = 0x001C1890u;
     bool g_nativeFrames = false; // native frames, TMB_NATIVE_FRAMES=0 off (timer1HandlerNative)
-    uint32_t g_vblankCalls = 0;
-    bool g_gsLag = false;
-    bool g_gsLagAb = false;
-    bool g_gsLagExperimentOn = true; // TMB_AB=lag: off in the experiment's off stretches
-
-    // The GS lag (fork, PS2Memory::setGsLag: the GS and VU1 may finish a frame while the game runs the next) is
-    // off while a movie plays: the main thread then waits for the decoder in a loop that only rotates the
-    // priority-1 ready queue (switchThread) at priority 0, and running ahead it gets there before the decode
-    // threads (priority 1) have queued their last pictures, which then never run. The movie flag is `displaying`
-    // (gp-0x340C). The vblank handler, which only runs while movies play, turns the lag off; hier (each frame of
-    // 3D rendering) turns it back on when no movie plays. TMB_GS_LAG_AB=1 switches it on and off every 100
-    // vblanks instead (measurements).
-    constexpr uint32_t kMovieDisplaying = 0x004FB794u; // gp - 0x340C
     constexpr uint32_t kHier = 0x001D2EA0u;
 
-    void updateGsLag(uint8_t *rdram, PS2Runtime *runtime)
-    {
-        if (!g_gsLag)
-            return;
-        bool lag = *reinterpret_cast<const int32_t *>(rdram + kMovieDisplaying) == 0 && g_gsLagExperimentOn;
-        if (g_gsLagAb)
-            lag = lag && (runtime->eeScheduler().currentVSyncTick() / 100u) % 2u == 0u;
-        runtime->memory().setGsLag(lag);
-    }
-
     double g_hierMs = 0, g_updateMs = 0;
+    uint32_t g_theGame = 0;              // `this` of TheGame::Update
+    std::atomic<uint64_t> g_vblanks{0};  // the vblanks at the last TheGame::Update (the timeline's marks)
+    std::chrono::steady_clock::time_point g_frameUpdate;
     bool g_traceFrames = false;
-
-    // TMB_GS_LAG_AB: per mode (lag on, off), every 500 frames, the frames, vblanks and slow frames (two vblanks or
-    // more), and the input latency: vblanks from the TheGame::Update whose state a frame shows to the first vblank
-    // after VIF1 finished drawing it (a callback queued behind the frame's packets), the earliest it can be shown.
-    struct LagAbMode
-    {
-        uint64_t frames = 0, vblanks = 0, slow = 0;
-        uint64_t drawn = 0, latencyVblanks = 0, latencyOver2 = 0;
-    };
-    std::mutex g_lagAbMutex;
-    LagAbMode g_lagAbModes[2];
-    uint64_t g_lastUpdateTick = 0; // vblank count at the last TheGame::Update
-
-    // TMB_RAIN_LIFT_AB=1: the lifted rain (runtime/vu1/tmb_vu1_rain.cpp) off and on every 100 vblanks; per mode,
-    // every 1000 frames: fps, slow frames (two vblanks or more), the VIF1 thread's CPU per frame, the strips lifted.
-    bool g_rainAb = false;
-    struct RainAbMode
-    {
-        uint64_t frames = 0, vblanks = 0, slow = 0, strips = 0;
-        double vif1Ms = 0;
-    };
-    RainAbMode g_rainAbModes[2]; // lifted on, off
-
-    void noteRainAbFrame(PS2Runtime *runtime, uint64_t vblanks)
-    {
-        if (!g_rainAb || vblanks == 0u || vblanks > 10u)
-            return;
-        static int64_t s_vif1Ns = -1;
-        static uint64_t s_strips = 0, s_total = 0;
-        const auto vif1Ns = []
-        {
-            for (const tmb::host::ThreadCpu &thread : tmb::host::threadCpuTimes())
-                if (thread.name == "vif1")
-                    return thread.cpuNs;
-            return int64_t{0};
-        };
-        const int current = tmb::g_rainLiftOff.load(std::memory_order_relaxed) ? 1 : 0;
-        RainAbMode &mode = g_rainAbModes[current];
-        ++mode.frames;
-        mode.vblanks += vblanks;
-        mode.slow += vblanks >= 2u ? 1u : 0u;
-        const int next = (runtime->eeScheduler().currentVSyncTick() / 100u) % 2u == 0u ? 0 : 1;
-        if (next != current || s_vif1Ns < 0)
-        {
-            const int64_t now = vif1Ns();
-            const uint64_t strips = tmb::g_rainLiftedStrips.load(std::memory_order_relaxed);
-            if (s_vif1Ns >= 0)
-            {
-                mode.vif1Ms += static_cast<double>(now - s_vif1Ns) / 1e6;
-                mode.strips += strips - s_strips;
-            }
-            s_vif1Ns = now;
-            s_strips = strips;
-            tmb::g_rainLiftOff.store(next == 1, std::memory_order_relaxed);
-        }
-        if (++s_total % 1000u != 0u)
-            return;
-        const auto describe = [](const RainAbMode &m)
-        {
-            char text[160];
-            std::snprintf(text, sizeof(text), "%llu frames %.1f fps %.1f%% slow, vif1 %.2f ms/frame, %llu strips lifted",
-                          static_cast<unsigned long long>(m.frames), m.vblanks ? 50.0 * m.frames / m.vblanks : 0.0,
-                          m.frames ? 100.0 * m.slow / m.frames : 0.0, m.frames ? m.vif1Ms / m.frames : 0.0,
-                          static_cast<unsigned long long>(m.strips));
-            return std::string(text);
-        };
-        std::fprintf(stderr, "[tmb:rainab] last 1000 frames, lifted: %s | compiled: %s\n",
-                     describe(g_rainAbModes[0]).c_str(), describe(g_rainAbModes[1]).c_str());
-        g_rainAbModes[0] = g_rainAbModes[1] = RainAbMode{};
-    }
-
-    // TMB_VBLANK_HOLD=<ms>: in the match, the vblank waits (fork, EeScheduler::setVBlankHold) while a frame is still
-    // being processed, from TheGame::Update to the end of its real-time processing, at most <ms>: a frame that
-    // overruns its field by a few ms then takes those ms instead of a second field (40 ms). The game counts one field
-    // for it, so it runs that much slower in that frame instead of stuttering.
-    uint32_t g_theGame = 0; // `this` of TheGame::Update
-    bool g_vblankHoldNow = false;
-    bool g_vblankHoldConfigured = false;
-
-    // TMB_AB=<experiment>: an in-run A/B, the experiment on and off every 100 vblanks (the same stretches of play for
-    // both); per mode, every 1000 frames: frames per second of real time, frames over 25 ms, and the game's speed
-    // (fields of 20 ms against real time). Experiments: hold (the vblank hold; also TMB_VBLANK_HOLD_AB=1), slice
-    // (equal-priority EE time slicing off, as the real kernel; also TMB_SLICE_AB=1), lag (the GS lag on), holdlimit
-    // (the hold's limit at 12 ms against 6), fill (the GS drawing-time model at 8 pixels a GS cycle against 4).
-    enum class AbExperiment
-    {
-        None,
-        Hold,
-        Slice,
-        Lag,
-        HoldLimit,
-        Fill
-    };
-    AbExperiment g_ab = AbExperiment::None;
-    bool g_abOnNow = false; // the experiment is on in this frame
-    struct AbMode
-    {
-        uint64_t frames = 0, over25 = 0, fields = 0;
-        double ms = 0;
-    };
-    AbMode g_abModes[2]; // off, on
-
-    const char *abExperimentName(AbExperiment experiment)
-    {
-        switch (experiment)
-        {
-        case AbExperiment::Hold: return "vblank hold";
-        case AbExperiment::Slice: return "equal-priority slicing off";
-        case AbExperiment::Lag: return "GS lag";
-        case AbExperiment::HoldLimit: return "hold limit 12 ms (against 6)";
-        case AbExperiment::Fill: return "GS fill 8 px/cycle (against 4)";
-        default: return "";
-        }
-    }
-
-    void applyAbExperiment(PS2Runtime *runtime, bool on)
-    {
-        g_abOnNow = on;
-        g_vblankHoldNow = g_vblankHoldConfigured;
-        switch (g_ab)
-        {
-        case AbExperiment::Hold:
-            g_vblankHoldNow = on;
-            break;
-        case AbExperiment::Slice:
-            runtime->eeScheduler().setEqualPrioritySlicing(!on);
-            break;
-        case AbExperiment::Lag:
-            g_gsLagExperimentOn = on;
-            break;
-        case AbExperiment::HoldLimit:
-            runtime->eeScheduler().setVBlankHoldLimit(std::chrono::microseconds(on ? 12000 : 6000));
-            break;
-        case AbExperiment::Fill: // ffop/gs-fill-rate's default against main's, in the GS drawing-time model
-            if (runtime->hasGs())
-                runtime->gsForPresentation().setDrawRates(GsDrawEstimate::Rates{on ? 256u : 512u, 32u});
-            break;
-        default:
-            break;
-        }
-    }
-
-    // At the end of each frame's real-time processing: the hold ends, the A/B counts the frame and picks the next mode.
-    void noteVblankHoldFrame(PS2Runtime *runtime)
-    {
-        runtime->eeScheduler().setVBlankHold(false);
-        if (g_ab == AbExperiment::None)
-        {
-            g_vblankHoldNow = g_vblankHoldConfigured;
-            return;
-        }
-        static std::chrono::steady_clock::time_point s_last{};
-        static uint64_t s_lastTick = 0, s_total = 0;
-        const auto now = std::chrono::steady_clock::now();
-        const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
-        if (s_last != std::chrono::steady_clock::time_point{} && g_lastUpdateTick > s_lastTick)
-        {
-            const double ms = std::chrono::duration<double, std::milli>(now - s_last).count();
-            AbMode &mode = g_abModes[g_abOnNow ? 1 : 0];
-            if (ms < 200.0)
-            {
-                ++mode.frames;
-                mode.ms += ms;
-                mode.over25 += ms > 25.0 ? 1u : 0u;
-                mode.fields += tick - s_lastTick;
-            }
-            if (++s_total % 1000u == 0u)
-            {
-                const auto describe = [](const AbMode &m)
-                {
-                    char text[160];
-                    std::snprintf(text, sizeof(text), "%llu frames %.1f fps %.1f%% over 25 ms, game speed %.2f",
-                                  static_cast<unsigned long long>(m.frames), m.ms > 0 ? 1000.0 * m.frames / m.ms : 0.0,
-                                  m.frames ? 100.0 * m.over25 / m.frames : 0.0, m.ms > 0 ? 20.0 * m.fields / m.ms : 0.0);
-                    return std::string(text);
-                };
-                std::fprintf(stderr, "[tmb:ab] last 1000 frames, %s on: %s | off: %s | vblanks held %llu\n",
-                             abExperimentName(g_ab), describe(g_abModes[1]).c_str(), describe(g_abModes[0]).c_str(),
-                             static_cast<unsigned long long>(runtime->eeScheduler().vblanksHeld()));
-                g_abModes[0] = g_abModes[1] = AbMode{};
-            }
-        }
-        s_last = now;
-        s_lastTick = tick;
-        applyAbExperiment(runtime, (tick / 100u) % 2u == 1u);
-    }
-
-    void noteLagAbFrame(PS2Runtime *runtime, uint64_t vblanks)
-    {
-        if (!g_gsLagAb || vblanks == 0u || vblanks > 10u)
-            return;
-        static uint64_t s_total = 0;
-        std::lock_guard<std::mutex> lock(g_lagAbMutex);
-        LagAbMode &mode = g_lagAbModes[runtime->memory().gsLag() ? 0 : 1];
-        ++mode.frames;
-        mode.vblanks += vblanks;
-        mode.slow += vblanks >= 2u ? 1u : 0u;
-        if (++s_total % 500u != 0u)
-            return;
-        const auto describe = [](const LagAbMode &m)
-        {
-            char text[160];
-            std::snprintf(text, sizeof(text), "%llu frames %.1f fps %.1f%% slow, latency %.2f vblanks (%.1f%% over 2)",
-                          static_cast<unsigned long long>(m.frames), m.vblanks ? 50.0 * m.frames / m.vblanks : 0.0,
-                          m.frames ? 100.0 * m.slow / m.frames : 0.0,
-                          m.drawn ? static_cast<double>(m.latencyVblanks) / m.drawn : 0.0,
-                          m.drawn ? 100.0 * m.latencyOver2 / m.drawn : 0.0);
-            return std::string(text);
-        };
-        std::fprintf(stderr, "[tmb:lagab] last 500 frames, lag on: %s | off: %s\n", describe(g_lagAbModes[0]).c_str(),
-                     describe(g_lagAbModes[1]).c_str());
-        g_lagAbModes[0] = g_lagAbModes[1] = LagAbMode{};
-    }
-
-    // TMB_TRACE_IDLE=1: what the EE waits on when every guest thread is blocked (EeScheduler::setIdleObserver),
-    // per frame, added up separately for slow frames (two vblanks or more) and fast ones; every 1500 frames the
-    // largest per class, in ms per frame: "<blocked threads> <- <what woke the EE>".
-    bool g_traceIdle = false;
-    std::vector<EeScheduler::IdleRecord> g_frameIdle;
-
-    void noteIdleFrame(uint64_t vblanks)
-    {
-        if (!g_traceIdle)
-            return;
-        struct Totals
-        {
-            uint64_t frames = 0;
-            std::map<std::string, double> ms;
-        };
-        static Totals s_totals[2];
-        static uint64_t s_frames = 0;
-        if (vblanks != 0u && vblanks <= 10u)
-        {
-            Totals &totals = s_totals[vblanks >= 2u ? 1 : 0];
-            ++totals.frames;
-            for (const EeScheduler::IdleRecord &record : g_frameIdle)
-                totals.ms[record.blocked + " <- " + record.wokenBy] += static_cast<double>(record.nanoseconds) / 1e6;
-        }
-        g_frameIdle.clear();
-        if (++s_frames % 1500u != 0u)
-            return;
-        for (int kind = 0; kind < 2; ++kind)
-        {
-            const Totals &totals = s_totals[kind];
-            if (totals.frames == 0u)
-                continue;
-            std::vector<std::pair<double, std::string>> sorted;
-            double all = 0.0;
-            for (const auto &[key, ms] : totals.ms)
-            {
-                sorted.push_back({ms, key});
-                all += ms;
-            }
-            std::sort(sorted.rbegin(), sorted.rend());
-            std::fprintf(stderr, "[tmb:idle] %s frames: %llu, EE idle %.2f ms per frame\n", kind ? "slow" : "fast",
-                         static_cast<unsigned long long>(totals.frames), all / totals.frames);
-            for (size_t i = 0; i < sorted.size() && i < 12u; ++i)
-                std::fprintf(stderr, "[tmb:idle]   %6.2f ms  %s\n", sorted[i].first / totals.frames, sorted[i].second.c_str());
-        }
-    }
 
     void hierOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        updateGsLag(rdram, runtime);
-        tmb::native::setGuestMemory(rdram); // the adapter reads the game's fog packet
+        tmb::native::setGuestMemory(rdram); // the native frame reads the game's fog packet
         const auto start = std::chrono::steady_clock::now();
         timelineEvent('H');
         hier__Fi_0x1d2ea0(rdram, ctx, runtime);
         timelineEvent('h');
-        // hier draws the state of the TheGame::Update before it (the frame's own Update comes after).
-        if (g_gsLagAb && g_lastUpdateTick != 0u && runtime->memory().vif1Threaded())
-        {
-            const uint64_t updateTick = g_lastUpdateTick;
-            const int lag = runtime->memory().gsLag() ? 0 : 1;
-            runtime->memory().queueVif1Callback([runtime, updateTick, lag]()
-            {
-                const uint64_t shown = runtime->eeScheduler().currentVSyncTick() + 1u;
-                std::lock_guard<std::mutex> lock(g_lagAbMutex);
-                LagAbMode &mode = g_lagAbModes[lag];
-                ++mode.drawn;
-                mode.latencyVblanks += shown - updateTick;
-                mode.latencyOver2 += shown - updateTick > 2u ? 1u : 0u;
-            });
-        }
         if (g_traceFrames)
             g_hierMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     }
 
+    // The vblank handler (it only runs while movies play): the game's own, marked on the timeline.
     void vblankHandlerOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        const uint32_t gp = getRegU32(ctx, 28);
-        const auto rd = [&](uint32_t addr) { return *reinterpret_cast<const int32_t *>(rdram + (addr & 0x1FFFFFFu)); };
-        const int32_t displaying = rd(gp + -0x36DC);
         timelineEvent('B');
         vblankHandler__Fi_0x1c1890(rdram, ctx, runtime);
-        updateGsLag(rdram, runtime);
-        // Native frames: vblanks latch no picture. A movie's or a load's screen (they end no frame) is shown by the
-        // host on its own clock (PS2X_NATIVE_IDLE_PRESENT_MS), not here.
-        if (!g_traceMovie)
-            return;
-        static uint32_t s_dispCalls = 0;
-        if (std::getenv("TMB_TRACE_DISPLAY") && (s_dispCalls++ % 150u) == 0u)
-        {
-            PS2Memory &m = runtime->memory();
-            std::cerr << std::hex << "[tmb:disp] pmode=0x" << m.read64(0x12000000u) << " smode2=0x" << m.read64(0x12000020u)
-                      << " dispfb1=0x" << m.read64(0x12000070u) << " display1=0x" << m.read64(0x12000080u)
-                      << " dispfb2=0x" << m.read64(0x12000090u) << " display2=0x" << m.read64(0x120000A0u)
-                      << " bg=0x" << m.read64(0x120000E0u) << std::dec << std::endl;
-        }
-        if (displaying && (g_vblankCalls++ % 100u) == 0u)
-        {
-            std::cerr << "[tmb:vblank] call#" << g_vblankCalls << " displaying=" << displaying
-                      << " pathBusy=" << rd(gp + -0x36D0) << " ret=" << static_cast<int32_t>(getRegU32(ctx, 2))
-                      << " voBuf(+8,+0x10,+0xc)=" << rd(0x004C4A18u + 8u) << "," << rd(0x004C4A18u + 0x10u) << ","
-                      << rd(0x004C4A18u + 0xCu) << " | " << ps2_stubs::mpegDebugSummary() << std::endl;
-        }
     }
 
     // TMB_TRACE_FONT=1: dump the font packet state on each fontDmaFontData (bring-up aid).
@@ -773,70 +427,15 @@ namespace
         }
     }
 
-    // TMB_TRACE_THREADS=<seconds>: print every guest thread and semaphore that often (hang hunting).
-    void startThreadTrace(PS2Runtime &runtime, double periodSeconds)
-    {
-        std::thread([&runtime, periodSeconds]()
-                    {
-                        static const char *const kStatus[] = {"run", "ready", "wait", "wait+susp", "susp", "dormant"};
-                        static const char *const kWait[] = {"-", "sleep", "sema", "evflag", "vsync", "external", "mpeg"};
-                        for (uint32_t pass = 0;; ++pass)
-                        {
-                            std::this_thread::sleep_for(std::chrono::duration<double>(periodSeconds));
-                            const EeKernelSnapshot snap = runtime.eeScheduler().snapshot();
-                            std::cerr << "[tmb:threads] pass " << pass << " running=" << snap.runningThreadId
-                                      << " | mpeg: " << ps2_stubs::mpegDebugSummary() << std::endl;
-                            for (const EeThreadSnapshot &t : snap.threads)
-                            {
-                                const auto st = static_cast<size_t>(t.status);
-                                const auto wr = static_cast<size_t>(t.waitReason);
-                                std::cerr << std::hex << "  th" << std::dec << t.id << " " << (st < 6 ? kStatus[st] : "?")
-                                          << " wait=" << (wr < 7 ? kWait[wr] : "?") << ":" << t.waitId
-                                          << " prio=" << t.currentPriority << std::hex << " pc=0x" << t.pc
-                                          << " ra=0x" << t.ra << " sp=0x" << t.sp << " entry=0x" << t.entry << std::dec
-                                          << " wakeups=" << t.wakeupCount << " depth=" << t.invocationDepth << std::endl;
-                            }
-                            {
-                                const auto &g = runtime.memory().gs();
-                                std::cerr << std::hex << "  [gs] pmode=0x" << g.pmode << " smode2=0x" << g.smode2
-                                          << " dispfb1=0x" << g.dispfb1 << " display1=0x" << g.display1
-                                          << " dispfb2=0x" << g.dispfb2 << " display2=0x" << g.display2
-                                          << std::dec << std::endl;
-                            }
-                            if (std::getenv("TMB_TRACE_IOP"))
-                            {
-                                const auto iop = runtime.iopDebugSnapshot();
-                                for (const std::string &line : iop.diagnostics)
-                                {
-                                    std::cerr << "  [iop] " << line << std::endl;
-                                }
-                            }
-                            for (const EeSemaphoreSnapshot &sem : snap.semaphores)
-                            {
-                                if (sem.waiters != 0u)
-                                {
-                                    std::cerr << "  sema" << sem.id << " count=" << sem.count << "/" << sem.maxCount
-                                              << " waiters=" << sem.waiters << std::endl;
-                                }
-                            }
-                        } })
-            .detach();
-    }
-
-    // End of a movie. Every PSS ends with 4 bytes past its last sector (the program end code); the
-    // player treats the stream as complete with < 5 bytes left and never reads them. It then calls
-    // videoDecFlush, which appends a sequence_end_code to the IPU ring so the decoder finishes. With
-    // libmpeg HLE'd, tell the HLE the input is complete once that flush succeeds.
+    // End of a movie. Every PSS ends with 4 bytes past its last sector (the program end code); the player treats the
+    // stream as complete with < 5 bytes left and never reads them. It then calls videoDecFlush, which appends a
+    // sequence_end_code to the IPU ring so the decoder finishes. The fork's libmpeg HLE had to be told the input was
+    // complete; BozoEngine's libmpeg sees the end code in the stream.
     constexpr uint32_t kVideoDecFlush = 0x001FE7D0u;
 
     void videoDecFlushOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        const uint32_t videoDec = getRegU32(ctx, 4);
         videoDecFlush__FP8VideoDec_0x1fe7d0(rdram, ctx, runtime);
-        if (getRegU32(ctx, 2) != 0u)
-        {
-            ps2_stubs::endMpegPlaybackInput(runtime, videoDec);
-        }
     }
 
     // TMB_TRACE_SND=1: log every 989snd command sent with snd_SendIOPCommandAndWait (bring-up aid).
@@ -904,7 +503,7 @@ namespace
             ctx->pc = ra;
             return;
         }
-        sceGsExecStoreImage_0x2043d8(rdram, ctx, runtime);
+        bozo::port::callLibrary(runtime, ctx, kSceGsExecStoreImage); // the library (BozoEngine's), not the game's copy
         // TMB_LOG_STOREIMAGE=1: each GS readback's caller (ra) and first words, every 100th per caller.
         static const bool s_log = std::getenv("TMB_LOG_STOREIMAGE") != nullptr;
         if (s_log)
@@ -936,102 +535,14 @@ namespace
     constexpr int32_t kFrameTicksGpOffset = -0x2EE4; // timerGetFrameTime's tick count (gp-relative)
     int32_t g_maxFrameTicks = 40 * 576;
 
-    // TMB_TRACE_FRAMES=1: every 100 frames, the host time from the end of one frame's real-time processing to the
-    // next TheGame::Update (W: vsync wait, rendering kick, pad) and from there to the end of the processing (B), and how
-    // many of those frames took over 25 ms in all.
-    std::chrono::steady_clock::time_point g_frameEnd, g_frameUpdate;
-
-    // CPU time of each host thread per frame since the previous call, by thread name.
-    std::string threadCpuPerFrame(uint32_t frames)
-    {
-        static std::unordered_map<uint64_t, int64_t> s_previous;
-        std::map<std::string, double> perName;
-        for (const tmb::host::ThreadCpu &thread : tmb::host::threadCpuTimes())
-        {
-            const auto previous = s_previous.find(thread.id);
-            if (previous != s_previous.end())
-                perName[thread.name.empty() ? "?" : thread.name] += static_cast<double>(thread.cpuNs - previous->second) / 1e6 / frames;
-            s_previous[thread.id] = thread.cpuNs;
-        }
-        std::string out;
-        char buffer[64];
-        for (const auto &[name, ms] : perName)
-            if (ms >= 0.5)
-            {
-                std::snprintf(buffer, sizeof(buffer), " %s %.1f", name.c_str(), ms);
-                out += buffer;
-            }
-        return out;
-    }
-
-    PS2Runtime *g_runtime = nullptr;
-
-    void traceFrameEnd()
-    {
-        static double sumW = 0, sumB = 0, maxW = 0, maxB = 0, sumH = 0, sumU = 0;
-        static uint32_t frames = 0, over25 = 0;
-        const auto now = std::chrono::steady_clock::now();
-        if (g_frameEnd.time_since_epoch().count() != 0 && g_frameUpdate > g_frameEnd)
-        {
-            const double w = std::chrono::duration<double, std::milli>(g_frameUpdate - g_frameEnd).count();
-            const double b = std::chrono::duration<double, std::milli>(now - g_frameUpdate).count();
-            sumW += w; sumB += b; maxW = std::max(maxW, w); maxB = std::max(maxB, b);
-            sumH += g_hierMs; sumU += g_updateMs;
-            over25 += w + b > 25.0 ? 1u : 0u;
-            if (++frames == 100u)
-            {
-                static uint64_t s_idle = 0, s_vif1 = 0;
-                const uint64_t idle = g_runtime->eeScheduler().idleWaitNanoseconds();
-                const uint64_t vif1 = g_runtime->memory().vif1WaitNanoseconds();
-                std::fprintf(stderr, "[tmb:frames] W avg %.1f max %.1f ms, B avg %.1f max %.1f ms, hier %.1f, update %.1f, "
-                             "EE idle %.1f, waiting VIF1/GS %.1f, over 25 ms %u | cpu ms/frame:%s\n",
-                             sumW / frames, maxW, sumB / frames, maxB, sumH / frames, sumU / frames,
-                             (idle - s_idle) / 1e6 / frames, (vif1 - s_vif1) / 1e6 / frames, over25, threadCpuPerFrame(frames).c_str());
-                s_idle = idle;
-                s_vif1 = vif1;
-                sumW = sumB = maxW = maxB = sumH = sumU = 0;
-                frames = over25 = 0;
-            }
-        }
-        g_frameEnd = now;
-        g_hierMs = g_updateMs = 0;
-    }
-
     double hitchClock();
-    std::atomic<double> g_lastMatchFrameNoted{-1.0}; // the fps overlay's last match frame (hitchClock)
+    std::atomic<double> g_lastMatchFrameNoted{-1.0}; // the last match frame (hitchClock)
 
     void timerEndOfRealTimeProcessingOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        g_runtime = runtime;
         timelineEvent('E');
-        runtime->noteGameFrame(); // the fps overlay
         g_lastMatchFrameNoted.store(hitchClock(), std::memory_order_relaxed);
-        noteVblankHoldFrame(runtime); // TMB_VBLANK_HOLD: the frame's processing is done
         tmb::cheats::onFrame(rdram); // the Cheats tab (runtime/tmb_cheats.cpp)
-        // PS2X_PROFILE_GATED=1: the profiler samples while frames take two vblanks or more (busy scenes; they come
-        // in stretches, so the frame after a slow one is mostly slow too), or, with TMB_PROFILE_FAST_FRAMES=1,
-        // while they take one: a profile of each kind from the same build.
-        {
-            static const bool s_fastFrames = []
-            {
-                const char *value = std::getenv("TMB_PROFILE_FAST_FRAMES");
-                return value && *value == '1';
-            }();
-            static uint64_t s_lastTick = 0;
-            const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
-            const bool slow = tick - s_lastTick >= 2u;
-            if (!std::getenv("TMB_PROFILE_HITCH"))
-                ps2x::profiling::setSampleGate(s_lastTick != 0 && slow != s_fastFrames);
-            if (s_lastTick != 0)
-            {
-                noteLagAbFrame(runtime, tick - s_lastTick);
-                noteRainAbFrame(runtime, tick - s_lastTick);
-                noteIdleFrame(tick - s_lastTick);
-            }
-            s_lastTick = tick;
-        }
-        if (g_traceFrames)
-            traceFrameEnd();
         const uint32_t gp = getRegU32(ctx, 28);
         tmb::native::onFrameEnd(); // TMB_NATIVE: publish the frame's native draws
         timerEndOfRealTimeProcessing__Fv_0x1f67f0(rdram, ctx, runtime);
@@ -1057,6 +568,7 @@ namespace
     uint32_t g_syncVParity = 0;
     uint64_t g_frameEndCycle = 0;
     double g_fieldCarry = 0.0;
+    bozo::app::FramePacer g_pacer;
 
     int32_t *gpWord(uint8_t *rdram, uint32_t gp, int32_t offset)
     {
@@ -1070,45 +582,19 @@ namespace
         return rate > 0 ? rate : 60;
     }
 
-    // TMB_PROFILE_HITCH=<ms> (with PS2X_PROFILE and PS2X_PROFILE_GATED=1): the profiler samples only while the frame
-    // under way has lasted longer than that, from a watcher thread: what the game does during its freezes, which a
-    // gate decided at frame ends (one frame late) misses.
-    std::atomic<double> g_lastFrameEndSeconds{0.0};
     const auto g_hitchClockStart = std::chrono::steady_clock::now();
 
     double hitchClock() { return std::chrono::duration<double>(std::chrono::steady_clock::now() - g_hitchClockStart).count(); }
 
-    void startHitchProfiler()
+    // Holds the frame to the field rate, charges the EE the real time it did not account, ends the game's frame (the
+    // host takes it: bozo::port::frameEnd); returns the frame's duration. Deterministic mode: exactly one field.
+    double nativeFrameEnd(uint8_t *rdram, uint32_t gp, R5900Context *ctx, PS2Runtime *runtime)
     {
-        const char *value = std::getenv("TMB_PROFILE_HITCH");
-        const double threshold = value && *value ? std::atof(value) / 1000.0 : 0.0;
-        if (threshold <= 0.0)
-            return;
-        std::thread([threshold]
-                    {
-                        for (;;)
-                        {
-                            const double last = g_lastFrameEndSeconds.load(std::memory_order_relaxed);
-                            ps2x::profiling::setSampleGate(last > 0.0 && hitchClock() - last > threshold);
-                            std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                        }
-                    })
-            .detach();
-    }
-
-    // Holds the frame to the field rate, charges the EE the real time it did not account, shows the picture; returns
-    // the frame's real duration.
-    double nativeFrameEnd(uint8_t *rdram, uint32_t gp, PS2Runtime *runtime)
-    {
-        FramePacer &pacer = runtime->framePacer();
-        pacer.setCap(static_cast<uint32_t>(fieldRate(rdram, gp)));
+        g_pacer.setCap(static_cast<uint32_t>(fieldRate(rdram, gp)));
+        g_pacer.setPaced(bozo::port::realTime(runtime)); // a headless or checked run is not held to real time
         tmb::native::onMenuFrameEnd(); // TMB_NATIVE: publishes a menu frame's native draws (not in a match)
-        const double step = pacer.frameEnd();
-        g_lastFrameEndSeconds.store(hitchClock(), std::memory_order_relaxed);
+        const double step = g_pacer.frameEnd();
         tmb::cheats::logProgress(rdram, gp); // TMB_LOG_PROGRESS
-        // The fps overlay in the menus (a match's frames are counted at timerEndOfRealTimeProcessing).
-        if (hitchClock() - g_lastMatchFrameNoted.load(std::memory_order_relaxed) > 0.5)
-            runtime->noteGameFrame();
         // TMB_TRACE_HITCH=<ms>: each game frame longer than that (from one frame end to the next), with when it ended.
         static const double s_hitchSeconds = []
         {
@@ -1118,29 +604,26 @@ namespace
         if (s_hitchSeconds > 0.0)
         {
             static double s_last = -1.0;
-            static const auto s_start = std::chrono::steady_clock::now();
-            const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - s_start).count();
+            const double now = hitchClock();
             if (s_last >= 0.0 && now - s_last > s_hitchSeconds)
                 std::fprintf(stderr, "[tmb:hitch] game frame %.0f ms, until t=%.2f\n", (now - s_last) * 1000.0, now);
             s_last = now;
         }
-        EeScheduler &scheduler = runtime->eeScheduler();
-        const uint64_t real = static_cast<uint64_t>(step * static_cast<double>(EeScheduler::kEeClockHz));
-        const uint64_t accounted = scheduler.currentCycle() - g_frameEndCycle;
-        for (uint64_t debt = real > accounted ? real - accounted : 0u; debt != 0u;)
-        {
-            const uint32_t cycles = static_cast<uint32_t>(std::min<uint64_t>(debt, 1ull << 30));
-            scheduler.accountCycles(cycles);
-            debt -= cycles;
-        }
-        g_frameEndCycle = scheduler.currentCycle();
-        scheduler.presentGuestFrame();
+        // Deterministic mode: exactly one field's EE cycles (the step is one field too).
+        const uint64_t real = bozo::det::enabled()
+                                  ? bozo::port::kEeClockHz / static_cast<uint64_t>(fieldRate(rdram, gp))
+                                  : static_cast<uint64_t>(step * static_cast<double>(bozo::port::kEeClockHz));
+        const uint64_t accounted = bozo::port::now(runtime) - g_frameEndCycle;
+        if (real > accounted)
+            bozo::port::accountCycles(runtime, ctx, real - accounted);
+        g_frameEndCycle = bozo::port::now(runtime);
+        bozo::port::frameEnd(runtime, ctx);
         return step;
     }
 
     void sceGsSyncVNative(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        nativeFrameEnd(rdram, getRegU32(ctx, 28), runtime);
+        nativeFrameEnd(rdram, getRegU32(ctx, 28), ctx, runtime);
         g_syncVParity ^= 1u;
         setReturnS32(ctx, static_cast<int32_t>(g_syncVParity));
         ctx->pc = getRegU32(ctx, 31);
@@ -1150,10 +633,9 @@ namespace
     {
         const uint32_t gp = getRegU32(ctx, 28);
         const uint32_t parityOut = getRegU32(ctx, 4);
-        PS2Memory &memory = runtime->memory();
-        *gpWord(rdram, gp, kTicsGpOffset) += static_cast<int32_t>(memory.read32(kT0Count));
-        memory.write32(kT0Count, 0u);
-        const double step = nativeFrameEnd(rdram, gp, runtime);
+        *gpWord(rdram, gp, kTicsGpOffset) += static_cast<int32_t>(bozo::port::ioRead32(runtime, ctx, kT0Count));
+        bozo::port::ioWrite32(runtime, ctx, kT0Count, 0u);
+        const double step = nativeFrameEnd(rdram, gp, ctx, runtime);
         g_syncVParity ^= 1u;
         if (parityOut != 0u)
             *reinterpret_cast<uint32_t *>(rdram + (parityOut & 0x1FFFFFFu)) = g_syncVParity == 0u ? 1u : 0u;
@@ -1310,12 +792,11 @@ namespace
         g_timeline.sampler = std::thread([clocks]()
                                          {
             // The vblank handler only runs during movies: mark the vblanks from the scheduler's tick instead.
-            uint64_t lastVSyncTick = g_runtime ? g_runtime->eeScheduler().currentVSyncTick() : 0u;
+            uint64_t lastVSyncTick = g_vblanks.load(std::memory_order_relaxed);
             while (g_timeline.state.load() == 1)
             {
-                if (g_runtime)
                 {
-                    const uint64_t tick = g_runtime->eeScheduler().currentVSyncTick();
+                    const uint64_t tick = g_vblanks.load(std::memory_order_relaxed);
                     if (tick != lastVSyncTick)
                     {
                         lastVSyncTick = tick;
@@ -1345,7 +826,7 @@ namespace
     {
         const uint32_t ra = getRegU32(ctx, 31);
         timelineEvent('P', ra);
-        sceGsSyncPath_0x203c18(rdram, ctx, runtime);
+        bozo::port::callLibrary(runtime, ctx, 0x00203C18u);
         timelineEvent('p', ra);
     }
 
@@ -1353,7 +834,7 @@ namespace
     {
         const uint32_t ra = getRegU32(ctx, 31);
         timelineEvent('V', ra);
-        sceGsSyncV_0x203b80(rdram, ctx, runtime);
+        bozo::port::callLibrary(runtime, ctx, 0x00203B80u);
         timelineEvent('v', ra);
     }
 
@@ -1409,7 +890,7 @@ namespace
             return;
         if (FILE *out = std::fopen("build/rdram.bin", "wb"))
         {
-            std::fwrite(rdram, 1, PS2_RAM_SIZE, out);
+            std::fwrite(rdram, 1, 0x2000000u, out);
             std::fclose(out);
             std::fprintf(stderr, "[tmb:dump] EE memory written to build/rdram.bin\n");
         }
@@ -1434,9 +915,7 @@ namespace
         if (g_traceFrames && s.steps == 0)
             g_frameUpdate = std::chrono::steady_clock::now();
         if (s.steps == 0)
-            g_lastUpdateTick = runtime->eeScheduler().currentVSyncTick();
-        if (s.steps == 0 && g_vblankHoldNow)
-            runtime->eeScheduler().setVBlankHold(true); // until the end of this frame's processing
+            g_vblanks.store(bozo::port::vblankCount(runtime), std::memory_order_relaxed);
         s.gp = getRegU32(ctx, 28);
         const int32_t fields = *gpGlobal(rdram, kFieldsLastFrameGpOffset);
         const int32_t steps = std::min(fields, g_maxSubsteps);
@@ -1478,7 +957,7 @@ namespace
             float p[3];
             std::memcpy(p, rdram + ((vehicle + 0x260u) & 0x1FFFFFFu), sizeof(p));
             std::fprintf(g_posTrace, "%llu %x %.2f %.2f %.2f\n",
-                         static_cast<unsigned long long>(runtime->eeScheduler().currentVSyncTick()), vehicle, p[0], p[1],
+                         static_cast<unsigned long long>(bozo::port::vblankCount(runtime)), vehicle, p[0], p[1],
                          p[2]);
         }
         if (g_blackboxPath && getRegU32(ctx, 4) == kPlayerVehicle && !g_blackboxDumped)
@@ -1507,15 +986,9 @@ namespace
         collisCheckHdResults__7Vehicle_0x117d48(rdram, ctx, runtime);
     }
 
-    // TMB_FX_TEST=<seconds>: an effects test bench. In a match, every <seconds> one of the game's 87 particle effect
-    // types is created (particleCreateFx, the call its weapons and props make) at the player's car, always in view
-    // whatever the camera does, each logged with its time ([tmb:fx]); captured with PS2X_CAPTURE_WINDOW_DIR on the PS2
-    // path (TMB_NATIVE=0) and on the native one, the same effects come at about the same moments, to compare. The call
-    // is made at particleMove's entry (once a frame, the game's own place for particles) and returns to kFxTestReturn
-    // (padding before a function, never executed), which then runs particleMove as it was called.
     // A multitap in pad port 0, as the game's own sceMtap library would find one (its IOP module is not run): four
-    // players on that port's slots (the runtime's PSPadBackend: player N on the Nth gamepad or PS2X_PADN_SCRIPT),
-    // which the game needs for its 3 and 4 player modes. TMB_MULTITAP=0: none.
+    // players on that port's slots, which the game needs for its 3 and 4 player modes. TMB_MULTITAP=0: none. (The
+    // slots' pads come with the PC's input, milestone M2: BozoEngine's libpad answers port 1 slot 0 and port 2.)
     constexpr uint32_t kMtapInit = 0x00206250u, kMtapPortOpen = 0x002064D0u,
                        kMtapPortClose = 0x00206540u, kMtapGetConnection = 0x002065B0u;
     bool multitap()
@@ -1536,20 +1009,20 @@ namespace
     {
         const bool open = multitap() && getRegU32(ctx, 4) == 0u;
         if (open)
-            runtime->padBackend().setMultitap(true);
+            bozo::port::libraries(runtime).pad.multitap = true;
         setReturnS32(ctx, open ? 1 : 0);
         ctx->pc = getRegU32(ctx, 31);
     }
     void mtapPortClose(uint8_t *, R5900Context *ctx, PS2Runtime *runtime)
     {
         if (getRegU32(ctx, 4) == 0u)
-            runtime->padBackend().setMultitap(false);
+            bozo::port::libraries(runtime).pad.multitap = false;
         setReturnS32(ctx, 1);
         ctx->pc = getRegU32(ctx, 31);
     }
     void mtapGetConnection(uint8_t *, R5900Context *ctx, PS2Runtime *runtime)
     {
-        setReturnS32(ctx, getRegU32(ctx, 4) == 0u && runtime->padBackend().multitap() ? 1 : 0);
+        setReturnS32(ctx, getRegU32(ctx, 4) == 0u && bozo::port::libraries(runtime).pad.multitap ? 1 : 0);
         ctx->pc = getRegU32(ctx, 31);
     }
 
@@ -1613,131 +1086,36 @@ namespace
         particleMove__Fv_0x1e5158(rdram, ctx, runtime);
     }
 
-    // With the native renderer (TMB_NATIVE=1), the GS stream (menus, HUD, 2D, movies, effects) goes to the fork's GS
-    // native back end too, not to paraLLEl-GS: set before the window opens, where the runtime picks the GS renderer.
-    // PS2X_GS_RENDERER=parallel or cpu keeps that one. No PS2X_GS_SCALE default here (it was 2): the variable is an
-    // override of video.ini's gs_scale (ps2_video::loadAtStartup reads the environment over the file), so a default
-    // set here made the runner ignore the player's setting and log "GS scale 2" with gs_scale = 1 in video.ini. The GS
-    // back end draws nothing in the native port (no GS front end); a diagnostic that brings it back sets the scale in
-    // video.ini or PS2X_GS_SCALE.
-    // The rest of the native port too: the IOP modules recompiled by scripts/iop_recomp.sh run as native code (the
-    // others interpreted), the SPU2 mixed and the IOP run on the PC's clock. Each can be set to 0.
-    // The native port is the default (a double-click starts it, scripts/run_native.sh no longer needed for it):
-    // TMB_NATIVE=1 unless the environment says otherwise (TMB_NATIVE=0 is the GS front end path, a diagnostic).
-    const bool g_nativeGsDefault = []
-    {
-        tmb::host::setEnvDefault("TMB_NATIVE", "1");
-        if (tmb::native::enabled())
-        {
-            tmb::host::setEnvDefault("PS2X_GS_RENDERER", "native");
-            tmb::host::setEnvDefault("PS2X_IOP_NATIVE", "1");
-            tmb::host::setEnvDefault("PS2X_SPU2_WALLCLOCK", "1");
-            tmb::host::setEnvDefault("PS2X_IOP_WALLCLOCK", "1");
-            // Native audio: 989SND's calls to libsd act on the fork's native mixer (ps2xIOP native_libsd.cpp, read
-            // as the IOP is constructed, after this), the SPU2 emulation absent. TMB_NATIVE_AUDIO=0 (or
-            // PS2X_NATIVE_AUDIO=0) keeps libsd recompiled on the emulated SPU2.
-            const char *audio = std::getenv("TMB_NATIVE_AUDIO");
-            const bool nativeAudio = !(audio && *audio == '0');
-            tmb::host::setEnvDefault("PS2X_NATIVE_AUDIO", nativeAudio ? "1" : "0");
-            // No IOP hardware either (ps2xIOP, PS2X_IOP_HARDWARE=0): TMB's modules reach the IOP only through their
-            // imports (kernel, SIF, cdvdman, timrman, intrman answered natively; libsd's on the native mixer; pad and
-            // memory card are the EE's libpad / libmc HLE), so no SIO2, no INTC or DMA register semantics; the few
-            // register accesses left (module start code: LIBSD's bus setup, USBD's probe, SIO2MAN's first write) are
-            // plain storage, counted in [iop:hw]. With the emulated SPU2 (TMB_NATIVE_AUDIO=0) the hardware stays
-            // modelled, as does TMB_IOP_HARDWARE=1.
-            const char *hardware = std::getenv("TMB_IOP_HARDWARE");
-            tmb::host::setEnvDefault("PS2X_IOP_HARDWARE", nativeAudio && !(hardware && *hardware == '1') ? "0" : "1");
-        }
-        // The runtime's debugger window starts hidden (F1 shows it, PS2X_DEBUG_UI=1 starts with it): here, before the
-        // window opens, where the debug panel reads it (applyTmb comes later, with the ELF).
-        tmb::host::setEnvDefault("PS2X_DEBUG_UI", "0");
-        return true;
-    }();
+    // The Logitech wheel's library (lgDevInit, the input module's force-feedback calls): no wheel is ever attached, so
+    // each returns 0 at once (the PS2Recomp build's TOML "ret0" stubs; they stay stubs in the generated code:
+    // recomp/tmb_stubs.txt).
+    constexpr uint32_t kLgStubs[] = {0x0020F8F8u, 0x001D78D0u, 0x001D9370u, 0x001D93D0u, 0x001D9568u,
+                                     0x001D96A8u, 0x001D9968u, 0x001D9B20u, 0x001D9B98u};
 
-    void applyTmb(PS2Runtime &runtime)
+    void returnZero(uint8_t *, R5900Context *ctx, PS2Runtime *)
     {
+        setReturnS32(ctx, 0);
+        ctx->pc = getRegU32(ctx, 31);
+    }
+
+    void applyTmb(tmb::Registry &runtime)
+    {
+        for (uint32_t address : kLgStubs)
+            runtime.registerFunction(address, &returnZero);
         // The frames on the PC clock (timer1HandlerNative); TMB_NATIVE_FRAMES=0 keeps them on the vblanks.
         if (const char *frames = std::getenv("TMB_NATIVE_FRAMES"); !(frames && *frames == '0'))
             g_nativeFrames = true;
-        // Draw on the GPU (paraLLEl-GS, Vulkan): 20-23 ms per frame in the match against 24-27 with the CPU rasterizer,
-        // and the four raster threads' CPU freed. PS2X_GS_RENDERER=cpu keeps the CPU rasterizer; without a Vulkan
-        // device the GS falls back to it by itself.
-        // No GS front end (runtime/tmb_native.cpp gsFrontEndAbsent): said once, with what proves it.
-        if (!runtime.hasGs())
-            std::cerr << "[tmb:gs] no GS front end: GS object none, GS memory "
-                      << (runtime.memory().getGSVRAM() ? "allocated" : "none") << ", GS thread none, raster backend none; "
-                      << "the display (vblanks, CSR.FIELD, frame count, mode, IMR) native (runtime/native/native_display.h), "
-                      << "the frame drawn and presented by the native renderer (TMB_GS_FRONTEND=1: the GS front end, headless)"
-                      << std::endl;
-        else if (runtime.gsForPresentation().requestParallelRenderer())
-            std::cout << "[tmb] GS on the GPU (PS2X_GS_RENDERER=cpu for the CPU rasterizer)" << std::endl;
-        // The game's frame rate at the top right: off for players (F3 shows it; PS2X_SHOW_FPS=1 starts with it, as
-        // scripts/run_native.sh does).
-        // Rasterize on 4 worker threads (TMB_GS_SERIAL=1 keeps the GS thread alone).
-        if (const char *serial = std::getenv("TMB_GS_SERIAL"); runtime.hasGs() && !(serial && *serial == '1'))
-        {
-            tmb::host::setEnvDefault("PS2X_GS_RASTER_THREADS", "4");
-            GSCpuBackend::SetAsyncRasterization(true);
-        }
-        // VIF1 and the VU1 microcode (two thirds of the game thread in the match) run on their own thread
-        // (TMB_VIF1_SERIAL=1 keeps them on the game thread). The game waits for them in sceGsSyncPath each frame.
-        if (const char *serial = std::getenv("TMB_VIF1_SERIAL"); !(serial && *serial == '1'))
-        {
-            // (Without a GS front end nothing is ever queued for VIF1, every kick completing unread: no worker.)
-            if (runtime.hasGs())
-                runtime.memory().setVif1Threaded(true);
-            // TMB_GS_LAG=1: ...and finish a frame while the game runs the next. Off by default: bounded to one
-            // presented frame (the input latency it adds), it gains nothing measurable; unbounded, its gain was the
-            // GS falling several frames behind the controls.
-            const char *lag = std::getenv("TMB_GS_LAG");
-            g_gsLag = lag && *lag == '1';
-            g_gsLagAb = std::getenv("TMB_GS_LAG_AB") != nullptr;
-            g_rainAb = std::getenv("TMB_RAIN_LIFT_AB") != nullptr;
-            // On by default with 6 ms (in-run A/B in busy stretches: ~+3 fps, frames over 25 ms 1.5-8% against 6-13%,
-            // the game at 0.99 of its speed); TMB_VBLANK_HOLD=0 turns it off.
-            const char *hold = std::getenv("TMB_VBLANK_HOLD");
-            const int holdMs = hold && *hold ? std::atoi(hold) : 6;
-            if (holdMs > 0 && !g_nativeFrames)
-            {
-                g_vblankHoldConfigured = g_vblankHoldNow = true;
-                runtime.eeScheduler().setVBlankHoldLimit(std::chrono::microseconds(holdMs * 1000));
-            }
-            const std::string ab = std::getenv("TMB_AB") ? std::getenv("TMB_AB") : "";
-            if (ab == "hold" || std::getenv("TMB_VBLANK_HOLD_AB"))
-                g_ab = AbExperiment::Hold;
-            else if (ab == "slice" || std::getenv("TMB_SLICE_AB"))
-                g_ab = AbExperiment::Slice;
-            else if (ab == "lag")
-            {
-                g_ab = AbExperiment::Lag;
-                g_gsLag = true; // updateGsLag then switches it with the experiment
-            }
-            else if (ab == "holdlimit")
-                g_ab = AbExperiment::HoldLimit;
-            else if (ab == "fill")
-                g_ab = AbExperiment::Fill;
-        }
-        if (const char *idle = std::getenv("TMB_TRACE_IDLE"); idle && *idle == '1')
-        {
-            g_traceIdle = true;
-            runtime.eeScheduler().setIdleObserver([](const EeScheduler::IdleRecord &record) { g_frameIdle.push_back(record); });
-        }
         runtime.registerFunction(kVblankHandler, &vblankHandlerOverride);
         runtime.registerFunction(kHier, &hierOverride);
-        tmb::native::install(); // TMB_NATIVE
-        tmb::vu0::install();    // the VU0 microprograms in C++ (TMB_VU0_NATIVE=0: the interpreter)
+        tmb::native::install();          // TMB_NATIVE
         tmb::textures::install(runtime); // the textures from the offline texture pack for the native renderer
         tmb::twod::install(runtime);     // the 2D builders rewritten natively (runtime/tmb_2d.cpp)
-        tmb::meshes::install(runtime);   // TMB_NATIVE_MESHES=1: rigid objects from the offline mesh pack (runtime/tmb_meshes.cpp)
-        tmb::particles::install(runtime); // TMB_NATIVE_PARTICLES=1: particles drawn from their structs (runtime/tmb_particles.cpp)
+        tmb::meshes::install(runtime);   // rigid objects from the offline mesh pack (runtime/tmb_meshes.cpp)
+        tmb::particles::install(runtime); // particles drawn from their structs (runtime/tmb_particles.cpp)
         if (const char *trace = std::getenv("TMB_TRACE_HIER"); trace && *trace == '1')
-        {
             runtime.registerFunction(kHierDmaHandler, &hierDmaHandlerTrace);
-        }
         if (const char *trace = std::getenv("TMB_TRACE_SND"); trace && *trace == '1')
-        {
             runtime.registerFunction(kSndSendIopCommandAndWait, &sndSendIopCommandAndWaitTrace);
-        }
         runtime.registerFunction(kVideoDecFlush, &videoDecFlushOverride);
         if (const char *maxMs = std::getenv("TMB_MAX_FRAME_MS"); maxMs && *maxMs)
             g_maxFrameTicks = std::max(1, std::atoi(maxMs)) * 576;
@@ -1756,7 +1134,8 @@ namespace
             if (const char *seconds = std::getenv("TMB_TRACE_TIMELINE_SECONDS"); seconds && *seconds)
                 g_timeline.durationNs = static_cast<int64_t>(std::max(1.0, std::atof(seconds)) * 1e9);
             runtime.registerFunction(0x00203C18u, &sceGsSyncPathTimeline);
-            runtime.registerFunction(0x00203B80u, &sceGsSyncVTimeline);
+            if (!g_nativeFrames)
+                runtime.registerFunction(0x00203B80u, &sceGsSyncVTimeline);
         }
         runtime.registerFunction(kSubstepReturn, &substepReturn);
         runtime.registerFunction(kMtapInit, &mtapInit);
@@ -1773,11 +1152,8 @@ namespace
         // Native frames: the frames on the PC clock (timer1HandlerNative).
         if (g_nativeFrames)
         {
-            runtime.eeScheduler().setNativeFrames(true);
             runtime.registerFunction(kTimer1Handler, &timer1HandlerNative);
             runtime.registerFunction(kSceGsSyncV, &sceGsSyncVNative);
-            startHitchProfiler();
-            std::cout << "[tmb] native frames: paced on the PC clock at the field rate" << std::endl;
         }
         if (const char *path = std::getenv("TMB_TRACE_BLACKBOX"); path && *path)
             g_blackboxPath = path;
@@ -1786,19 +1162,6 @@ namespace
                 std::setvbuf(g_posTrace, nullptr, _IOLBF, 0);
         if (g_blackboxPath || g_posTrace)
             runtime.registerFunction(0x00117D48u, &collisCheckHdResultsBlackbox);
-        if (const char *period = std::getenv("TMB_TRACE_THREADS"); period && *period)
-        {
-            startThreadTrace(runtime, std::max(0.5, std::atof(period)));
-        }
-        // Movie audio arrives as far ahead as the libmpeg HLE demuxes video: by default up to 128 decoded pictures
-        // (5 s), far more than the player's 48 KiB ring and 989snd's 24 KiB IOP buffer (about 375 ms) hold. The PCM
-        // queue (pcmCallbackOverride) loses nothing either way; a lead of a few pictures keeps it short.
-        {
-            size_t picturesAhead = 6u;
-            if (const char *value = std::getenv("TMB_MOVIE_PICTURES_AHEAD"); value && *value)
-                picturesAhead = static_cast<size_t>(std::max(1, std::atoi(value)));
-            ps2_stubs::setMpegMaxPicturesAhead(picturesAhead);
-        }
         runtime.registerFunction(kVideoDecAbort, &videoDecAbortOverride);
         runtime.registerFunction(kPcmCallback, &pcmCallbackOverride);
         runtime.registerFunction(kAudioDecSendToIop, &audioDecSendToIopOverride);
@@ -1807,25 +1170,21 @@ namespace
         runtime.registerFunction(kSwitchThread, &switchThreadOverride);
         runtime.registerFunction(kSwitchThreadReturn, &switchThreadReturn);
         if (const char *trace = std::getenv("TMB_TRACE_FONT"); trace && *trace == '1')
-        {
             runtime.registerFunction(kFontDmaFontData, &fontDmaFontDataTrace);
-        }
         if (const char *trace = std::getenv("TMB_TRACE_MOVIE"); trace && *trace == '1')
         {
             runtime.registerFunction(kTermAll, &termAllTrace);
             g_traceMovie = true;
         }
-
-        PS2Runtime::IoPaths paths = PS2Runtime::getIoPaths();
-        paths.cdImage = findDiscImage(paths.elfPath);
-        if (paths.cdImage.empty())
-        {
-            std::cerr << "[tmb] no disc image found: raw sceCdRead calls will fail (set TMB_ISO)" << std::endl;
-            return;
-        }
-        std::cout << "[tmb] disc image: " << paths.cdImage.string() << std::endl;
-        PS2Runtime::setIoPaths(paths);
     }
 }
 
-PS2_REGISTER_GAME_OVERRIDE("Twisted Metal - Black (USA)", "SCUS_971.01", kTmbPalEntry, 0u, &applyTmb)
+namespace tmb
+{
+    std::string findDiscImage(const std::string &fromFolder, const std::string &elfName)
+    {
+        return ::findDiscImage(std::filesystem::path(fromFolder) / elfName).string();
+    }
+}
+
+BOZO_PORT("Twisted Metal - Black (USA)", "SCUS_971.01", kTmbPalEntry, &applyTmb)

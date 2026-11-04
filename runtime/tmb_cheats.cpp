@@ -26,8 +26,8 @@
 
 #include "tmb_port.h"
 #include "bozo/app/determinism.h"
-#if defined(PS2X_ENABLE_DEBUG_UI)
-#include "runtime/ps2_debug_ui.h"
+#if defined(BOZO_SETTINGS_UI)
+#include "bozo/app/settings_tabs.h"
 #include "imgui.h"
 #endif
 #include <algorithm>
@@ -216,7 +216,7 @@ namespace tmb::cheats
             Screen(rdram, ctx, runtime);
         }
 
-#if defined(PS2X_ENABLE_DEBUG_UI)
+#if defined(BOZO_SETTINGS_UI)
         void perPlayer(const char *label, std::atomic<uint32_t> &flags, int players)
         {
             ImGui::PushID(label);
@@ -454,8 +454,8 @@ namespace tmb::cheats
         runtime.registerFunction(kUiCarSel, &shellScreenOverride<&uiCarSel__Fv_0x1963b0>);
         runtime.registerFunction(kUiAiSel, &shellScreenOverride<&uiAiSel__Fv_0x1986a8>);
         runtime.registerFunction(kUiMovies, &shellScreenOverride<&uiMovies__Fv_0x190760>);
-#if defined(PS2X_ENABLE_DEBUG_UI)
-        ps2x::debugui::registerTab("Cheats", &drawTab);
+#if defined(BOZO_SETTINGS_UI)
+        bozo::app::ui::registerTab("Cheats", &drawTab);
 #endif
     }
 }

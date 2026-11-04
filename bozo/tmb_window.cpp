@@ -13,9 +13,13 @@
 // cards (mc0, mc1; --card-dir overrides) and the logs (logs/TMB_Recomp.log). Without --elf the game data is looked for
 // as the fork's TMB did (<exe>/game/SCUS_971.01, then the same in the user folder).
 //
-// F8 saves the window as a PNG (--capture-dir, the current folder by default); --capture-frames saves it at the first
-// present after each of those game frames. F11 / Alt+Enter: fullscreen. --quit-after: close after that many frames.
-// PS2X_FRAME_STATS=1: the frames' work times every 2 s (the FramePacer).
+// Milestone M4, as the fork's TMB: F2 the settings window (Controls: input.ini; Video: video.ini in the user folder,
+// --width / --height / --fullscreen (borderless) / --render-scale over it; Cheats: runtime/tmb_cheats.cpp), F3 the
+// frame rate counter (PS2X_SHOW_FPS=1 from the start), F8 a capture sequence (PS2X_CAPTURE_SEQUENCE presents,
+// PS2X_CAPTURE_SEQUENCE_AT seconds), F9 a burst of captures, ten a second; --capture-frames saves the game's picture at
+// the first present after each of those game frames. The captures go to --capture-dir, else PS2X_CAPTURE_WINDOW_DIR,
+// else <user folder>/captures. F11 / Alt+Enter: between the window and the last full-screen mode. --quit-after: close
+// after that many frames. PS2X_FRAME_STATS=1: the frames' work times every 2 s (the FramePacer).
 //
 // Sound (milestone M3): the mixer's samples, made on the EE clock at each frame's end, go to the default playback device
 // (bozo::app::AudioDevice: a queue of --audio-latency ms, 32 by default, plus the device's buffer). --audio-stats: the
@@ -29,6 +33,7 @@
 #include "bozo/audio/wav.h"
 #include "bozo/app/device_pad.h"
 #include "bozo/app/input_bindings.h"
+#include "bozo/app/video_settings.h"
 #include "bozo/app/window.h"
 #include "bozo/ee/dispatcher.h"
 #include "bozo/host/free_host.h"
@@ -67,6 +72,10 @@ int main(int argc, char **argv)
     std::string wavPath;
     if (const char *record = std::getenv("PS2X_AUDIO_RECORD"); record && *record)
         wavPath = record;
+    // The command line's window options, over video.ini (applied once the user folder is known, below).
+    int width = 0, height = 0;
+    bool fullscreen = false;
+    float renderScale = 0.0f;
     for (int k = 1; k < argc; ++k)
     {
         const std::string a = argv[k];
@@ -90,15 +99,15 @@ int main(int argc, char **argv)
             (player == 1 ? opt.padScript : opt.playerScripts[static_cast<size_t>(player - 2)]) = v;
         }
         else if (a == "--width")
-            window.width = std::stoi(value());
+            width = std::stoi(value());
         else if (a == "--height")
-            window.height = std::stoi(value());
+            height = std::stoi(value());
         else if (a == "--fullscreen")
-            window.fullscreen = true;
+            fullscreen = true;
         else if (a == "--no-vsync")
             window.vsync = false;
         else if (a == "--render-scale")
-            window.renderScale = std::stof(value());
+            renderScale = std::stof(value());
         else if (a == "--capture-dir")
             window.captureDir = value();
         else if (a == "--capture-frames")
@@ -128,6 +137,19 @@ int main(int argc, char **argv)
             return 2;
         }
     }
+    // The window as the player set it (video.ini in the user folder, the fork's file; PS2X_WINDOW_SIZE / _MODE,
+    // PS2X_RENDER_SCALE over it), then the command line over both.
+    bozo::app::video::loadAtStartup(window.width, window.height);
+    {
+        bozo::app::video::Settings &v = bozo::app::video::edited();
+        if (width > 0 && height > 0)
+            v.width = width, v.height = height;
+        if (fullscreen)
+            v.mode = bozo::app::video::WindowMode::Borderless;
+        if (renderScale > 0.0f)
+            v.renderScale = renderScale;
+    }
+    window.videoSettings = true;
     std::error_code ec;
     if (opt.elf.empty() || !std::filesystem::is_regular_file(opt.elf, ec))
     {

@@ -619,6 +619,24 @@ namespace
         bozo::port::frameEnd(runtime, ctx);
         // The frame's end as the host has it (a checked run moves the clock to the reference's frame end).
         g_frameEndCycle = bozo::port::now(runtime);
+        // TMB_TRACE_CLOCK=1: every 300 frames, the EE clock against the PC's since the first frame end (what the sound,
+        // made on the EE clock, is ahead of the window's real time).
+        static const bool s_traceClock = std::getenv("TMB_TRACE_CLOCK") != nullptr;
+        if (s_traceClock)
+        {
+            static uint64_t s_frames = 0, s_firstCycle = 0;
+            static double s_firstTime = 0.0;
+            const double wall = hitchClock();
+            if (s_frames == 0)
+                s_firstCycle = g_frameEndCycle, s_firstTime = wall;
+            if (++s_frames % 300u == 0u)
+            {
+                const double ee = static_cast<double>(g_frameEndCycle - s_firstCycle) / static_cast<double>(bozo::port::kEeClockHz);
+                std::fprintf(stderr, "[tmb:clock] frame %llu: EE %.3f s, PC %.3f s, EE ahead %.3f s (%.2f%%)\n",
+                             static_cast<unsigned long long>(s_frames), ee, wall - s_firstTime, ee - (wall - s_firstTime),
+                             wall > s_firstTime ? 100.0 * (ee / (wall - s_firstTime) - 1.0) : 0.0);
+            }
+        }
         return step;
     }
 

@@ -85,6 +85,11 @@ target_compile_options(tmb_generated PRIVATE ${TMB_GEN_OPT} -w)
 add_library(tmb_runtime OBJECT ${TMB_RUNTIME_SOURCES})
 target_include_directories(tmb_runtime PUBLIC "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})
 target_link_libraries(tmb_runtime PUBLIC bozo_port bozo_render bozo_libs bozo_runtime_core)
+# The Cheats tab of the settings window (F2): ImGui's core and the tab list (bozo_ui, no SDL3; BOZO_SETTINGS_UI), with
+# the window. The headless programs link it too and never draw it.
+if(TMB_WINDOW)
+    target_link_libraries(tmb_runtime PUBLIC bozo_ui)
+endif()
 add_dependencies(tmb_runtime tmb_generated)
 target_compile_options(tmb_runtime PRIVATE -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable)
 # The draw lists as the reference build (the fork) computed them (the PS2XREF1 `draws` field): it compiled TMB's runtime

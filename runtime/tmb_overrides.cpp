@@ -988,8 +988,8 @@ namespace
     }
 
     // A multitap in pad port 0, as the game's own sceMtap library would find one (its IOP module is not run): four
-    // players on that port's slots, which the game needs for its 3 and 4 player modes. TMB_MULTITAP=0: none. (The
-    // slots' pads come with the PC's input, milestone M2: BozoEngine's libpad answers port 1 slot 0 and port 2.)
+    // players on that port's slots, which the game needs for its 3 and 4 player modes. TMB_MULTITAP=0: none.
+    // BozoEngine's libpad then answers players 2-4 on slots 1-3 (a gamepad each, or a script), port 2's pad idle.
     constexpr uint32_t kMtapInit = 0x00206250u, kMtapPortOpen = 0x002064D0u,
                        kMtapPortClose = 0x00206540u, kMtapGetConnection = 0x002065B0u;
     bool multitap()

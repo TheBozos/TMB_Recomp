@@ -1,8 +1,11 @@
 // tmb-headless: Twisted Metal: Black on BozoEngine with no window (phase 4, milestone M0). Every library native, the
 // disc image read, BozoEngine's own timing (free mode), TMB's overrides native; the native renderer records its frames.
 //
-//   tmb-headless [--frames n] [--elf SCUS_971.01] [--iso image] [--pad-script file] [--card-dir dir] [--out run.ref]
-//                [--report n] [--quiet]
+//   tmb-headless [--frames n] [--elf SCUS_971.01] [--iso image] [--pad-script [n=]file]... [--card-dir dir]
+//                [--out run.ref] [--report n] [--quiet]
+//
+// --pad-script n=file: player n's frame-keyed script (1 when omitted; players 2-4 are the multitap's slots, as the
+// reference's PS2X_PAD2_SCRIPT..PS2X_PAD4_SCRIPT).
 //
 // Every --report frames (500 by default) and at the end: the frame, the EE clock, the function that waited for the
 // frame's end (the game's loop: uiTitle_Main__Fv at the title), the Shell (the menus' object, gp - 0x4148) and the
@@ -43,7 +46,16 @@ int main(int argc, char **argv)
         else if (a == "--iso")
             opt.iso = value();
         else if (a == "--pad-script")
-            opt.padScript = value();
+        {
+            std::string v = value();
+            int player = 1;
+            if (v.size() > 2 && v[1] == '=' && v[0] >= '1' && v[0] <= '4')
+            {
+                player = v[0] - '0';
+                v = v.substr(2);
+            }
+            (player == 1 ? opt.padScript : opt.playerScripts[static_cast<size_t>(player - 2)]) = v;
+        }
         else if (a == "--card-dir")
             opt.cardDir = value();
         else if (a == "--out")
@@ -56,7 +68,7 @@ int main(int argc, char **argv)
             opt.printGameOutput = true;
         else
         {
-            std::fprintf(stderr, "usage: tmb-headless [--frames n] [--elf path] [--iso image] [--pad-script file] [--card-dir dir] "
+            std::fprintf(stderr, "usage: tmb-headless [--frames n] [--elf path] [--iso image] [--pad-script [n=]file]... [--card-dir dir] "
                                  "[--out run.ref] [--report n] [--print] [--quiet]\n");
             return 2;
         }
@@ -169,6 +181,13 @@ int main(int argc, char **argv)
     std::printf("\noverride calls:");
     for (const auto &[a, n] : host.overrideCalls())
         std::printf(" 0x%x:%llu", a, static_cast<unsigned long long>(n));
+    std::printf("\n");
+    // The pads the game found and read: each socket's reads (port.slot), and whether the multitap was open.
+    const bozo::libs::PadState &pads = host.libraries().pad;
+    std::printf("pad reads (port.slot: reads; multitap %s):", pads.multitap ? "open" : "closed");
+    for (int p = 0; p < 2; ++p)
+        for (int sl = 0; sl < 4; ++sl)
+            std::printf(" %d.%d: %llu;", p + 1, sl, static_cast<unsigned long long>(pads.socketReads[p][sl]));
     std::printf("\n");
     for (const auto &[name, n] : s.unanswered)
         std::printf("no native answer: %s (%llu)\n", name.c_str(), static_cast<unsigned long long>(n));

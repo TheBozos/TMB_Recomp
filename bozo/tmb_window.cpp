@@ -1,10 +1,16 @@
-// tmb: Twisted Metal: Black on BozoEngine in a window, in real time (phase 4, milestone M1). The free host as
+// tmb: Twisted Metal: Black on BozoEngine in a window, in real time (phase 4, milestones M1 and M2). The free host as
 // tmb-headless runs it (every library native, the disc image read, TMB's overrides native), with the host's clock: the
 // game's frames held to the field rate (TMB's native frame end, bozo::app::FramePacer), each one presented in an SDL3
-// window through OpenGL 3.3 (bozo::app::runWindow), the keyboard and the first gamepad as port 1's pad.
+// window through OpenGL 3.3 (bozo::app::runWindow). The players' pads: the keyboard, mouse and up to four gamepads
+// through input.ini's bindings (bozo::app::DevicePad; with the game's multitap, players 2-4 are its slots), or the
+// frame-keyed scripts given.
 //
 //   tmb [--iso image] [--elf SCUS_971.01] [--card-dir dir] [--width w --height h] [--fullscreen] [--no-vsync]
-//       [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] [--pad-script file]
+//       [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] [--pad-script [n=]file]...
+//
+// The user folder (%APPDATA%\TMB_Recomp, as the fork's TMB; PS2X_USER_DIR overrides it) holds input.ini, the memory
+// cards (mc0, mc1; --card-dir overrides) and the logs (logs/TMB_Recomp.log). Without --elf the game data is looked for
+// as the fork's TMB did (<exe>/game/SCUS_971.01, then the same in the user folder).
 //
 // F8 saves the window as a PNG (--capture-dir, the current folder by default); --capture-frames saves it at the first
 // present after each of those game frames. F11 / Alt+Enter: fullscreen. --quit-after: close after that many frames.
@@ -12,8 +18,10 @@
 #include "tmb_host.h"
 #include "tmb_port.h"
 
+#include "bozo/app/app.h"
 #include "bozo/app/determinism.h"
 #include "bozo/app/device_pad.h"
+#include "bozo/app/input_bindings.h"
 #include "bozo/app/window.h"
 #include "bozo/ee/dispatcher.h"
 #include "bozo/host/free_host.h"
@@ -30,6 +38,17 @@
 
 int main(int argc, char **argv)
 {
+    // The fork's TMB identity (its PS2X_APP_* CMake values): the same user folder, so the cards and input.ini carry over.
+    bozo::app::Identity identity;
+    identity.title = "Twisted Metal: Black";
+    identity.folder = "TMB_Recomp";
+    identity.xdgFolder = "tmb_recomp";
+    identity.bootElf = "SCUS_971.01";
+    identity.dataFolder = "game";
+    bozo::app::setIdentity(identity);
+    bozo::app::startLogging();
+    bozo::app::installCrashHandler();
+
     bozo::host::FreeOptions opt;
     opt.elf = BOZO_RUN_DEFAULT_ELF;
     opt.realTime = true;
@@ -47,7 +66,17 @@ int main(int argc, char **argv)
         else if (a == "--card-dir")
             opt.cardDir = value();
         else if (a == "--pad-script")
-            opt.padScript = value();
+        {
+            // [n=]file: player n's script (1 when omitted; players 2-4: the multitap's slots)
+            std::string v = value();
+            int player = 1;
+            if (v.size() > 2 && v[1] == '=' && v[0] >= '1' && v[0] <= '4')
+            {
+                player = v[0] - '0';
+                v = v.substr(2);
+            }
+            (player == 1 ? opt.padScript : opt.playerScripts[static_cast<size_t>(player - 2)]) = v;
+        }
         else if (a == "--width")
             window.width = std::stoi(value());
         else if (a == "--height")
@@ -75,15 +104,25 @@ int main(int argc, char **argv)
         {
             std::fprintf(stderr, "usage: tmb [--iso image] [--elf path] [--card-dir dir] [--width w] [--height h] [--fullscreen] "
                                  "[--no-vsync] [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] "
-                                 "[--pad-script file] [--print]\n");
+                                 "[--pad-script [n=]file]... [--print]\n");
             return 2;
         }
     }
-    if (opt.elf.empty())
+    std::error_code ec;
+    if (opt.elf.empty() || !std::filesystem::is_regular_file(opt.elf, ec))
     {
-        std::fprintf(stderr, "tmb: no ELF (--elf)\n");
-        return 2;
+        std::string searched;
+        const std::filesystem::path found = bozo::app::findGameData(&searched);
+        if (found.empty())
+        {
+            std::fprintf(stderr, "tmb: no ELF (--elf); looked for the game data at\n%s", searched.c_str());
+            return 2;
+        }
+        opt.elf = found.string();
     }
+    // The memory cards in the user folder (<user>/mc0, mc1: the fork's layout, its saves read as they are).
+    if (opt.cardDir.empty() && !bozo::app::userDirectory().empty())
+        opt.cardDir = bozo::app::userDirectory().string();
     tmb::host::setElfDirectory(std::filesystem::path(opt.elf).parent_path().string());
     if (opt.iso.empty())
         opt.iso = tmb::findDiscImage(std::filesystem::path(opt.elf).parent_path().string(), "SCUS_971.01");
@@ -115,8 +154,14 @@ int main(int argc, char **argv)
         return 2;
     }
     bozo::app::DevicePad pad;
-    if (opt.padScript.empty())
+    bool scripted = !opt.padScript.empty();
+    for (const std::string &script : opt.playerScripts)
+        scripted = scripted || !script.empty();
+    if (!scripted)
         host.libraries().pad.input = &pad;
+    const std::string pads = scripted ? std::string("the scripts") : "the PC's devices (" + bozo::app::input::configPath() + ")";
+    std::fprintf(stderr, "tmb: user folder %s, memory cards in %s, pads from %s\n", bozo::app::userDirectory().string().c_str(),
+                 opt.cardDir.empty() ? "memory" : opt.cardDir.c_str(), pads.c_str());
     std::fprintf(stderr, "tmb: %s, %zu overrides, ELF %s, disc %s\n", port->title, registry.functions().size(), opt.elf.c_str(),
                  opt.iso.c_str());
 

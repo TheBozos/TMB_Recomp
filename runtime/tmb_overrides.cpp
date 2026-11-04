@@ -158,14 +158,16 @@ namespace
     }
 
     // Movie skip. The player (Sony's ezmpeg sample) aborts a movie with videoDecAbort, then videoDecFlush appends a
-    // sequence_end_code to the IPU ring and waits until the decode thread reaches it. The fork's libmpeg HLE had to be
-    // told the playback was over here; BozoEngine's libmpeg sees the stream's end itself (its decoder-feeding protocol:
-    // libraries.md section 9), so the override only runs the game's own.
+    // sequence_end_code to the IPU ring and waits until the decode thread reaches it. BozoEngine's libmpeg never reads
+    // that ring (it decodes from the demux), so it is told here that the playback was aborted, as the fork's was.
     constexpr uint32_t kVideoDecAbort = 0x001FE710u;
 
     void videoDecAbortOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         videoDecAbort__FP8VideoDec_0x1fe710(rdram, ctx, runtime);
+        // The skip ends the playback for libmpeg too (sceMpegIsEnd 1 from now, as the fork's abortMpegPlayback made it):
+        // the stream's own end never comes, the game stopped feeding it (milestone M5: story's skipped stage movie).
+        bozo::port::libraries(runtime).mpeg.aborted = true;
     }
 
     // The movie player's switchThread is RotateThreadReadyQueue(1): Sony's ezmpeg sample runs its main loop at

@@ -46,8 +46,8 @@ What it reads:
   packet comes in sections, each closed by STCYCL 4,4 and NOPs to the quadword (the chain sends the bones again
   before each); the next starts with its pool's S-32 @180. A bone offset is 4 quadwords per bone: bone = offset / 4.
 
-The pack is the fork's generic mesh pack (PS2Recomp/tools/native_pack/mesh.py, PS2XMSH1; the runtime's loader is
-ps2x::native::packs::MeshPack, PS2Recomp/docs/native_packs.md): one file per NGP file (its name upper case, no
+The pack is BozoEngine's generic mesh pack (BozoEngine tools/native_pack/mesh.py, PS2XMSH1; the runtime's loader is
+bozo::render::packs::MeshPack, bozo/render/mesh_pack.h): one file per NGP file (its name upper case, no
 directory, e.g. "JUNKYARD.NGP"; the image's size and CRC32 inflated), one object per hierobject keyed by its offset
 (obj - 0x980000 in the image). What TMB puts in it:
   kind: 0 rigid, 1 pool-less, 2 sprite, 3 ribbon, 4 skinned.
@@ -77,7 +77,13 @@ import struct
 import sys
 import zlib
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'PS2Recomp', 'tools'))
+# native_pack: BozoEngine's tools/ (BOZO_ENGINE_TOOLS, or a BozoEngine checkout beside tools/), else the fork's.
+_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+for _tools in (os.environ.get('BOZO_ENGINE_TOOLS', ''), os.path.join(_root, 'BozoEngine', 'tools'),
+               os.path.join(_root, 'PS2Recomp', 'tools')):
+    if _tools and os.path.isdir(os.path.join(_tools, 'native_pack')):
+        sys.path.insert(0, _tools)
+        break
 from native_pack import mesh as native_mesh  # noqa: E402
 from native_pack.ps2 import UNPACK_FORMATS, u16, u32, vif_codes, dma_chain, chain_stream, image_offset  # noqa: E402,F401
 from native_pack.ps2 import find_gs_register_blocks  # noqa: E402

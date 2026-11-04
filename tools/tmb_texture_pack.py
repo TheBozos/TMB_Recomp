@@ -15,8 +15,8 @@ What it reads:
   the T8H / T4HL / T4HH textures (pixels at +0x80) and the palettes (entries at +0x10).
 - the font (fontDmaFontData's sources in the ELF: a 128 x 128 T4 raster, a 16-entry CT32 palette).
 
-The pack is the fork's generic texture pack (PS2Recomp/tools/native_pack/texture.py, PS2XTEX1; the runtime's loader
-and decoders are ps2x::native::packs, PS2Recomp/docs/native_packs.md): per file its name (upper case, no directory)
+The pack is BozoEngine's generic texture pack (BozoEngine tools/native_pack/texture.py, PS2XTEX1; the runtime's loader
+and decoders are bozo::render::packs, bozo/render/texture_pack.h): per file its name (upper case, no directory)
 and its records in the order the game sets them up (the runtime's key scheme counts them so), each psm, width, height
 and its texels unpacked; the font as the file "FONT" (its raster, then its palette).
 """
@@ -25,7 +25,13 @@ import struct
 import sys
 import zlib
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'PS2Recomp', 'tools'))
+# native_pack: BozoEngine's tools/ (BOZO_ENGINE_TOOLS, or a BozoEngine checkout beside tools/), else the fork's.
+_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+for _tools in (os.environ.get('BOZO_ENGINE_TOOLS', ''), os.path.join(_root, 'BozoEngine', 'tools'),
+               os.path.join(_root, 'PS2Recomp', 'tools')):
+    if _tools and os.path.isdir(os.path.join(_tools, 'native_pack')):
+        sys.path.insert(0, _tools)
+        break
 from native_pack import texture as native_texture  # noqa: E402
 from native_pack.texture import bits, unpack_texels  # noqa: E402,F401
 from native_pack.ps2 import u32, elf_bytes  # noqa: E402

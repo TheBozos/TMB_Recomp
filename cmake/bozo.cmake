@@ -1,10 +1,13 @@
 # TMB on BozoEngine (phase 4, BozoEngine's docs/phase4-inventory.md): TMB's runtime/ built against BozoEngine instead
-# of the PS2Recomp fork. Milestone M0: headless.
+# of the PS2Recomp fork. Milestone M0: headless; M1: the window (tmb), the packs built from the disc.
 #
 #   cmake -S . -B build/bozo -G Ninja -DTMB_BOZO=ON -DBOZO_ENGINE_DIR=<BozoEngine> -DTMB_ELF=<SCUS_971.01>
-#         [-DBOZO_FFMPEG_ROOT=<kit>/ffmpeg]
+#         -DTMB_ISO=<the disc image> [-DBOZO_FFMPEG_ROOT=<kit>/ffmpeg] [-DTMB_WINDOW=OFF]
 #
 # Targets:
+# - tmb: the game in a window, in real time (SDL3, OpenGL 3.3: BozoEngine's bozo_app; TMB_WINDOW, on by default).
+# - tmb_packs: the texture and mesh packs (tools/tmb_texture_pack.py, tools/tmb_mesh_pack.py on BozoEngine's
+#   tools/native_pack) from the disc image's files, into <build>/packs; the runtime's built-in pack paths point there.
 # - tmb-headless: the game on BozoEngine with no window (the free host: every library native, the disc image read,
 #   BozoEngine's own timing); it reports the frames and the game's state.
 # - tmb-check: BozoEngine's call-log checker (bozo-run, tools/run/README.md) with TMB's overrides running natively:
@@ -17,6 +20,8 @@ set(BOZO_ENGINE_DIR "" CACHE PATH "BozoEngine's source tree")
 set(TMB_ELF "" CACHE FILEPATH "TMB's executable (SCUS_971.01), extracted from the disc")
 set(TMB_GEN_FILES 32 CACHE STRING "How many .cpp files the generated code is split into")
 set(TMB_GEN_OPT "-O1" CACHE STRING "Optimisation of the generated code")
+set(TMB_ISO "" CACHE FILEPATH "TMB's disc image (the packs are built from its files)")
+option(TMB_WINDOW "Build tmb, the game in a window (BozoEngine's bozo_app: SDL3, OpenGL 3.3)" ON)
 if(NOT BOZO_ENGINE_DIR OR NOT EXISTS "${BOZO_ENGINE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "TMB_BOZO: set BOZO_ENGINE_DIR to BozoEngine's source tree")
 endif()
@@ -31,6 +36,7 @@ endif()
 
 # BozoEngine's own TMB generation (its call-log checks) is not wanted here: TMB generates its own.
 set(BOZO_TMB_ELF "" CACHE FILEPATH "" FORCE)
+set(BOZO_APP ${TMB_WINDOW} CACHE BOOL "" FORCE)
 add_subdirectory("${BOZO_ENGINE_DIR}" bozo)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -81,8 +87,41 @@ target_include_directories(tmb_runtime PUBLIC "${CMAKE_SOURCE_DIR}/runtime" ${ge
 target_link_libraries(tmb_runtime PUBLIC bozo_port bozo_render bozo_libs bozo_runtime_core)
 add_dependencies(tmb_runtime tmb_generated)
 target_compile_options(tmb_runtime PRIVATE -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable)
-target_compile_definitions(tmb_runtime PRIVATE TMB_TEXTURE_PACK="${CMAKE_SOURCE_DIR}/generated_us/tmb_textures.pack"
-                                               TMB_MESH_PACK="${CMAKE_SOURCE_DIR}/generated_us/tmb_meshes.pack")
+# The packs: from the disc image's files (only those they read: .TEX, .RTX, .NGP, .PTR), into the build folder. Without
+# TMB_ISO, where the fork's build put them (generated_us/).
+if(TMB_ISO)
+    set(pack_dir "${CMAKE_BINARY_DIR}/packs")
+    set(disc_dir "${CMAKE_BINARY_DIR}/disc")
+    set(native_pack "${BOZO_ENGINE_DIR}/tools/native_pack")
+    file(GLOB native_pack_sources CONFIGURE_DEPENDS "${native_pack}/*.py")
+    add_custom_command(
+        OUTPUT "${disc_dir}/.extracted"
+        COMMAND Python3::Interpreter "${native_pack}/ps2_disc.py" extract "${TMB_ISO}" "${disc_dir}" --ext .TEX,.RTX,.NGP,.PTR
+        COMMAND ${CMAKE_COMMAND} -E touch "${disc_dir}/.extracted"
+        DEPENDS "${TMB_ISO}" "${native_pack}/ps2_disc.py"
+        COMMENT "Reading the packs' files from the disc image")
+    add_custom_command(
+        OUTPUT "${pack_dir}/tmb_textures.pack"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${pack_dir}"
+        COMMAND ${CMAKE_COMMAND} -E env "BOZO_ENGINE_TOOLS=${BOZO_ENGINE_DIR}/tools"
+                "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/tmb_texture_pack.py" "${disc_dir}" "${TMB_ELF}" "${pack_dir}/tmb_textures.pack"
+        DEPENDS "${disc_dir}/.extracted" "${CMAKE_SOURCE_DIR}/tools/tmb_texture_pack.py" ${native_pack_sources} "${TMB_ELF}"
+        COMMENT "Building the texture pack")
+    add_custom_command(
+        OUTPUT "${pack_dir}/tmb_meshes.pack"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${pack_dir}"
+        COMMAND ${CMAKE_COMMAND} -E env "BOZO_ENGINE_TOOLS=${BOZO_ENGINE_DIR}/tools"
+                "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/tmb_mesh_pack.py" "${disc_dir}" "${pack_dir}/tmb_meshes.pack"
+        DEPENDS "${disc_dir}/.extracted" "${CMAKE_SOURCE_DIR}/tools/tmb_mesh_pack.py" ${native_pack_sources}
+        COMMENT "Building the mesh pack")
+    add_custom_target(tmb_packs ALL DEPENDS "${pack_dir}/tmb_textures.pack" "${pack_dir}/tmb_meshes.pack")
+    add_dependencies(tmb_runtime tmb_packs)
+else()
+    message(WARNING "TMB_BOZO: no TMB_ISO, the packs are looked for in generated_us/ (draws untextured without them)")
+    set(pack_dir "${CMAKE_SOURCE_DIR}/generated_us")
+endif()
+target_compile_definitions(tmb_runtime PRIVATE TMB_TEXTURE_PACK="${pack_dir}/tmb_textures.pack"
+                                               TMB_MESH_PACK="${pack_dir}/tmb_meshes.pack")
 
 if(TARGET bozo_run)
     add_executable(tmb-check bozo/tmb_check.cpp)
@@ -98,4 +137,17 @@ target_link_libraries(tmb-headless PRIVATE tmb_runtime tmb_generated bozo_host)
 target_compile_definitions(tmb-headless PRIVATE BOZO_RUN_DEFAULT_ELF="${TMB_ELF}")
 if(MINGW)
     target_link_options(tmb-headless PRIVATE -static -Wl,--stack,268435456)
+endif()
+
+if(TMB_WINDOW)
+    add_executable(tmb bozo/tmb_window.cpp)
+    target_link_libraries(tmb PRIVATE tmb_runtime tmb_generated bozo_host bozo_app)
+    target_compile_definitions(tmb PRIVATE BOZO_RUN_DEFAULT_ELF="${TMB_ELF}")
+    if(WIN32)
+        enable_language(RC)
+        target_sources(tmb PRIVATE "${CMAKE_SOURCE_DIR}/runtime/app/tmb.rc")
+    endif()
+    if(MINGW)
+        target_link_options(tmb PRIVATE -static -Wl,--stack,268435456)
+    endif()
 endif()

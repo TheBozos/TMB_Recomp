@@ -87,6 +87,18 @@ target_include_directories(tmb_runtime PUBLIC "${CMAKE_SOURCE_DIR}/runtime" ${ge
 target_link_libraries(tmb_runtime PUBLIC bozo_port bozo_render bozo_libs bozo_runtime_core)
 add_dependencies(tmb_runtime tmb_generated)
 target_compile_options(tmb_runtime PRIVATE -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable)
+# The draw lists as the reference build (the fork) computed them (the PS2XREF1 `draws` field): it compiled TMB's runtime
+# at -O2 (its RelWithDebInfo flags) and its native renderer library at -O3 (Release), both for AVX2 with FMA, and GCC
+# fuses a * b + c there (-ffp-contract=fast, its default outside ISO mode) where its inlining lets it. The matrices and
+# vertices TMB and the mesh submitter (BozoEngine's render/mesh_draw.cpp, moved from the fork) compute for the draws are
+# those fused results, so the same flags here give the same draws (match1p: every frame; -O3 for the runtime or no FMA:
+# the first difference within ten frames of the match's start). Nothing the game computes depends on them (the
+# generated code and BozoEngine's libraries keep their own flags). A CPU without FMA (before 2013's Haswell, 2011's
+# Bulldozer) cannot run it, as it could not run the fork's.
+set(TMB_RUNTIME_ARCH "-mavx2;-mfma" CACHE STRING "Instruction set flags of TMB's runtime and the renderer (the reference build's)")
+set(TMB_RUNTIME_OPT "-O2" CACHE STRING "Optimisation of TMB's runtime (the reference build's)")
+target_compile_options(tmb_runtime PRIVATE ${TMB_RUNTIME_ARCH} ${TMB_RUNTIME_OPT})
+target_compile_options(bozo_render PRIVATE ${TMB_RUNTIME_ARCH})
 # The packs: from the disc image's files (only those they read: .TEX, .RTX, .NGP, .PTR), into the build folder. Without
 # TMB_ISO, where the fork's build put them (generated_us/).
 if(TMB_ISO)

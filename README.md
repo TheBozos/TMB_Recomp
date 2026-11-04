@@ -34,15 +34,17 @@ You build the game yourself, on your PC, from **your own disc**: nothing of the 
 
 1. Download the release zip from the [Releases](https://github.com/TheBozos/TMB_Recomp/releases) page. Each release
    publishes the zip's SHA-256: check it before running anything
-   (`Get-FileHash .\TMB_Recomp-<version>.zip` in PowerShell, or `certutil -hashfile <zip> SHA256`).
-2. Unzip it anywhere with about 10 GB free (into `D:\Games`, say: the zip holds a `TMB_Recomp` folder), but not in
+   (`Get-FileHash .\TMB_Recomp-<version>.zip` in PowerShell, or `certutil -hashfile <zip> SHA256`). On this branch
+   the release is the build on BozoEngine: `TMB_Recomp-<version>-bozo.zip`, folder `TMB_Recomp_Bozo` (it sits beside
+   the fork build's zip and folder).
+2. Unzip it anywhere with about 5 GB free (into `D:\Games`, say: the zip holds a `TMB_Recomp_Bozo` folder), but not in
    `Program Files` (the launcher writes the game next to itself). Keep its folders together: `TMB Launcher.exe`, `source\` (our code),
    `kit\` (the compiler and tools that build the game), `README.txt` (these steps, English and French), `LICENSES\`.
 3. Double-click **TMB Launcher.exe**. The launcher is not signed, so Windows may say *"Windows protected your PC"*:
    click **More info**, then **Run anyway**.
 4. Click **Select your disc image…** and pick your image of the USA disc (`SCUS-97101`): a `.iso`, or a `.bin` with
    its `.cue`. The launcher checks it at once (the European disc and other games are refused with a message saying so).
-5. Click **Prepare the game**. It takes a few minutes, once (about 3.5 minutes on an 8-core PC); you can stop it and it
+5. Click **Prepare the game**. It takes a few minutes, once (about 3 minutes on a 16-thread PC); you can stop it and it
    continues where it left off next time.
 6. Click **Play**. In the game, **F2** opens the settings (controls, video, cheats). Your memory cards, settings and
    logs are in `%APPDATA%\TMB_Recomp` (the launcher's Maintenance tab opens it).
@@ -203,35 +205,45 @@ from the repository:
 ### One command, from your disc (Windows)
 
 `tools/tmb_build.py` goes from your own disc image to a game folder that runs, with nothing derived from the game
-ever downloaded: it checks the disc (the USA release, SCUS-97101: `SCUS_971.01`'s SHA-1; the European disc and other
-images are refused with a message saying so), extracts it with its own ISO9660 reader (`.iso`, `.bin` / `.cue`; no
-bsdtar), recompiles the game's code and VU1 microcode, converts the textures and models into their packs, recompiles
-the IOP modules straight from the disc's `MOD/*.IRX` (no boot of the game), compiles the runner and stages it.
+ever downloaded. On this branch the game is built on **BozoEngine** (the `BozoEngine` submodule, at the commit TMB
+pins): it checks the disc (the USA release, SCUS-97101: `SCUS_971.01`'s SHA-1; the European disc and other images are
+refused with a message saying so), reads the ELF and the packs' files (`.TEX`, `.RTX`, `.NGP`, `.PTR`) with
+BozoEngine's own ISO9660 reader (`.iso`, `.bin` / `.cue`), configures TMB on BozoEngine (`cmake/bozo.cmake`), builds
+`bozo-recomp`, writes the externals list and recompiles the game, converts the textures and models into their packs,
+compiles `tmb` (SDL3, OpenGL 3.3) and stages it. No IOP step, no `ps2_recomp` or `ps2_vu_aot`.
 
 ```bat
 python tools\tmb_build.py --disc "D:\Games\Twisted Metal - Black (USA).iso" --out D:\TMB
 "D:\TMB\TMB\Play TMB.cmd"
 ```
 
+| Step | What |
+|---|---|
+| `verify` | the disc image or folder: ISO9660, `SYSTEM.CNF`'s boot file, `SCUS_971.01`'s SHA-1 |
+| `extract` | `SCUS_971.01` and the packs' files into `<out>/disc` (217 files, 108 MB); `disc.iso` in the game folder (a hard link to your image on the same drive, else a copy) |
+| `configure` | CMake (Ninja) with `TMB_BOZO=ON`, `TMB_DISC_DIR`, `TMB_GUI_SUBSYSTEM=ON`, `BOZO_BUILD_TOOLS=OFF`; SDL3 and ImGui from the kit's `deps/`, FFmpeg from the kit's `ffmpeg/` |
+| `tools` | `bozo-recomp` and `bozo-externals`, built from BozoEngine's sources |
+| `recompile` | the externals list (the ELF's library symbols, TMB's overrides, `recomp/tmb_stubs.txt`) and `bozo-recomp` → `<out>/build/tmb_gen` |
+| `packs` | `tools/tmb_texture_pack.py`, `tools/tmb_mesh_pack.py` on BozoEngine's `tools/native_pack` → `<out>/build/packs` |
+| `compile` | `tmb` |
+| `stage` | the game folder: `tmb.exe` (static, no DLL), `SCUS_971.01`, the two packs, `disc.iso`, `Play TMB.cmd` |
+
 - Python: the standard library only, so the Windows embeddable Python (`python-3.x-embed-amd64.zip`) runs it; every
   build-time tool it calls is stdlib-only too.
-- Compiler: `--toolchain <dir>` (a folder whose `bin` has `g++`, `gcc`, `cmake`, `ninja` and `pkg-config`), else the
-  PATH, else `C:\msys64\ucrt64` (MSYS2 UCRT64 with the packages below). No bash, MSYS2 shell, bsdtar or rsync.
-- `--tools <dir>`: prebuilt `ps2_recomp` / `ps2_vu_aot` (otherwise built from `PS2Recomp`). `--fetch-cache <dir>`:
-  the libraries CMake fetches (`raylib-src`, `imgui-src`, ... as CMake left them) instead of downloading them with git.
+- Compiler: `--toolchain <dir>` (a folder whose `bin` has `g++`, `gcc`, `cmake`, `ninja`), else the PATH, else
+  `C:\msys64\ucrt64`. `--fetch-cache <dir>`: `sdl3-src` and `imgui-src` instead of CMake's download of the pinned
+  archives. `--engine <dir>`: another BozoEngine tree (development).
 - `--disc` also takes an extracted disc folder; its `.iso` is still needed (in it or a folder above), as the game reads
-  raw sectors from the image.
-- The game ends up in `<out>/TMB`: `ps2EntryRunner.exe`, the DLLs it loads, the two packs, `disc/` (the disc's files),
-  `disc.iso` (a hard link to your image on the same drive, else a copy) and `Play TMB.cmd`.
+  the disc from the image.
 - `--game <dir>` stages the game somewhere else; `--check` only checks the disc (`OK ...`, or `ERROR verify ...` and
-  exit code 1). `--debug-info no` (the default with the build kit: a player's build) compiles the runner without
-  debug information, the same code as RelWithDebInfo: 45 MB instead of 613, and the compile about a third faster.
-- Resumable: a step finished with the same inputs is skipped (`--redo <step>` runs it and the ones after again,
-  `--stop-after <step>` stops there). For a launcher, stdout has one line per event: `PROGRESS <step> <i>/<n>
-  <message>`, `PERCENT <step> <0-100>`, `SKIP <step> <i>/<n>`, `DONE <step> <i>/<n> <seconds>`, `ERROR <step>
-  <message>` (exit code 1), `RESULT <game folder> <launcher>`; each step's full output is in `<out>/logs/`.
-- From an empty folder on a Ryzen 7 7800X3D: about 9 minutes (the compile 5, the recompiler's build and CMake's
-  downloads 1.5 each).
+  exit code 1).
+- Resumable and incremental: a step finished with the same inputs is skipped (`--redo <step>` runs it and the ones
+  after again, `--stop-after <step>` stops there), and within a step CMake and Ninja rebuild only what changed. For a
+  launcher, stdout has one line per event: `PROGRESS <step> <i>/<n> <message>`, `PERCENT <step> <0-100>`, `SKIP <step>
+  <i>/<n>`, `DONE <step> <i>/<n> <seconds>`, `ERROR <step> <message>` (exit code 1), `RESULT <game folder>
+  <launcher>`; each step's full output is in `<out>/logs/`.
+- From an empty folder with the kit on a Ryzen 7 7800X3D: about 2.5 minutes (configure 1, SDL3's checks most of it;
+  packs 0.5; compile 1). The work folder is about 0.5 GB, the game folder 230 MB plus the disc image.
 
 ### The build kit: nothing installed (Windows)
 
@@ -240,65 +252,65 @@ python tools\tmb_build.py --disc "D:\Games\Twisted Metal - Black (USA).iso" --ou
 
 ```bat
 python tools\make_build_kit.py --out D:\tmb_kit\kit --zip D:\tmb_kit\tmb_build_kit.zip
-rem on the player's PC: TMB_Recomp\ (this repository's files) and kit\ side by side
+rem on the player's PC: TMB_Recomp\ (this repository's files, BozoEngine\ included) and kit\ side by side
 kit\python\python.exe -I TMB_Recomp\tools\tmb_build.py --disc "D:\Games\Twisted Metal - Black (USA).iso" --out D:\TMB
 ```
 
 | Kit folder | Contents |
 |---|---|
 | `ucrt64/` | MSYS2 UCRT64's GCC 16.2, binutils, mingw-w64 headers and CRT, winpthreads, CMake 4.4, Ninja 1.13: the packages' files minus documentation, translations, GCC plugin headers, `lto1`, gcov, the prefixed duplicates, binutils' libraries, old / Store / API-set import libraries; plus the DLLs those programs load (CMake's curl, OpenSSL...) |
-| `ffmpeg/` | FFmpeg 9.0.2 (ffmpeg.org tarball, SHA-256 and release signature checked), LGPL, static: `--disable-everything` plus the `mpeg2video` decoder and `mpegvideo` parser; avcodec, swscale, avutil only (5 MB), built with the kit's GCC |
-| `deps/` | the FetchContent sources at the pinned tags (raylib, imgui, rlImGui, ELFIO, toml11, fmt, libdwarf, rabbitizer), without `.git` |
-| `tools/` | `ps2_recomp.exe`, `ps2_vu_aot.exe` built with the kit, static |
+| `ffmpeg/` | FFmpeg 9.0.2 (ffmpeg.org tarball, SHA-256 and release signature checked), LGPL, static: `--disable-everything` plus the `mpeg2video` decoder and `mpegvideo` parser; avcodec and avutil only (3 MB; BozoEngine's libmpeg needs no swscale), built with the kit's GCC |
+| `deps/` | `sdl3-src` (SDL 3.4.20) and `imgui-src` (Dear ImGui v1.92.7-docking, `b1bcb12a`): the release archives BozoEngine's CMake pins, the same SHA-256, unpacked without their tests, examples and IDE projects |
 | `python/` | the Windows embeddable Python 3.14 (python.org, SHA-256 pinned) |
-| `sources/`, `licenses/`, `kit_manifest.json` | FFmpeg's source tarball; each component's license files; versions, origins, hashes, licenses, sizes |
+| `sources/`, `licenses/`, `kit_manifest.json` | FFmpeg's source tarball; each component's license files (`licenses/deps/sdl3`: zlib, `licenses/deps/imgui`: MIT); versions, origins, hashes, licenses, sizes |
 
 - `tmb_build.py` uses the kit when it sits in `TMB_Recomp\kit` or next to the `TMB_Recomp` folder (or `--kit <dir>`;
-  `--no-kit` ignores it): the kit's compiler, recompilers and sources, FFmpeg through `PS2X_FFMPEG_ROOT` (no
-  pkg-config) and `PS2X_ENABLE_PARALLEL_GS=OFF` (paraLLEl-GS, a GS-emulation diagnostic the native port does not use).
-  The game folder then holds the runner and three DLLs (libstdc++, libgcc, winpthread) instead of 81.
-- Size: 468 MB unpacked, 142 MB as a zip; assembled in about 2.5 minutes. From an empty folder with the kit and a
-  PATH of only the Windows folders: 4 minutes to the game folder (compile 3.4), no recompiler build, no downloads.
+  `--no-kit` ignores it): the kit's compiler, `deps/` (`FETCHCONTENT_SOURCE_DIR_SDL3` / `_IMGUI`, fully disconnected)
+  and FFmpeg (`BOZO_FFMPEG_ROOT`, no pkg-config). BozoEngine's sources come with TMB's (the submodule; in a release,
+  `source\BozoEngine`), and its recompiler is built with the game: the kit has no prebuilt tools.
+- Size: 441 MB unpacked; assembled in under 2 minutes.
 - The kit is build output, never committed. GCC, binutils and the other MSYS2 binaries are redistributed unmodified:
   a release ships their sources alongside (`make_release.py --with-sources`: MSYS2's source packages of the versions
   in the manifest) and lists them in `LICENSES\SOURCES.txt`.
 
 ### The launcher (Windows)
 
-`launcher/` is `TMB Launcher.exe`, what a player double-clicks: its own small CMake project (raylib, Dear ImGui and
-rlImGui at the fork's tags, linked static: a 4 MB GUI exe that loads only Windows' DLLs).
+`launcher/` is `TMB Launcher.exe`, what a player double-clicks: its own small CMake project (SDL3 and Dear ImGui at the
+releases BozoEngine pins, ImGui's own SDL3 and OpenGL 3 backends, BozoEngine's PNG writer; linked static: a 6 MB GUI
+exe that loads only Windows' DLLs). Mouse and keyboard only.
 
 ```bat
 cmake -S launcher -B build\launcher -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build\launcher
-rem offline, with the kit: -DFETCHCONTENT_SOURCE_DIR_RAYLIB=<kit>\deps\raylib-src (IMGUI, RLIMGUI likewise)
+rem offline, with the kit: -DFETCHCONTENT_SOURCE_DIR_SDL3=<kit>\deps\sdl3-src -DFETCHCONTENT_SOURCE_DIR_IMGUI=<kit>\deps\imgui-src
 rem                        -DLAUNCHER_FONT_DIR=<folder with Exo2[wght].ttf and OFL.txt>
 ```
 
-- It expects the release folder: `TMB Launcher.exe`, `source\` (this repository without `.git`), `kit\` (the build
-  kit); it makes `build\` (tmb_build's work folder) and `game\` (the game: `ps2EntryRunner.exe`, `disc\`, `disc.iso`,
-  the packs). `--release <dir>` points it elsewhere.
+- It expects the release folder: `TMB Launcher.exe`, `source\` (this repository without `.git`, BozoEngine in
+  `source\BozoEngine`), `kit\` (the build kit); it makes `build\` (tmb_build's work folder) and `game\` (the game:
+  `tmb.exe`, `SCUS_971.01`, `disc.iso`, the packs). `--release <dir>` points it elsewhere.
 - Disc check: `kit\python\python.exe -I -X utf8 source\tools\tmb_build.py --check --disc <image>`; build: the same
   with `--disc <image> --out build --game game`, in a job object with no console window (Stop ends the whole tree;
   tmb_build resumes). Its PROGRESS / PERCENT / SKIP / DONE / ERROR / RESULT lines drive the step list, the progress
   bar and the time estimate; an error shows tmb_build's message, the step's log and "Copy details".
-- Play starts `game\ps2EntryRunner.exe game\disc\SCUS_971.01` with nothing set (the runner's defaults), hides the
-  launcher until the game exits, then offers the crash report if one appeared in the user folder.
-- Settings: the window mode and size written to the user folder's `video.ini` in the runner's own format; launcher.ini
+- Play starts `game\tmb.exe --elf game\SCUS_971.01 --iso game\disc.iso`, hides the launcher until the game exits, then
+  offers the crash report if one appeared in the user folder.
+- Settings: the window mode and size written to the user folder's `video.ini` in the game's own format; launcher.ini
   (disc, language, background motion, build state) sits next to it. English and French.
 - The look is the team's, from RecompWatcher: the PS2 BIOS's radial blue, glowing boot towers (motion can be turned
   off), glass cards, Exo 2 (SIL OFL 1.1, google/fonts at a pinned commit, embedded with its licence; downloaded at
-  configure time, never committed). The icon is TMB's variant of The Bozos' logo, the clown with its head on fire (`launcher/tmb.ico`; the game's window uses the same, `runtime/app/tmb.ico`; drawn by `docs/branding/make_logo.py`). No game art.
+  configure time, never committed), all drawn with ImGui's draw lists (`launcher/src/ui.cpp`; the window and its
+  backends: `launcher/src/window.cpp`). The icon is TMB's variant of The Bozos' logo, the clown with its head on fire (`launcher/tmb.ico`; the game's window uses the same, `runtime/app/tmb.ico`; drawn by `docs/branding/make_logo.py`). No game art.
 - Updates: at start (Settings: "Check for updates at start") and from Maintenance's "Check for updates", one HTTPS
   GET of `api.github.com/repos/TheBozos/TMB_Recomp/releases/latest` through WinHTTP; a newer `tag_name` shows
   "Version X is available" with a link to its release page (built from the tag). Offline or no release: silent. Update
-  downloads `releases/download/<tag>/TMB_Recomp-<version>.zip` and its `.sha256` (addresses built from the tag, not read
-  from the API's answer) into `update\`, then runs `source\tools\apply_update.py` with the kit's Python: it checks the
-  SHA-256 and every name in the zip (one `TMB_Recomp\` folder, no `..`, nothing under `build\` or `game\`, the version
-  asked for), unpacks it whole to `update\staging`, then moves the files over the release; a file in use (the launcher
-  itself) is renamed `*.tmb-old` first and deleted at the next start. The launcher then starts its new exe. When
-  `source\release.ini`'s commit differs from the one in `game\built_from.ini` (written by tmb_build), the Play tab
-  offers "Rebuild now".
+  downloads `releases/download/<tag>/TMB_Recomp-<version>-bozo.zip` and its `.sha256` (addresses built from the tag,
+  not read from the API's answer) into `update\`, then runs `source\tools\apply_update.py` with the kit's Python: it
+  checks the SHA-256 and every name in the zip (one `TMB_Recomp_Bozo\` folder, no `..`, nothing under `build\` or
+  `game\`, the version asked for), unpacks it whole to `update\staging`, then moves the files over the release; a file
+  in use (the launcher itself) is renamed `*.tmb-old` first and deleted at the next start. The launcher then starts its
+  new exe. When `source\release.ini`'s commit differs from the one in `game\built_from.ini` (written by tmb_build), the
+  Play tab offers "Rebuild now".
 - `--selftest <iso> --shots <dir> [--wrong <image>] [--error-demo] [--cancel] [--play-seconds s] [--crash-seconds s]`:
   the whole flow unattended, a screenshot of each screen and `selftest.log` (with `PS2X_USER_DIR` set, the real user
   folder is untouched). `--screens`: the tabs' screenshots only; `--ui-scale <x>`: another DPI scale; `--update-url
@@ -317,9 +329,9 @@ python tools\make_release.py --out D:\tmb_release --kit D:\tmb_kit\kit --with-so
 
 | Output (in `--out`) | Contents |
 |---|---|
-| `TMB_Recomp-<version>.zip` | `TMB_Recomp\` (the same folder name each release, so a new one unzips over the last): `TMB Launcher.exe` (built with the kit, the version and commit in it), `source\` (`git archive` of the commit and of PS2Recomp at its recorded commit, `release.ini`, `release_files.txt`), `kit\`, `README.txt` (players, English and French), `CHANGELOG.md`, `LICENSES\` (every component's licence: TMB_Recomp's code MIT, PS2Recomp GPL-3.0, the kit's components; `SOURCES.txt`) |
+| `TMB_Recomp-<version>-bozo.zip` | `TMB_Recomp_Bozo\` (the same folder name each release, so a new one unzips over the last; not the fork build's `TMB_Recomp\`, so both can sit side by side): `TMB Launcher.exe` (built with the kit, the version and commit in it), `source\` (`git archive` of the commit and of BozoEngine at its recorded commit without its `reference/` records, `release.ini`, `release_files.txt`), `kit\`, `README.txt` (players, English and French), `CHANGELOG.md`, `LICENSES\` (every component's licence: TMB_Recomp's code and BozoEngine MIT, the kit's components, SDL3 and ImGui; `SOURCES.txt`) |
 | `<zip>.sha256` | `sha256sum` format; the release page quotes it |
-| `TMB_Recomp-<version>-sources.zip` | `--with-sources`: the MSYS2 source packages of every package the kit holds files of (repo.msys2.org only) and FFmpeg's tarball: the GPL / LGPL corresponding source, attached to the same release |
+| `TMB_Recomp-<version>-bozo-sources.zip` | `--with-sources`: the MSYS2 source packages of every package the kit holds files of (repo.msys2.org only) and FFmpeg's tarball: the GPL / LGPL corresponding source, attached to the same release |
 | `RELEASE_NOTES.md` | the release's body: CHANGELOG.md's section for the version ("What's new"), the download steps, hashes, sizes, versions, the source offer |
 
 - The version is the commit's tag (`v0.1.0` → `0.1.0`) or `--version`; `x.y.z-pre` makes a pre-release.
@@ -331,8 +343,8 @@ python tools\make_release.py --out D:\tmb_release --kit D:\tmb_kit\kit --with-so
   `--out` (the workflow checks the zip in between).
 - Nothing of the game: the export and the release folder are audited (no ELF, IRX, ISO volume, disc file names,
   `generated/` / `game/` / `disc/` / `build/` folders) and the zip's names again; the script stops on any.
-- The kit's prebuilt recompilers must be the fork's at the commit (`kit_manifest.json` `tools.fork_commit`): when they
-  are not, the release's copy of the kit gets them rebuilt (the original kit stays as it is).
+- The kit must be a BozoEngine kit (`kit_manifest.json` `engine`, kit_version 2) whose pins (FFmpeg, Python, the SDL3
+  and ImGui archives, the MSYS2 packages) are the commit's.
 - `--publish` creates a **draft** GitHub release with `gh` (the zips, their `.sha256`, the notes); `--dry-run` prints
   the command. It never pushes: the commit has to be on GitHub first, and the owner publishes the draft.
 - Before each release: `docs/RELEASE_CHECKLIST.md` on a clean Windows.
@@ -340,7 +352,9 @@ python tools\make_release.py --out D:\tmb_release --kit D:\tmb_kit\kit --with-so
 ### Making a release
 
 Releases are built by GitHub Actions (`.github/workflows/release.yml`), and only when the owner asks: on a pushed
-version tag, or a manual run with a tag. Nothing runs on ordinary pushes or pull requests.
+version tag, or a manual run with a tag. Nothing runs on ordinary pushes or pull requests. A manual run without a tag
+(`gh workflow run release.yml --ref <branch>`) is a test build of that branch: version `0.0.0-test.<run>`, the same
+kit, zip and checks, no sources zip and no draft; the zips are the run's artifacts.
 
 1. Move the entries under `## [Unreleased]` in `CHANGELOG.md` to a new `## [0.1.0] - <date>` section (players first,
    plain words; Added / Changed / Fixed), update the links at the bottom, and commit. Push the branch.

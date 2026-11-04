@@ -1,43 +1,43 @@
 #!/usr/bin/env python3
 """tmb_build: from the player's own Twisted Metal: Black disc (USA, SCUS-97101) to a game folder that runs, in one
 command. Nothing derived from the game is distributed: the disc's files, the generated code, the packs and the
-executable are all made here, on the player's PC.
+executable are all made here, on the player's PC. The game is built on BozoEngine (the BozoEngine submodule, at the
+commit this code pins; --engine <dir> for another tree).
 
   python tools/tmb_build.py --disc "Twisted Metal - Black (USA).iso" --out D:/TMB
   python tools/tmb_build.py --disc D:/TMB_Recomp/game_us --out D:/TMB          (an extracted disc folder)
 
 Steps (each skipped when an earlier run finished it with the same inputs; --redo <step> runs it and the ones after
-again):
+again; within a step CMake and Ninja rebuild only what changed):
   verify     the disc image or folder: ISO9660 (.iso, .bin/.cue), SYSTEM.CNF's boot file, SCUS_971.01's SHA-1
-  extract    the disc's files into <out>/TMB/disc (the runtime's cdrom0:), no outside tool (PS2Recomp/tools/ps2_disc.py),
-             and the image itself as <out>/TMB/disc.iso (the game reads raw sectors too): a hard link to the .iso on
-             the same drive, else a copy (a .bin / .cue converted)
-  tools      ps2_recomp and ps2_vu_aot: --tools <dir> (prebuilt), or built from PS2Recomp with the toolchain
-  recompile  ps2_recomp (recomp/tmb_scus97101.toml) and ps2_vu_aot (VU1 microcode) -> <out>/generated
-  packs      the texture and mesh packs (tools/tmb_texture_pack.py, tools/tmb_mesh_pack.py) -> <out>/generated
-  iop        the IOP modules loaded offline from the disc at their bases (recomp/tmb_iop_modules.json,
-             PS2Recomp/tools/irx_load.py) and recompiled (PS2Recomp/tools/iop_recomp.py) -> <out>/generated/iop
-  configure  cmake (Ninja) of the runner with the generated code
-  compile    the runner (ps2EntryRunner)
-  stage      <out>/TMB: the executable, the DLLs it loads from the toolchain, the packs, "Play TMB.cmd"
+  extract    the files the build reads into <out>/disc: SCUS_971.01 and the packs' files (.TEX, .RTX, .NGP, .PTR), no
+             outside tool (BozoEngine's tools/native_pack/ps2_disc.py); and the image itself as <game>/disc.iso (the
+             game reads the disc from it): a hard link to the .iso on the same drive, else a copy (a .bin / .cue
+             converted)
+  configure  cmake (Ninja) of TMB on BozoEngine (TMB_BOZO, cmake/bozo.cmake): SDL3 and Dear ImGui from the kit's
+             deps/, FFmpeg from the kit's ffmpeg/
+  tools      BozoEngine's recompiler and externals writer (bozo-recomp, bozo-externals), built from its sources
+  recompile  the externals list (the ELF's library symbols, TMB's overrides, recomp/tmb_stubs.txt) and bozo-recomp
+             -> <out>/build/tmb_gen
+  packs      the texture and mesh packs (tools/tmb_texture_pack.py, tools/tmb_mesh_pack.py on BozoEngine's
+             tools/native_pack) -> <out>/build/packs
+  compile    the game (tmb: SDL3, OpenGL 3.3)
+  stage      <game>: tmb.exe, SCUS_971.01, the packs, disc.iso, "Play TMB.cmd"
 
 The build kit (tools/make_build_kit.py): a folder with kit_manifest.json, the compiler (ucrt64/), a minimal static
-FFmpeg (ffmpeg/), the libraries' sources (deps/), the prebuilt recompilers (tools/) and an embeddable Python. Used
-when it sits in <TMB_Recomp>/kit or next to the TMB_Recomp folder (<parent>/kit), or with --kit <dir> (--no-kit: not
-used). With it nothing else is needed (no MSYS2, git, network or installed Python), and the runner is the player's
-build: FFmpeg from the kit (no pkg-config, no FFmpeg DLLs: the game folder gets the exe and the three GCC runtime
-DLLs), paraLLEl-GS left out (PS2X_ENABLE_PARALLEL_GS=OFF, a GS-emulation diagnostic the native port never uses).
+FFmpeg (ffmpeg/), the libraries' sources (deps/: SDL3, Dear ImGui) and an embeddable Python. Used when it sits in
+<TMB_Recomp>/kit or next to the TMB_Recomp folder (<parent>/kit), or with --kit <dir> (--no-kit: not used). With it
+nothing else is needed (no MSYS2, git, network or installed Python), and the game is the player's build: statically
+linked (no DLL), FFmpeg from the kit.
   kit/python/python.exe -I tools/tmb_build.py --disc "Twisted Metal - Black (USA).iso" --out D:/TMB
 
-Without a kit: --toolchain <dir> (a folder whose bin/ has g++, cmake, ninja, pkg-config: an MSYS2 UCRT64 prefix such
-as C:/msys64/ucrt64), else the PATH, else C:/msys64/ucrt64; FFmpeg through pkg-config; FetchContent's sources from the
-network (git) unless --fetch-cache <dir> holds <name>-src folders. --toolchain, --tools and --fetch-cache also
+Without a kit: --toolchain <dir> (a folder whose bin/ has g++, cmake, ninja: an MSYS2 UCRT64 prefix such as
+C:/msys64/ucrt64), else the PATH, else C:/msys64/ucrt64; FFmpeg through pkg-config; SDL3 and ImGui downloaded by CMake
+(pinned URLs and SHA-256) unless --fetch-cache <dir> holds sdl3-src and imgui-src. --toolchain and --fetch-cache also
 override the kit's.
 
-A player's build (the default with the kit, --debug-info no): the runner without debug information, the same code as
-RelWithDebInfo (its -O2 flags without -g; GCC's -g never changes the code), stripped again when staged: 45 MB instead
-of 613. --game <dir> stages the game somewhere else than <out>/TMB (the launcher: <release>/game). --check only checks
-the disc (no work folder): OK <message>, or ERROR verify <message> and exit code 1.
+--game <dir> stages the game somewhere else than <out>/TMB (the launcher: <release>/game). --check only checks the disc
+(no work folder): OK <message>, or ERROR verify <message> and exit code 1.
 Every successful run writes <game>/built_from.ini: the release stamp (<TMB_Recomp>/release.ini, from
 tools/make_release.py) of the code the game was built from; the launcher offers Rebuild when the source's differs.
 
@@ -52,7 +52,6 @@ Output for a launcher, one line each on stdout (everything else goes to <out>/lo
 Standard library only (Python 3.8+): runs on a bundled Windows embeddable Python.
 """
 import argparse
-import filecmp
 import hashlib
 import json
 import os
@@ -64,9 +63,8 @@ import sys
 import time
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-sys.path.insert(0, os.path.join(ROOT, 'PS2Recomp', 'tools'))
-import ps2_disc  # noqa: E402
-import irx_load  # noqa: E402
+ENGINE = os.path.join(ROOT, 'BozoEngine')  # --engine replaces it
+ps2_disc = None  # BozoEngine's tools/native_pack/ps2_disc.py, imported by load_engine()
 
 ELF_NAME = 'SCUS_971.01'
 ELF_SHA1 = '3ff17f4897552e355d0bb8c3abfa5125fe3ff2ef'
@@ -74,11 +72,12 @@ OTHER_RELEASES = {
     'SCES_503.60': 'the European release (SCES-50360)',
     'SCUS_971.01': 'the USA release',
 }
-STEPS = ['verify', 'extract', 'tools', 'recompile', 'packs', 'iop', 'configure', 'compile', 'stage']
-FETCH_NAMES = ['raylib', 'imgui', 'rlimgui', 'parallel_gs', 'granite',
-               'elfio', 'toml11', 'fmt', 'libdwarf', 'rabbitizer', 'nlohmann_json']
-LAUNCH_ENV = [('TMB_NATIVE', '1'), ('PS2X_SPU2_WALLCLOCK', '1'), ('PS2X_IOP_WALLCLOCK', '1'),
-              ('PS2X_GS_RENDERER', 'native'), ('PS2X_IOP_NATIVE', '1')]
+# The disc's files the packs read (cmake/bozo.cmake's own extraction takes the same).
+PACK_EXTS = ('.TEX', '.RTX', '.NGP', '.PTR')
+STEPS = ['verify', 'extract', 'configure', 'tools', 'recompile', 'packs', 'compile', 'stage']
+# FetchContent sources (BozoEngine's runtime/CMakeLists.txt): <name>-src in the kit's deps/.
+FETCH_NAMES = ['sdl3', 'imgui']
+GAME_EXE = 'tmb'
 EXE = '.exe' if os.name == 'nt' else ''
 KIT_MANIFEST = 'kit_manifest.json'
 
@@ -89,6 +88,20 @@ class BuildError(Exception):
 
 def emit(*parts):
     print(' '.join(str(p) for p in parts), flush=True)
+
+
+def load_engine(path=None):
+    """BozoEngine's tree (--engine, else the submodule) and its disc reader."""
+    global ENGINE, ps2_disc
+    if path:
+        ENGINE = os.path.abspath(path)
+    tools = os.path.join(ENGINE, 'tools', 'native_pack')
+    if not os.path.isfile(os.path.join(tools, 'ps2_disc.py')):
+        raise SystemExit('ERROR verify BozoEngine is missing (%s): the release is incomplete, or in a git checkout run '
+                         '"git submodule update --init BozoEngine"' % ENGINE)
+    sys.path.insert(0, tools)
+    import ps2_disc as module  # noqa: E402
+    ps2_disc = module
 
 
 def sha1_file(path):
@@ -125,36 +138,12 @@ def tree_stamp(folder, exts=None):
     return fingerprint(out)
 
 
-def sync_tree(src, dst):
-    """Copies src over dst comparing contents (like rsync -c --delete): unchanged files keep their mtime, so ninja
-    only rebuilds what changed. Returns the number of files written."""
-    changed = 0
-    wanted = set()
-    for dirpath, _dirs, files in os.walk(src):
-        rel = os.path.relpath(dirpath, src)
-        out_dir = os.path.normpath(os.path.join(dst, rel))
-        os.makedirs(out_dir, exist_ok=True)
-        wanted.add(os.path.normcase(out_dir))
-        for name in files:
-            s, d = os.path.join(dirpath, name), os.path.join(out_dir, name)
-            wanted.add(os.path.normcase(d))
-            if os.path.exists(d) and filecmp.cmp(s, d, shallow=False):
-                continue
-            shutil.copyfile(s, d)
-            changed += 1
-    for dirpath, dirs, files in os.walk(dst, topdown=False):
-        for name in files:
-            p = os.path.join(dirpath, name)
-            if os.path.normcase(p) not in wanted:
-                os.remove(p)
-        if os.path.normcase(os.path.normpath(dirpath)) not in wanted and not os.listdir(dirpath):
-            os.rmdir(dirpath)
-    return changed
+SOURCE_EXTS = ('.cpp', '.h', '.hpp', '.inl', '.c', '.txt', '.cmake', '.rc', '.ico', '.manifest', '.py')
 
 
-# ---- PE imports (the DLLs the runner needs, found in the toolchain's bin) ----
+# ---- PE imports (the DLLs the game needs, found in the toolchain's bin) ----
 
-# windres (the runner's icon, version and UTF-8 manifest resources) runs its preprocessor through popen, that is
+# windres (the game's icon, version and UTF-8 manifest resources) runs its preprocessor through popen, that is
 # cmd /c: by default as "<its own folder>\gcc" -E ... "<the .rc>". With a space in the toolchain's path (C:\Users\Jean
 # Dupont\..., D:\Games\TMB Recomp\kit) and a second quoted argument, cmd strips the outer quotes and runs
 # "D:\Games\TMB" ("preprocessing failed"). The bare name, found on the PATH tmb_build puts the toolchain first on, has no
@@ -234,8 +223,7 @@ class Build:
         self.args = args
         self.out = os.path.abspath(args.out)
         self.game = os.path.abspath(args.game) if args.game else os.path.join(self.out, 'TMB')
-        self.disc_dir = os.path.join(self.game, 'disc')
-        self.gen = os.path.join(self.out, 'generated')
+        self.disc_dir = os.path.join(self.out, 'disc')
         self.cmake_build = os.path.join(self.out, 'build')
         self.logs = os.path.join(self.out, 'logs')
         self.state_path = os.path.join(self.out, 'tmb_build_state.json')
@@ -245,6 +233,9 @@ class Build:
                 self.state = json.load(f)
         except (OSError, ValueError):
             self.state = {}
+        if self.state.get('engine') != 'bozo':
+            # A work folder of the fork's build (generated/, its CMake cache): its step records mean nothing here.
+            self.state = {'engine': 'bozo'}
         self.toolchain_bin = None
         self.env = dict(os.environ)
         self.step = None
@@ -253,10 +244,9 @@ class Build:
         if self.kit:
             # The kit's parts unless the command line names others.
             args.toolchain = args.toolchain or os.path.join(self.kit, 'ucrt64')
-            args.tools = args.tools or os.path.join(self.kit, 'tools')
             args.fetch_cache = args.fetch_cache or os.path.join(self.kit, 'deps')
             self.ffmpeg_root = os.path.join(self.kit, 'ffmpeg')
-        if args.debug_info is None:  # a player's build (the kit): no debug information, a 613 MB runner otherwise
+        if args.debug_info is None:  # a player's build (the kit): no debug information
             args.debug_info = 'no' if self.kit else 'yes'
 
     def save_state(self):
@@ -297,8 +287,9 @@ class Build:
             raise BuildError('%s failed (exit %d); the full output is in %s'
                              % (os.path.basename(cmd[0]), code, self.log_path()))
 
-    def py(self, script, *argv, **kw):
-        self.run([sys.executable, '-I', script] + list(argv), **kw)
+    def cmake_build_targets(self, *targets, percent=None):
+        self.run([self.tool('cmake'), '--build', self.cmake_build, '--target'] + list(targets) +
+                 ['-j', str(self.args.jobs)], percent=percent)
 
     # -- inputs
 
@@ -336,38 +327,41 @@ class Build:
             raise BuildError('%s does not exist' % src)
         return src
 
+    def elf(self):
+        return os.path.join(self.disc_dir, ELF_NAME)
+
     # -- steps
 
     def key(self, step):
         """What a step's result depends on (its inputs and the earlier steps' keys)."""
         a = self.args
+        prev = lambda s: self.state.get(s, {}).get('key')  # noqa: E731
         if step == 'verify':
             return fingerprint(file_stamp(self.disc_input()))
         if step == 'extract':
-            return fingerprint(self.state.get('verify', {}).get('key'))
-        if step == 'tools':
-            return fingerprint(os.path.abspath(a.tools) if a.tools else tree_stamp(
-                os.path.join(ROOT, 'PS2Recomp'), ('.cpp', '.h', '.hpp', '.txt', '.cmake')))
-        if step == 'recompile':
-            return fingerprint(self.state.get('extract', {}).get('key'), self.state.get('tools', {}).get('key'),
-                               file_stamp(os.path.join(ROOT, 'recomp', 'tmb_scus97101.toml')))
-        if step == 'packs':
-            return fingerprint(self.state.get('extract', {}).get('key'),
-                               [file_stamp(os.path.join(ROOT, 'tools', t)) for t in ('tmb_texture_pack.py', 'tmb_mesh_pack.py')],
-                               tree_stamp(os.path.join(ROOT, 'PS2Recomp', 'tools', 'native_pack'), ('.py',)))
-        if step == 'iop':
-            return fingerprint(self.state.get('extract', {}).get('key'),
-                               file_stamp(os.path.join(ROOT, 'recomp', 'tmb_iop_modules.json')),
-                               [file_stamp(os.path.join(ROOT, 'PS2Recomp', 'tools', t)) for t in ('irx_load.py', 'iop_recomp.py')])
+            return fingerprint(prev('verify'), PACK_EXTS, self.game)
         if step == 'configure':
             return fingerprint(self.find_toolchain(), a.build_type, a.debug_info, a.fetch_cache, self.ffmpeg_root,
-                               cmake_rc_flags(), [self.state.get(s, {}).get('key') for s in ('recompile', 'packs', 'iop')])
+                               cmake_rc_flags(), ROOT, ENGINE, sys.executable, prev('extract'),
+                               [file_stamp(os.path.join(ROOT, p)) for p in ('CMakeLists.txt', 'cmake/bozo.cmake')])
+        if step == 'tools':
+            return fingerprint(prev('configure'), tree_stamp(os.path.join(ENGINE, 'recompiler'), SOURCE_EXTS),
+                               tree_stamp(os.path.join(ENGINE, 'tools', 'externals'), SOURCE_EXTS))
+        if step == 'recompile':
+            return fingerprint(prev('tools'), tree_stamp(os.path.join(ROOT, 'runtime'), ('.cpp',)),
+                               file_stamp(os.path.join(ROOT, 'recomp', 'tmb_stubs.txt')),
+                               file_stamp(os.path.join(ROOT, 'tools', 'tmb_overrides_list.py')))
+        if step == 'packs':
+            return fingerprint(prev('configure'),
+                               [file_stamp(os.path.join(ROOT, 'tools', t)) for t in ('tmb_texture_pack.py', 'tmb_mesh_pack.py')],
+                               tree_stamp(os.path.join(ENGINE, 'tools', 'native_pack'), ('.py',)))
         if step == 'compile':
-            return fingerprint(self.state.get('configure', {}).get('key'),
-                               tree_stamp(os.path.join(ROOT, 'runtime')),
-                               tree_stamp(os.path.join(ROOT, 'PS2Recomp'), ('.cpp', '.h', '.hpp', '.inl', '.txt', '.cmake')))
+            return fingerprint(prev('recompile'), prev('packs'),
+                               tree_stamp(os.path.join(ROOT, 'runtime'), SOURCE_EXTS),
+                               tree_stamp(os.path.join(ROOT, 'bozo'), SOURCE_EXTS),
+                               tree_stamp(os.path.join(ENGINE, 'runtime'), SOURCE_EXTS))
         if step == 'stage':
-            return fingerprint(self.state.get('compile', {}).get('key'), self.game)
+            return fingerprint(prev('compile'), self.game)
         raise AssertionError(step)
 
     def step_verify(self):
@@ -414,12 +408,18 @@ class Build:
         if os.path.isdir(src):
             image = self.find_folder_image(src)
             if not image:
-                raise BuildError('the game reads the disc image itself as well as its files: no .iso of the USA disc '
-                                 'in %s or the folders above it. Pass the .iso (--disc <image>) instead.' % src)
+                raise BuildError('the game reads the disc image itself: no .iso of the USA disc in %s or the folders '
+                                 'above it. Pass the .iso (--disc <image>) instead.' % src)
         os.makedirs(self.game, exist_ok=True)
+        marker = os.path.join(self.disc_dir, '.extracted')
+        if os.path.exists(marker):
+            os.remove(marker)
         self.extract_files(src)
-        if sha1_file(os.path.join(self.disc_dir, ELF_NAME)) != ELF_SHA1:
+        if sha1_file(self.elf()) != ELF_SHA1:
             raise BuildError("the extracted %s differs from the disc's (disk error?)" % ELF_NAME)
+        # The packs' inputs are ready (cmake/bozo.cmake's TMB_DISC_DIR: the packs depend on this file).
+        with open(marker, 'w') as f:
+            f.write('extracted by tools/tmb_build.py\n')
         self.place_image(image)
 
     def find_folder_image(self, folder):
@@ -446,10 +446,9 @@ class Build:
         return None
 
     def place_image(self, src):
-        """The game also reads raw sectors (sceCdRead by LBN: the volume descriptor, the directories, then its data
-        files), which the extracted files cannot serve: the runtime reads them from a 2048-byte-sector image of the
-        disc, <game>/disc.iso (TMB_ISO; the runtime also finds it walking up from the ELF's folder). A hard link to the
-        player's .iso when it is on the same drive, else a copy; a .bin / .cue is converted."""
+        """The game reads the disc from a 2048-byte-sector image of it, <game>/disc.iso (tmb.exe --iso; it also finds
+        it walking up from the ELF's folder). A hard link to the player's .iso when it is on the same drive, else a
+        copy; a .bin / .cue is converted."""
         dest = os.path.join(self.game, 'disc.iso')
         disc = ps2_disc.Disc(src)
         try:
@@ -466,9 +465,9 @@ class Build:
                 except OSError:
                     pass
             free = shutil.disk_usage(self.game).free
-            if free < total * 2048 + (6 << 30):
+            if free < total * 2048 + (2 << 30):
                 raise BuildError('not enough free space on %s for the disc image: %.1f GB free, about %.1f GB needed'
-                                 % (self.game, free / 2**30, (total * 2048 + (6 << 30)) / 2**30))
+                                 % (self.game, free / 2**30, (total * 2048 + (2 << 30)) / 2**30))
             tmp = dest + '.part'
             with open(tmp, 'wb') as f:
                 lba = 0
@@ -481,17 +480,21 @@ class Build:
         finally:
             disc.close()
 
+    @staticmethod
+    def wanted(rel):
+        rel = rel.replace('\\', '/')
+        return rel.upper() == ELF_NAME or rel.upper().endswith(PACK_EXTS)
+
     def extract_files(self, src):
+        """Only what the build reads: the ELF and the packs' files (resumable: finished files stay)."""
         os.makedirs(self.disc_dir, exist_ok=True)
         if os.path.isdir(src):
-            if os.path.normcase(os.path.abspath(src)) == os.path.normcase(self.disc_dir):
-                return
             files = []
             for dirpath, _dirs, names in os.walk(src):
                 for n in names:
-                    if n.lower() in ('input.ini', 'video.ini'):
-                        continue
-                    files.append(os.path.relpath(os.path.join(dirpath, n), src))
+                    rel = os.path.relpath(os.path.join(dirpath, n), src)
+                    if self.wanted(rel):
+                        files.append(rel)
             total = sum(os.path.getsize(os.path.join(src, f)) for f in files) or 1
             done, last = 0, -1
             for rel in files:
@@ -513,19 +516,17 @@ class Build:
             return
         disc = ps2_disc.Disc(src)
         try:
-            files = [e for e in disc.entries() if not e.is_dir]
+            files = [e for e in disc.entries() if not e.is_dir and self.wanted(e.path)]
             total = sum(e.size for e in files) or 1
             free = shutil.disk_usage(self.out).free
-            if free < total + (6 << 30):
+            if free < total + (3 << 30):
                 raise BuildError('not enough free space on %s: %.1f GB free, about %.1f GB needed (the disc\'s files '
-                                 'and the build)' % (self.out, free / 2**30, (total + (6 << 30)) / 2**30))
+                                 'and the build)' % (self.out, free / 2**30, (total + (3 << 30)) / 2**30))
             done, last = 0, -1
-            for e in disc.entries():
+            for e in files:
                 dest = os.path.join(self.disc_dir, e.path)
-                if e.is_dir:
-                    os.makedirs(dest, exist_ok=True)
-                    continue
-                if not (os.path.exists(dest) and os.path.getsize(dest) == e.size):  # resumes: finished files stay
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                if not (os.path.exists(dest) and os.path.getsize(dest) == e.size):
                     tmp = dest + '.part'
                     with open(tmp, 'wb') as f:
                         for chunk in disc.image.read_extent(e.lba, e.size):
@@ -540,161 +541,82 @@ class Build:
                     emit('PERCENT', 'extract', pct)
         finally:
             disc.close()
-
-    def tools_dir(self):
-        if self.args.tools:
-            return os.path.abspath(self.args.tools)
-        return os.path.join(self.out, 'tools-build', 'ps2xRecomp')
-
-    def step_tools(self):
-        if self.args.tools:
-            for t in ('ps2_recomp', 'ps2_vu_aot'):
-                if not os.path.isfile(os.path.join(self.tools_dir(), t + EXE)):
-                    raise BuildError('%s%s is not in %s (--tools)' % (t, EXE, self.tools_dir()))
-            return
-        build = os.path.join(self.out, 'tools-build')
-        self.run([self.tool('cmake'), '-S', os.path.join(ROOT, 'PS2Recomp'), '-B', build, '-G', 'Ninja',
-                  '-DCMAKE_BUILD_TYPE=Release', '-DPS2X_BUILD_RUNTIME=OFF', '-DPS2X_BUILD_STUDIO=OFF',
-                  '-DPS2X_BUILD_TEST=OFF', '-DPS2X_BUILD_ANALYZER=OFF',
-                  '-DCMAKE_C_COMPILER=' + self.tool('gcc'), '-DCMAKE_CXX_COMPILER=' + self.tool('g++'),
-                  '-DCMAKE_MAKE_PROGRAM=' + self.tool('ninja')] + cmake_rc_flags() + self.fetch_args())
-        self.run([self.tool('cmake'), '--build', build, '--target', 'ps2_recomp', 'ps2_vu_aot', '-j', str(self.args.jobs)],
-                 percent=ninja_percent, append=True)
-
-    def step_recompile(self):
-        staging = os.path.join(self.out, 'recomp-staging')
-        shutil.rmtree(staging, ignore_errors=True)
-        os.makedirs(staging)
-        with open(os.path.join(ROOT, 'recomp', 'tmb_scus97101.toml'), encoding='utf-8') as f:
-            toml = f.read()
-        fwd = lambda p: p.replace('\\', '/')  # noqa: E731
-        toml = re.sub(r'(?m)^input = .*$', 'input = "%s"' % fwd(os.path.join(self.disc_dir, ELF_NAME)), toml)
-        toml = re.sub(r'(?m)^output = .*$', 'output = "%s/"' % fwd(staging), toml)
-        cfg = os.path.join(self.out, 'tmb_scus97101.toml')
-        with open(cfg, 'w', encoding='utf-8', newline='\n') as f:
-            f.write(toml)
-        self.run([os.path.join(self.tools_dir(), 'ps2_recomp' + EXE), cfg], cwd=ROOT)
-        env = dict(self.env, PS2X_VU_AOT_FAST='1')
-        self.run([os.path.join(self.tools_dir(), 'ps2_vu_aot' + EXE), os.path.join(self.disc_dir, ELF_NAME),
-                  os.path.join(staging, 'vu1')], env=env, append=True)
-        # Keep what the other steps write in generated/ (the packs, iop/), refresh the rest by content.
-        for keep in ('tmb_textures.pack', 'tmb_meshes.pack', 'iop'):
-            p = os.path.join(self.gen, keep)
-            if os.path.exists(p):
-                d = os.path.join(staging, keep)
-                if os.path.isdir(p):
-                    shutil.copytree(p, d)
-                else:
-                    shutil.copyfile(p, d)
-        os.makedirs(self.gen, exist_ok=True)
-        changed = sync_tree(staging, self.gen)
-        shutil.rmtree(staging, ignore_errors=True)
-        emit('INFO', 'recompile', '%d files written' % changed)
-
-    def step_packs(self):
-        elf = os.path.join(self.disc_dir, ELF_NAME)
-        os.makedirs(self.gen, exist_ok=True)
-        for i, (script, argv, name) in enumerate((
-                ('tmb_texture_pack.py', [self.disc_dir, elf], 'tmb_textures.pack'),
-                ('tmb_mesh_pack.py', [self.disc_dir], 'tmb_meshes.pack'))):
-            tmp = os.path.join(self.gen, name + '.tmp')
-            self.py(os.path.join(ROOT, 'tools', script), *(argv + [tmp]), append=i > 0)
-            os.replace(tmp, os.path.join(self.gen, name))
-            emit('PERCENT', 'packs', 50 * (i + 1))
-
-    def step_iop(self):
-        with open(os.path.join(ROOT, 'recomp', 'tmb_iop_modules.json')) as f:
-            table = json.load(f)['modules']
-        dumps = os.path.join(self.out, 'iopmods')
-        shutil.rmtree(dumps, ignore_errors=True)
-        out = os.path.join(self.gen, 'iop')
-        staging = os.path.join(self.out, 'iop-staging')
-        shutil.rmtree(staging, ignore_errors=True)
-        os.makedirs(staging)
-        with open(self.log_path(), 'w') as log:
-            for m in table:
-                irx = os.path.join(self.disc_dir, *m['file'].split('/'))
-                with open(irx, 'rb') as f:
-                    data = f.read()
-                h = '%016x' % irx_load.fnv1a64(data)
-                if h != m['hash']:
-                    raise BuildError('%s differs from the USA disc\'s (hash %s, expected %s)' % (m['file'], h, m['hash']))
-                j = irx_load.write_dump(irx, int(m['base'], 16), m['name'], dumps)
-                with open(j) as f:
-                    loaded = json.load(f)
-                if loaded['size'] != int(m['size'], 16):
-                    raise BuildError('%s loaded as %#x bytes, expected %s' % (m['file'], loaded['size'], m['size']))
-                log.write('%s -> %s\n' % (irx, j))
-        for i, m in enumerate(table):
-            j = os.path.join(dumps, '%s_%06x.json' % (m['name'], int(m['base'], 16)))
-            self.py(os.path.join(ROOT, 'PS2Recomp', 'tools', 'iop_recomp.py'), j, '--out', staging, append=True)
-            emit('PERCENT', 'iop', (i + 1) * 100 // len(table))
-        os.makedirs(out, exist_ok=True)
-        sync_tree(staging, out)
-        shutil.rmtree(staging, ignore_errors=True)
+        emit('INFO', 'extract', '%d files, %.0f MB' % (len(files), total / 1e6))
 
     def fetch_args(self):
         if not self.args.fetch_cache:
-            if not shutil.which('git', path=self.env.get('PATH')):
-                raise BuildError('git is needed to download the libraries the build uses (raylib, imgui, ...), or '
-                                 'pass --fetch-cache <dir> with their sources')
-            return []
+            return []  # CMake downloads the pinned archives (SHA-256 checked)
         cache = os.path.abspath(self.args.fetch_cache)
         out = ['-DFETCHCONTENT_FULLY_DISCONNECTED=ON'] if self.kit else []  # never the network
         for n in FETCH_NAMES:
             d = os.path.join(cache, n + '-src')
             if os.path.isdir(d):
                 out.append('-DFETCHCONTENT_SOURCE_DIR_%s=%s' % (n.upper(), d.replace('\\', '/')))
+            elif self.kit:
+                raise BuildError('the build kit has no deps/%s-src: the kit is incomplete or of an older release' % n)
         return out
 
     def step_configure(self):
         # A build folder configured from another path (the release folder moved or renamed, or reached once through
-        # the non-ASCII aliases and once not): CMake refuses its cache or fetches again; start that folder afresh.
+        # the non-ASCII aliases and once not), or a fork build's: CMake refuses its cache; start that folder afresh.
         cache = os.path.join(self.cmake_build, 'CMakeCache.txt')
         if os.path.isfile(cache):
             with open(cache, encoding='utf-8', errors='replace') as f:
-                m = re.search(r'^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$', f.read(), re.M)
-            if m and os.path.normcase(os.path.normpath(m.group(1))) != os.path.normcase(os.path.normpath(ROOT)):
-                emit('INFO', 'configure', 'the build folder was configured from %s: configured again' % m.group(1))
+                text = f.read()
+            m = re.search(r'^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$', text, re.M)
+            moved = m and os.path.normcase(os.path.normpath(m.group(1))) != os.path.normcase(os.path.normpath(ROOT))
+            if moved or not re.search(r'^TMB_BOZO:BOOL=ON$', text, re.M):
+                emit('INFO', 'configure', 'the build folder was configured %s: configured again'
+                     % ('from %s' % m.group(1) if moved else 'for the fork'))
                 os.remove(cache)
                 shutil.rmtree(os.path.join(self.cmake_build, 'CMakeFiles'), ignore_errors=True)
+        fwd = lambda p: p.replace('\\', '/')  # noqa: E731
         cmd = [self.tool('cmake'), '-S', ROOT, '-B', self.cmake_build, '-G', 'Ninja',
                '-DCMAKE_BUILD_TYPE=' + self.args.build_type,
-               '-DTMB_GENERATED_DIR=' + self.gen.replace('\\', '/'),
+               '-DTMB_BOZO=ON', '-DBOZO_ENGINE_DIR=' + fwd(ENGINE),
+               '-DTMB_ELF=' + fwd(self.elf()), '-DTMB_DISC_DIR=' + fwd(self.disc_dir),
+               '-DBOZO_BUILD_TOOLS=OFF', '-DBUILD_TESTING=OFF', '-DTMB_GUI_SUBSYSTEM=ON',
+               '-DPython3_EXECUTABLE=' + fwd(sys.executable),
                '-DCMAKE_C_COMPILER=' + self.tool('gcc'), '-DCMAKE_CXX_COMPILER=' + self.tool('g++'),
                '-DCMAKE_MAKE_PROGRAM=' + self.tool('ninja')] + cmake_rc_flags()
-        if self.args.debug_info == 'no':
-            # The configuration's own flags without -g: the same code (GCC's -g never changes it), the same -O2 and
-            # GUI subsystem as RelWithDebInfo; Release would be -O3, which the generated code is too large for.
-            flags = {'Release': '-O3 -DNDEBUG', 'RelWithDebInfo': '-O2 -DNDEBUG', 'Debug': '-O0'}[self.args.build_type]
+        if self.args.debug_info == 'no' and self.args.build_type != 'Release':
+            # The configuration's own flags without -g: the same code (GCC's -g never changes it).
+            flags = {'RelWithDebInfo': '-O2 -DNDEBUG', 'Debug': '-O0'}[self.args.build_type]
             cmd += ['-DCMAKE_%s_FLAGS_%s=%s' % (lang, self.args.build_type.upper(), flags) for lang in ('C', 'CXX')]
         if self.ffmpeg_root:
-            cmd += ['-DPS2X_FFMPEG_ROOT=' + self.ffmpeg_root.replace('\\', '/'), '-DPS2X_ENABLE_PARALLEL_GS=OFF']
+            cmd.append('-DBOZO_FFMPEG_ROOT=' + fwd(self.ffmpeg_root))
         else:
             pkg = os.path.join(self.find_toolchain(), 'pkg-config' + EXE)
             if os.path.isfile(pkg):
                 cmd.append('-DPKG_CONFIG_EXECUTABLE=' + pkg)
         self.run(cmd + self.fetch_args())
 
-    def runner_path(self):
-        return os.path.join(self.cmake_build, 'PS2Recomp', 'ps2xRuntime', 'ps2EntryRunner' + EXE)
+    def step_tools(self):
+        self.cmake_build_targets('bozo-recomp', 'bozo-externals', percent=ninja_percent)
+
+    def step_recompile(self):
+        self.cmake_build_targets('tmb_recompile', percent=ninja_percent)
+
+    def step_packs(self):
+        self.cmake_build_targets('tmb_packs', percent=ninja_percent)
 
     def step_compile(self):
-        self.run([self.tool('cmake'), '--build', self.cmake_build, '--target', 'ps2EntryRunner',
-                  '-j', str(self.args.jobs)], percent=ninja_percent)
+        self.cmake_build_targets(GAME_EXE, percent=ninja_percent)
+
+    def exe_path(self):
+        return os.path.join(self.cmake_build, GAME_EXE + EXE)
 
     def step_stage(self):
-        exe = self.runner_path()
+        exe = self.exe_path()
         if not os.path.isfile(exe):
-            raise BuildError('no runner at %s' % exe)
+            raise BuildError('no game at %s' % exe)
         os.makedirs(self.game, exist_ok=True)
         staged = [exe]
         dest = os.path.join(self.game, os.path.basename(exe))
         strip = os.path.join(self.find_toolchain(), 'strip' + EXE)
+        if os.path.exists(dest):
+            os.remove(dest)
         if self.args.debug_info == 'no' and os.path.isfile(strip):
-            # What debug information is left (the libraries' own -g, if any) out of the player's copy.
-            if os.path.exists(dest):
-                os.remove(dest)
             self.run([strip, '--strip-debug', '-o', dest, exe])
             shutil.copystat(exe, dest)
         else:
@@ -703,30 +625,33 @@ class Build:
             for dll in runtime_dlls(exe, [os.path.dirname(exe), self.find_toolchain()]):
                 shutil.copy2(dll, os.path.join(self.game, os.path.basename(dll)))
                 staged.append(dll)
+        shutil.copy2(self.elf(), os.path.join(self.game, ELF_NAME))
         for name in ('tmb_textures.pack', 'tmb_meshes.pack'):
-            shutil.copy2(os.path.join(self.gen, name), os.path.join(self.game, name))
+            shutil.copy2(os.path.join(self.cmake_build, 'packs', name), os.path.join(self.game, name))
+        # A fork build's game folder (ps2EntryRunner.exe and its DLLs): nothing of it is used any more.
+        for old in ('ps2EntryRunner.exe', 'libstdc++-6.dll', 'libgcc_s_seh-1.dll', 'libwinpthread-1.dll'):
+            p = os.path.join(self.game, old)
+            if os.path.isfile(p) and p not in staged:
+                os.remove(p)
+        name = os.path.basename(exe)
         if os.name == 'nt':
-            lines = ['@echo off', 'rem Made by tools/tmb_build.py: Twisted Metal: Black, native PC port.',
-                     'cd /d "%~dp0"']
-            lines += ['set %s=%s' % kv for kv in LAUNCH_ENV]
-            lines += ['set TMB_TEXTURE_PACK=%~dp0tmb_textures.pack', 'set TMB_MESH_PACK=%~dp0tmb_meshes.pack',
-                      'set TMB_ISO=%~dp0disc.iso',
-                      'start "" "%%~dp0%s" "%%~dp0disc\\%s" %%*' % (os.path.basename(exe), ELF_NAME), '']
+            lines = ['@echo off', 'rem Made by tools/tmb_build.py: Twisted Metal: Black, native PC port (BozoEngine).',
+                     'cd /d "%~dp0"',
+                     'start "" "%%~dp0%s" --elf "%%~dp0%s" --iso "%%~dp0disc.iso" %%*' % (name, ELF_NAME), '']
             with open(os.path.join(self.game, 'Play TMB.cmd'), 'w', newline='\r\n') as f:
                 f.write('\n'.join(lines))
         else:
             sh = os.path.join(self.game, 'play_tmb.sh')
             with open(sh, 'w', newline='\n') as f:
-                f.write('#!/bin/sh\ncd "$(dirname "$0")"\n' + ''.join('export %s=%s\n' % kv for kv in LAUNCH_ENV) +
-                        'export TMB_TEXTURE_PACK="$PWD/tmb_textures.pack" TMB_MESH_PACK="$PWD/tmb_meshes.pack" TMB_ISO="$PWD/disc.iso"\n'
-                        'exec ./%s disc/%s "$@"\n' % (os.path.basename(exe), ELF_NAME))
+                f.write('#!/bin/sh\ncd "$(dirname "$0")"\nexec ./%s --elf "$PWD/%s" --iso "$PWD/disc.iso" "$@"\n'
+                        % (name, ELF_NAME))
             os.chmod(sh, 0o755)
         with open(os.path.join(self.game, 'tmb_build.json'), 'w') as f:
-            json.dump({'built': time.strftime('%Y-%m-%d %H:%M:%S'), 'elf_sha1': ELF_SHA1,
-                       'build_type': self.args.build_type, 'debug_info': self.args.debug_info, 'toolchain': self.find_toolchain(), 'kit': self.kit,
-                       'files': [os.path.basename(p) for p in staged],
-                       'env': dict(LAUNCH_ENV)}, f, indent=1)
-        emit('INFO', 'stage', '%d DLLs staged' % (len(staged) - 1))
+            json.dump({'built': time.strftime('%Y-%m-%d %H:%M:%S'), 'engine': 'BozoEngine', 'elf_sha1': ELF_SHA1,
+                       'build_type': self.args.build_type, 'debug_info': self.args.debug_info,
+                       'toolchain': self.find_toolchain(), 'kit': self.kit, 'exe': name,
+                       'files': [os.path.basename(p) for p in staged]}, f, indent=1)
+        emit('INFO', 'stage', '%s, %.1f MB, %d DLLs staged' % (name, os.path.getsize(dest) / 1e6, len(staged) - 1))
 
     def write_built_from(self):
         """<game>/built_from.ini: the release stamp (<TMB_Recomp>/release.ini, written by tools/make_release.py) of the
@@ -767,7 +692,7 @@ class Build:
                         emit('INFO', 'stopped', 'after ' + step)
                         return 0
                     continue
-                dirty = True  # every later step runs again
+                dirty = True  # every later step runs again (Ninja only redoes what changed)
                 emit('PROGRESS', step, '%d/%d' % (i, n), STEP_TITLES[step])
                 t = time.time()
                 self.state[step] = {'done': False}
@@ -816,12 +741,11 @@ def find_kit(args):
 
 STEP_TITLES = {
     'verify': 'Checking the disc',
-    'extract': 'Copying the disc\'s files',
+    'extract': 'Reading the disc\'s files',
+    'configure': 'Configuring the build',
     'tools': 'Preparing the recompiler',
     'recompile': 'Recompiling the game\'s code',
     'packs': 'Converting textures and models',
-    'iop': 'Recompiling the sound and controller modules',
-    'configure': 'Configuring the build',
     'compile': 'Compiling (this takes a while)',
     'stage': 'Assembling the game folder',
 }
@@ -859,19 +783,21 @@ def main():
     ap.add_argument('--game', help='the game folder to stage (default: <out>/TMB)')
     ap.add_argument('--check', action='store_true', help='only check the disc (no work folder): OK <message> or '
                     'ERROR verify <message>')
+    ap.add_argument('--engine', help='BozoEngine\'s source tree (default: the BozoEngine submodule)')
     ap.add_argument('--kit', help='the build kit folder (default: <TMB_Recomp>/kit or <its parent>/kit if present)')
     ap.add_argument('--no-kit', action='store_true', help='do not use a build kit even if one is found')
     ap.add_argument('--toolchain', help='compiler folder (with bin/g++, cmake, ninja), default: the kit, PATH, '
                     'C:/msys64/ucrt64')
-    ap.add_argument('--tools', help='folder with prebuilt ps2_recomp and ps2_vu_aot (default: built here)')
-    ap.add_argument('--fetch-cache', help='folder with the FetchContent sources (<name>-src) instead of git')
-    ap.add_argument('--build-type', default='RelWithDebInfo', choices=['Release', 'RelWithDebInfo', 'Debug'])
-    ap.add_argument('--debug-info', choices=['yes', 'no'], help='debug information in the runner (default: no with '
+    ap.add_argument('--fetch-cache', help='folder with the FetchContent sources (sdl3-src, imgui-src) instead of the '
+                    'download')
+    ap.add_argument('--build-type', default='Release', choices=['Release', 'RelWithDebInfo', 'Debug'])
+    ap.add_argument('--debug-info', choices=['yes', 'no'], help='debug information in the game (default: no with '
                     'the build kit, a player build; yes without it)')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--redo', choices=STEPS, help='run this step and the ones after it again')
     ap.add_argument('--stop-after', choices=STEPS, help='stop once this step is done')
     args = ap.parse_args()
+    load_engine(args.engine)
     if args.check:
         sys.exit(check_disc(args.disc))
     os.makedirs(os.path.abspath(args.out), exist_ok=True)
@@ -884,9 +810,9 @@ def main():
 
 def remove_stale_sources():
     """A release's source folder lists its files (release_files.txt, tools/make_release.py). A newer release unzipped
-    over an older one leaves the files it no longer has; CMake globs some folders (runtime/*.cpp, the fork's sources),
-    so they are removed here: regular files under the source folder only, never through a link, never Python's caches;
-    then the folders left empty."""
+    over an older one leaves the files it no longer has; CMake globs some folders (runtime/*.cpp, BozoEngine's
+    sources), so they are removed here: regular files under the source folder only, never through a link, never
+    Python's caches; then the folders left empty."""
     listing = os.path.join(ROOT, 'release_files.txt')
     if not os.path.isfile(listing):
         return
@@ -915,11 +841,11 @@ def remove_stale_sources():
 #
 # MSYS2's binutils open files in the ANSI code page: ld cannot open an object or library whose path, read from the
 # response file CMake writes in UTF-8, has a non-ASCII character (C:\Users\Jérôme\..., D:\Jeux\Été\...): "cannot find
-# ...obj". GCC itself and the fork's tools (UTF-8 manifests) cope; ld does not, and it is not ours to rebuild. So when
-# the code, the work folder, the game folder or the kit has such a path, tmb_build runs itself again through
-# directory junctions with plain names (%ProgramData%\TMB_Recomp\paths\<hash>-<name>, the same each time so CMake's
-# cache stays valid) and removes the junctions afterwards (only the links: os.rmdir on a junction never touches its
-# target). A junction needs no administrator rights; the disc image is read by Python only and keeps its path.
+# ...obj". GCC itself copes; ld does not, and it is not ours to rebuild. So when the code, the work folder, the game
+# folder or the kit has such a path, tmb_build runs itself again through directory junctions with plain names
+# (%ProgramData%\TMB_Recomp\paths\<hash>-<name>, the same each time so CMake's cache stays valid) and removes the
+# junctions afterwards (only the links: os.rmdir on a junction never touches its target). A junction needs no
+# administrator rights; the disc image is read by Python only and keeps its path.
 
 ALIAS_ENV = 'TMB_BUILD_ALIASED'
 
@@ -936,7 +862,7 @@ def needs_ascii_aliases(args):
     if os.name != 'nt' or os.environ.get(ALIAS_ENV):
         return False
     kit = find_kit(args)
-    paths = [ROOT, os.path.abspath(args.out), os.path.abspath(args.game) if args.game else '', kit or '']
+    paths = [ROOT, ENGINE, os.path.abspath(args.out), os.path.abspath(args.game) if args.game else '', kit or '']
     return not all(is_ascii(p) for p in paths)
 
 
@@ -986,6 +912,10 @@ def run_through_aliases(args):
             k = make_alias(kit, 'kit')
             links.append(k)
             replace['--kit'] = k
+        if args.engine:
+            e = make_alias(ENGINE, 'engine')
+            links.append(e)
+            replace['--engine'] = e
         new = []
         i = 0
         while i < len(rest):

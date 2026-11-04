@@ -16,11 +16,16 @@
 # The generated code: bozo-recomp with the externals bozo-externals writes from the ELF (the stubs BozoEngine answers),
 # recomp/tmb_stubs.txt and TMB's override list (tools/tmb_overrides_list.py, from runtime/*.cpp).
 
-set(BOZO_ENGINE_DIR "" CACHE PATH "BozoEngine's source tree")
+# BozoEngine: the submodule (BozoEngine/, at the commit TMB pins) unless BOZO_ENGINE_DIR names another tree (development).
+set(BOZO_ENGINE_DIR "" CACHE PATH "BozoEngine's source tree (default: the BozoEngine submodule)")
+if(NOT BOZO_ENGINE_DIR AND EXISTS "${CMAKE_SOURCE_DIR}/BozoEngine/CMakeLists.txt")
+    set(BOZO_ENGINE_DIR "${CMAKE_SOURCE_DIR}/BozoEngine" CACHE PATH "BozoEngine's source tree (default: the BozoEngine submodule)" FORCE)
+endif()
 set(TMB_ELF "" CACHE FILEPATH "TMB's executable (SCUS_971.01), extracted from the disc")
 set(TMB_GEN_FILES 32 CACHE STRING "How many .cpp files the generated code is split into")
 set(TMB_GEN_OPT "-O1" CACHE STRING "Optimisation of the generated code")
 set(TMB_ISO "" CACHE FILEPATH "TMB's disc image (the packs are built from its files)")
+set(TMB_DISC_DIR "" CACHE PATH "The packs' files already extracted from the disc (tools/tmb_build.py: <dir>/.extracted marks them done); else read from TMB_ISO here")
 option(TMB_WINDOW "Build tmb, the game in a window (BozoEngine's bozo_app: SDL3, OpenGL 3.3)" ON)
 if(NOT BOZO_ENGINE_DIR OR NOT EXISTS "${BOZO_ENGINE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "TMB_BOZO: set BOZO_ENGINE_DIR to BozoEngine's source tree")
@@ -76,6 +81,8 @@ add_custom_command(
     COMMAND bozo-recomp ${TMB_ELF} ${gen_dir} --prefix tmb --files ${TMB_GEN_FILES} --no-comments --externals ${externals}
     DEPENDS bozo-recomp ${externals} ${TMB_ELF}
     COMMENT "Recompiling TMB")
+# The generated code alone (tools/tmb_build.py's recompile step, before the compile).
+add_custom_target(tmb_recompile DEPENDS ${gen_files})
 add_library(tmb_generated OBJECT ${gen_files})
 target_link_libraries(tmb_generated PUBLIC bozo_runtime_headers)
 target_include_directories(tmb_generated PUBLIC ${gen_dir})
@@ -104,19 +111,24 @@ set(TMB_RUNTIME_ARCH "-mavx2;-mfma" CACHE STRING "Instruction set flags of TMB's
 set(TMB_RUNTIME_OPT "-O2" CACHE STRING "Optimisation of TMB's runtime (the reference build's)")
 target_compile_options(tmb_runtime PRIVATE ${TMB_RUNTIME_ARCH} ${TMB_RUNTIME_OPT})
 target_compile_options(bozo_render PRIVATE ${TMB_RUNTIME_ARCH})
-# The packs: from the disc image's files (only those they read: .TEX, .RTX, .NGP, .PTR), into the build folder. Without
-# TMB_ISO, where the fork's build put them (generated_us/).
-if(TMB_ISO)
+# The packs: from the disc image's files (only those they read: .TEX, .RTX, .NGP, .PTR), into the build folder; with
+# TMB_DISC_DIR, from those files already extracted there (tools/tmb_build.py). Without either, where the fork's build put
+# them (generated_us/).
+if(TMB_ISO OR TMB_DISC_DIR)
     set(pack_dir "${CMAKE_BINARY_DIR}/packs")
     set(disc_dir "${CMAKE_BINARY_DIR}/disc")
     set(native_pack "${BOZO_ENGINE_DIR}/tools/native_pack")
     file(GLOB native_pack_sources CONFIGURE_DEPENDS "${native_pack}/*.py")
-    add_custom_command(
-        OUTPUT "${disc_dir}/.extracted"
-        COMMAND Python3::Interpreter "${native_pack}/ps2_disc.py" extract "${TMB_ISO}" "${disc_dir}" --ext .TEX,.RTX,.NGP,.PTR
-        COMMAND ${CMAKE_COMMAND} -E touch "${disc_dir}/.extracted"
-        DEPENDS "${TMB_ISO}" "${native_pack}/ps2_disc.py"
-        COMMENT "Reading the packs' files from the disc image")
+    if(TMB_DISC_DIR)
+        set(disc_dir "${TMB_DISC_DIR}")
+    else()
+        add_custom_command(
+            OUTPUT "${disc_dir}/.extracted"
+            COMMAND Python3::Interpreter "${native_pack}/ps2_disc.py" extract "${TMB_ISO}" "${disc_dir}" --ext .TEX,.RTX,.NGP,.PTR
+            COMMAND ${CMAKE_COMMAND} -E touch "${disc_dir}/.extracted"
+            DEPENDS "${TMB_ISO}" "${native_pack}/ps2_disc.py"
+            COMMENT "Reading the packs' files from the disc image")
+    endif()
     add_custom_command(
         OUTPUT "${pack_dir}/tmb_textures.pack"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${pack_dir}"
@@ -168,6 +180,12 @@ if(TMB_WINDOW)
     if(WIN32)
         enable_language(RC)
         target_sources(tmb PRIVATE "${CMAKE_SOURCE_DIR}/runtime/app/tmb.rc")
+        # A player's build (tools/tmb_build.py): a GUI-subsystem exe, no console window; started from a terminal it
+        # still prints there (bozo::app attaches to the parent's console).
+        option(TMB_GUI_SUBSYSTEM "tmb.exe without a console window (the players' build)" OFF)
+        if(TMB_GUI_SUBSYSTEM)
+            set_target_properties(tmb PROPERTIES WIN32_EXECUTABLE ON)
+        endif()
     endif()
     if(MINGW)
         target_link_options(tmb PRIVATE -static -Wl,--stack,268435456)

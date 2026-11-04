@@ -1,7 +1,7 @@
 #pragma once
 
-// The launcher's look: RecompWatcher's identity (its src/styles/global.css tokens and public/icon.svg) on raylib and
-// Dear ImGui. The PS2 BIOS's radial blue behind faint glowing "boot towers", glass cards, Exo 2.
+// The launcher's look: RecompWatcher's identity (its src/styles/global.css tokens and public/icon.svg) on Dear
+// ImGui, in an SDL3 window (window.h). The PS2 BIOS's radial blue behind faint glowing "boot towers", glass cards, Exo 2.
 
 #include "imgui.h"
 
@@ -28,11 +28,11 @@ namespace ui
         ImFont *mono = nullptr; // Cascadia Mono or Consolas (logs), else Exo 2
     };
     extern Fonts fonts;
-    // After rlImGuiBeginInitImGui: Exo 2 from the exe's resources, the monospace font from Windows, the style.
+    // After win::open: Exo 2 from the exe's resources, the monospace font from Windows, the style.
     void setup();
 
-    // The background, drawn with raylib before ImGui: the radial gradient, the boot towers (animated unless
-    // motion is off), a vignette and faint scanlines.
+    // The background, on ImGui's background draw list (after win::beginFrame): the radial gradient, the boot towers
+    // (animated unless motion is off), a vignette and faint scanlines.
     void drawBackground(double time, bool motion);
     void releaseBackground();
 

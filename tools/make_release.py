@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
-"""make_release: the player's download, from a commit of this repository: TMB_Recomp-<version>.zip with the launcher,
-the code and the build kit, its SHA-256, the licences and the corresponding sources of what the kit redistributes.
+"""make_release: the player's download, from a commit of this repository: TMB_Recomp-<version>-bozo.zip (the game
+built on BozoEngine; its folder TMB_Recomp_Bozo, so it can sit beside the fork build's TMB_Recomp-<version>.zip) with the
+launcher, the code and the build kit, its SHA-256, the licences and the corresponding sources of what the kit
+redistributes.
 
   python tools/make_release.py --version 0.1.0 --kit D:/tmb_kit/kit --out D:/tmb_release [--with-sources]
   python tools/make_release.py --out D:/tmb_release --publish --dry-run       (the version from the commit's tag)
 
 What it does, from <commit> (default HEAD; only committed files count, the working tree is never read):
-  export     git archive of the commit and of the PS2Recomp submodule at the commit it records -> source\\ (no .git,
-             no build/, nothing generated); source\\release.ini stamps the version and both commits. The tree is
-             audited: no ELF, IRX, disc image, pack, generated code or disc file name may be in it.
+  export     git archive of the commit and of the BozoEngine submodule at the commit it records (without its
+             reference/ records, which the build never reads) -> source\\ (no .git, no build/, nothing generated);
+             source\\release.ini stamps the version and both commits. The tree is audited: no ELF, IRX, disc image,
+             pack, generated code or disc file name may be in it.
   kit        the build kit (--kit <dir>: an existing one, hard-linked into the release; else assembled by
-             tools/make_build_kit.py, which needs MSYS2 and the network). Its prebuilt recompilers must be the fork's at
-             this commit (kit_manifest.json tools.fork_commit): when they are not, make_build_kit --only tools
-             --only manifest rebuilds them in the release's copy (the original kit is left as it was). The pins of
-             FFmpeg, Python and the FetchContent sources are checked against the exported make_build_kit.py.
+             tools/make_build_kit.py, which needs MSYS2 and the network): a BozoEngine kit (kit_version 2: SDL3 and
+             ImGui sources, no prebuilt recompilers). The pins of FFmpeg, Python, the library archives and the MSYS2
+             packages are checked against the exported make_build_kit.py.
   launcher   launcher/ configured and built with the kit's toolchain alone (PATH = the kit and Windows), offline (the
-             kit's raylib, imgui, rlImGui; the Exo 2 font from --font-dir or downloaded and SHA-256 checked), with
-             LAUNCHER_VERSION / LAUNCHER_COMMIT: the footer, the update check, the exe's version information.
+             kit's SDL3 and ImGui, BozoEngine's PNG writer; the Exo 2 font from --font-dir or downloaded and SHA-256
+             checked), with LAUNCHER_VERSION / LAUNCHER_COMMIT: the footer, the update check, the exe's version
+             information.
   licences   LICENSES\\: each component's licence files (TMB_Recomp's own code: MIT, the repository's LICENSE;
-             PS2Recomp: GPL-3.0; the kit's components, the launcher's libraries and font) and SOURCES.txt: every MSYS2
+             BozoEngine: MIT; the kit's components, the libraries and the launcher's font) and SOURCES.txt: every MSYS2
              package the kit holds files of, with its version and its source package on repo.msys2.org, FFmpeg's
              tarball, the libraries' repositories and commits.
   changelog  CHANGELOG.md's section for the version (## [x.y.z], Keep a Changelog), from the commit: the release
@@ -56,8 +59,15 @@ import zipfile
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 REPO = 'TheBozos/TMB_Recomp'
-FORK_REPO = 'TheBozos/PS2Recomp'
+ENGINE_REPO = 'TheBozos/BozoEngine'
+ENGINE_DIR = 'BozoEngine'  # the submodule
+# What BozoEngine's export leaves out (its reference records: hashes of recorded runs, never read by the build).
+ENGINE_SKIP = ('reference',)
 NAME = 'TMB_Recomp'
+# The BozoEngine build: its zips are <NAME>-<version>-bozo(.zip, -sources.zip) and the folder in them TOP, so they
+# sit beside the fork build's (<NAME>-<version>.zip, folder TMB_Recomp) on a release page and on a player's disk.
+FLAVOR = 'bozo'
+TOP = 'TMB_Recomp_Bozo'
 VERSION_RE = re.compile(r'^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$')
 MSYS2_SOURCES = 'https://repo.msys2.org/mingw/sources/'
 # The launcher's font (launcher/CMakeLists.txt pins the same commit and hash).
@@ -346,7 +356,7 @@ class Release:
         self.version = args.version or self.tag_version()
         if not VERSION_RE.match(self.version):
             raise ReleaseError('version %r: expected MAJOR.MINOR.PATCH[-prerelease]' % self.version)
-        self.name = '%s-%s' % (NAME, self.version)
+        self.name = '%s-%s-%s' % (NAME, self.version, FLAVOR)
         self.downloads = os.path.abspath(args.downloads or os.path.join(self.out, 'downloads'))
         self.work = os.path.join(self.out, 'work', self.version)
         self.stage = os.path.join(self.out, self.name)
@@ -355,7 +365,7 @@ class Release:
         self.zip = os.path.join(self.out, self.name + '.zip')
         self.sources_zip = os.path.join(self.out, self.name + '-sources.zip')
         self.commit_date = int(git('show', '-s', '--format=%ct', self.commit))
-        self.fork_commit = None
+        self.engine_commit = None
         self.manifest = None
         self.msys_sources = []  # (package base, version, licence, url, file, sha256)
 
@@ -376,18 +386,25 @@ class Release:
         rmtree(self.stage)
         os.makedirs(self.source)
         extract_tar_stream([find_git(), 'archive', '--format=tar', self.commit], self.source, ROOT)
-        entry = git('ls-tree', self.commit, 'PS2Recomp').split()
+        entry = git('ls-tree', self.commit, ENGINE_DIR).split()
         if len(entry) < 3 or entry[0] != '160000':
-            raise ReleaseError('PS2Recomp is not a submodule at %s' % self.commit)
-        self.fork_commit = entry[2]
-        fork_repo = os.path.join(ROOT, 'PS2Recomp')
+            raise ReleaseError('%s is not a submodule at %s' % (ENGINE_DIR, self.commit))
+        self.engine_commit = entry[2]
+        engine_repo = os.path.join(ROOT, ENGINE_DIR)
         try:
-            git('cat-file', '-e', self.fork_commit + '^{commit}', cwd=fork_repo)
+            git('cat-file', '-e', self.engine_commit + '^{commit}', cwd=engine_repo)
         except ReleaseError:
-            raise ReleaseError('the submodule does not have %s: git submodule update --init PS2Recomp' % self.fork_commit)
-        fork_dst = os.path.join(self.source, 'PS2Recomp')
-        os.makedirs(fork_dst, exist_ok=True)
-        extract_tar_stream([find_git(), 'archive', '--format=tar', self.fork_commit], fork_dst, fork_repo)
+            raise ReleaseError('the submodule does not have %s: git submodule update --init %s'
+                               % (self.engine_commit, ENGINE_DIR))
+        engine_dst = os.path.join(self.source, ENGINE_DIR)
+        os.makedirs(engine_dst, exist_ok=True)
+        extract_tar_stream([find_git(), 'archive', '--format=tar', self.engine_commit], engine_dst, engine_repo)
+        for skip in ENGINE_SKIP:
+            rmtree(os.path.join(engine_dst, skip))
+        # The fork's submodule (PS2Recomp) is not part of this build: the empty folder git archive leaves goes too.
+        fork_dir = os.path.join(self.source, 'PS2Recomp')
+        if os.path.isdir(fork_dir) and not os.listdir(fork_dir):
+            os.rmdir(fork_dir)
         # The list of the source's files: tmb_build removes the ones a newer release unzipped over this one no longer
         # has (CMake globs runtime/*.cpp: a deleted file left behind would still be compiled).
         files = sorted(os.path.relpath(os.path.join(d, n), self.source).replace('\\', '/')
@@ -396,14 +413,14 @@ class Release:
         write_text(os.path.join(self.source, 'release_files.txt'), '\n'.join(sorted(set(files))) + '\n')
         write_text(os.path.join(self.source, 'release.ini'),
                    '# The TMB_Recomp release this folder is (tools/make_release.py writes this file).\n'
-                   'version = %s\ncommit = %s\nfork_commit = %s\ndate = %s\n'
-                   % (self.version, self.commit, self.fork_commit,
+                   'version = %s\ncommit = %s\nengine = BozoEngine\nengine_commit = %s\ndate = %s\n'
+                   % (self.version, self.commit, self.engine_commit,
                       time.strftime('%Y-%m-%d', time.gmtime(self.commit_date))))
         problems = audit_tree(self.source, rel_prefix='source/')
         if problems:
             raise ReleaseError('the source export holds what looks like game data:\n  ' + '\n  '.join(problems[:20]))
         n = sum(len(f) for _d, _s, f in os.walk(self.source))
-        log('  source: %s + PS2Recomp %s, %d files, %.1f MB, audited' % (self.commit[:12], self.fork_commit[:12], n,
+        log('  source: %s + BozoEngine %s, %d files, %.1f MB, audited' % (self.commit[:12], self.engine_commit[:12], n,
                                                                          dir_size(self.source) / 1e6))
 
     # -- the kit
@@ -427,22 +444,14 @@ class Release:
                                    '--work', os.path.join(self.work, 'kit-work'), '--jobs', str(self.args.jobs)])
         with open(os.path.join(self.kit, 'kit_manifest.json')) as f:
             self.manifest = json.load(f)
+        if self.manifest.get('engine') != 'BozoEngine':
+            raise ReleaseError('%s is a kit of the fork\'s build (kit_version %s): make a BozoEngine kit '
+                               '(tools/make_build_kit.py at this commit)' % (self.args.kit or self.kit,
+                                                                            self.manifest.get('kit_version')))
         self.check_kit_pins()
-        if self.manifest['tools'].get('fork_commit') != self.fork_commit:
-            log('  the kit\'s recompilers are the fork\'s %s, this release\'s is %s: rebuilding them'
-                % (str(self.manifest['tools'].get('fork_commit'))[:12], self.fork_commit[:12]))
-            if not os.path.isdir(os.path.join(self.kit, '.parts')):
-                raise ReleaseError('the kit has no .parts/ (make_build_kit\'s step records): it cannot be updated')
-            run(self.kit_tool() + ['--out', self.kit, '--msys', self.args.msys, '--work',
-                                   os.path.join(self.work, 'kit-work'), '--only', 'tools', '--only', 'manifest',
-                                   '--jobs', str(self.args.jobs)], logfile=os.path.join(self.work, 'kit.log'))
-            with open(os.path.join(self.kit, 'kit_manifest.json')) as f:
-                self.manifest = json.load(f)
-            if self.manifest['tools'].get('fork_commit') != self.fork_commit:
-                raise ReleaseError('the rebuilt kit still records fork %s' % self.manifest['tools'].get('fork_commit'))
         self.prune_kit_deps()
         rmtree(os.path.join(self.kit, '.parts'))
-        log('  kit: %.1f MB, tools from the fork\'s %s' % (dir_size(self.kit) / 1e6, self.fork_commit[:12]))
+        log('  kit: %.1f MB' % (dir_size(self.kit) / 1e6))
 
     def prune_kit_deps(self):
         """What this commit's make_build_kit.py leaves out of the libraries' sources (DEP_PRUNE), out of the release's
@@ -477,8 +486,8 @@ class Release:
             if not pinned or pinned.group(1) != ver:
                 wrong.append('%s %s (pinned %s)' % (what.lower(), ver, pinned.group(1) if pinned else '?'))
         for name, info in m['deps'].items():
-            if not re.search(r"\('%s', '[^']+', '%s'" % (re.escape(name), re.escape(info['tag'])), text):
-                wrong.append('%s %s' % (name, info['tag']))
+            if not re.search(r"'name': '%s',[^}]*'sha256': '%s'" % (re.escape(name), re.escape(info['sha256'])), text):
+                wrong.append('%s %s' % (name, info['version']))
         # The toolchain's MSYS2 packages: the versions tools/build_kit_packages.json pins at this commit.
         pins_path = os.path.join(self.source, 'tools', 'build_kit_packages.json')
         if os.path.isfile(pins_path):
@@ -514,9 +523,8 @@ class Release:
              '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_C_COMPILER=' + b('gcc'), '-DCMAKE_CXX_COMPILER=' + b('g++'),
              '-DCMAKE_RC_COMPILER=' + b('windres'), '-DCMAKE_MAKE_PROGRAM=' + b('ninja'),
              '-DFETCHCONTENT_FULLY_DISCONNECTED=ON',
-             '-DFETCHCONTENT_SOURCE_DIR_RAYLIB=' + os.path.join(deps, 'raylib-src').replace('\\', '/'),
+             '-DFETCHCONTENT_SOURCE_DIR_SDL3=' + os.path.join(deps, 'sdl3-src').replace('\\', '/'),
              '-DFETCHCONTENT_SOURCE_DIR_IMGUI=' + os.path.join(deps, 'imgui-src').replace('\\', '/'),
-             '-DFETCHCONTENT_SOURCE_DIR_RLIMGUI=' + os.path.join(deps, 'rlimgui-src').replace('\\', '/'),
              '-DLAUNCHER_FONT_DIR=' + self.font_dir().replace('\\', '/'),
              '-DLAUNCHER_VERSION=' + self.version, '-DLAUNCHER_COMMIT=' + self.commit] + self.rc_flags(),
             env=env, logfile=logf)
@@ -550,10 +558,10 @@ class Release:
     def step_licenses(self):
         lic = os.path.join(self.stage, 'LICENSES')
         rmtree(lic)
-        # The code: TMB_Recomp's own files are MIT (the repository's LICENSE); PS2Recomp, the runtime and recompiler
-        # in source\PS2Recomp, is GPL-3.0 (the game a player builds links it: a GPL-3.0 combined work).
+        # The code: TMB_Recomp's own files are MIT (the repository's LICENSE); BozoEngine, the recompiler and runtime
+        # in source\BozoEngine, is MIT too.
         for name, src in (('TMB_Recomp', os.path.join(self.source, 'LICENSE')),
-                          ('PS2Recomp', os.path.join(self.source, 'PS2Recomp', 'LICENSE'))):
+                          ('BozoEngine', os.path.join(self.source, ENGINE_DIR, 'LICENSE'))):
             if not os.path.isfile(src):
                 raise ReleaseError('%s has no LICENSE at this commit (%s)' % (name, src))
             os.makedirs(os.path.join(lic, name))
@@ -624,9 +632,8 @@ class Release:
             '',
             'TMB_Recomp (source\\, this release\'s code; MIT, LICENSES\\TMB_Recomp)',
             '  https://github.com/%s/tree/%s' % (REPO, self.commit),
-            'PS2Recomp, the runtime and recompiler (source\\PS2Recomp; GPL-3.0, LICENSES\\PS2Recomp): the game you',
-            'build links its runtime, so that game is a GPL-3.0 combined work.',
-            '  PS2Recomp fork: https://github.com/%s/tree/%s' % (FORK_REPO, self.fork_commit),
+            'BozoEngine, the recompiler and runtime the game is built on (source\\BozoEngine; MIT, LICENSES\\BozoEngine)',
+            '  https://github.com/%s/tree/%s' % (ENGINE_REPO, self.engine_commit),
             '  The whole source is in source\\ already, the launcher\'s too (source\\launcher).',
             '',
             'The build kit (kit\\) redistributes these programs and libraries unmodified. Their corresponding source:',
@@ -660,8 +667,8 @@ class Release:
             '4. Libraries built from source on your PC (kit\\deps, the sources themselves):',
         ]
         for name, info in sorted(m['deps'].items()):
-            lines.append('   %-12s %-18s %s  commit %s  (%s)' % (name, info['tag'], info['repository'], info['commit'],
-                                                                 info['license']))
+            lines.append('   %-6s %s (%s)' % (name, info['version'], info['license']))
+            lines.append('          %s  SHA-256 %s' % (info['url'], info['sha256']))
         lines += [
             '',
             'Written offer: for at least three years from the date of this release, the authors (The Bozos,',
@@ -754,7 +761,14 @@ class Release:
         # The changelog at the top, for players (Notepad) and the launcher's "What's new": the commit's, CRLF.
         text = self.changelog_text()
         if text is not None:
-            write_text(os.path.join(self.stage, 'CHANGELOG.md'), text.replace('\r\n', '\n'), crlf=True)
+            text = text.replace('\r\n', '\n')
+            if changelog_section(text, self.version) is None and self.args.allow_missing_changelog:
+                # A test build (--allow-missing-changelog): a section of its own, so "What's new" and the launcher's
+                # self-check find one for this version.
+                at = text.find('\n## ')
+                at = at + 1 if at >= 0 else len(text)
+                text = text[:at] + '## [%s] - test build\n\n%s\n\n' % (self.version, self.changelog_section) + text[at:]
+            write_text(os.path.join(self.stage, 'CHANGELOG.md'), text, crlf=True)
 
     # -- the changelog
 
@@ -784,9 +798,9 @@ class Release:
         if problems:
             raise ReleaseError('the release folder holds what looks like game data:\n  ' + '\n  '.join(problems[:20]))
         t = time.time()
-        # The folder in the zip is TMB_Recomp, not TMB_Recomp-<version>: a new release unzipped where the last one
-        # was replaces it (and keeps build\ and game\, so Rebuild only does what changed).
-        zip_dir(self.stage, self.zip, NAME, self.zip_time())
+        # The folder in the zip is TMB_Recomp_Bozo, not TMB_Recomp-<version>-bozo: a new release unzipped where the
+        # last one was replaces it (and keeps build\ and game\, so Rebuild only does what changed).
+        zip_dir(self.stage, self.zip, TOP, self.zip_time())
         # The names once more, as the zip has them.
         with zipfile.ZipFile(self.zip) as zf:
             names = zf.namelist()
@@ -810,16 +824,16 @@ class Release:
             '1. `%s.zip` below. Check its SHA-256 before running anything:' % self.name,
             '   `Get-FileHash .\\%s.zip` (PowerShell) must print' % self.name, '',
             '   ```', '   %s' % self.zip_sha256.upper(), '   ```', '',
-            '2. Unzip it anywhere you like except Program Files, with about 10 GB free, and double-click '
+            '2. Unzip it anywhere you like except Program Files, with about 5 GB free, and double-click '
             '**TMB Launcher.exe**. It is not signed: on *Windows protected your PC*, click **More info**, then '
             '**Run anyway**.',
             '3. Select your USA disc image (SCUS-97101), **Prepare the game** (a few minutes, once), **Play**.', '',
-            'Updating from an earlier release: unzip this one where you unzipped it (the zip holds a `TMB_Recomp` '
+            'Updating from an earlier release: unzip this one where you unzipped it (the zip holds a `%s` ' % TOP +
             'folder; replace the files), then **Rebuild now** when the launcher offers it: only what changed is built '
             'again. Saves and settings are in `%APPDATA%\\TMB_Recomp` and stay.',
             '',
             '## Build information', '',
-            '- Code: %s (`%s`), PS2Recomp fork `%s`' % (REPO, self.commit, self.fork_commit),
+            '- Code: %s (`%s`), BozoEngine `%s`' % (REPO, self.commit, self.engine_commit),
             '- Build kit: GCC %s, CMake %s, Ninja %s (MSYS2 UCRT64), FFmpeg %s (LGPL, static), Python %s'
             % (self.pkg_version('gcc'), self.pkg_version('cmake'), self.pkg_version('ninja'),
                self.manifest['ffmpeg']['version'], self.manifest['python']['version']),
@@ -832,9 +846,8 @@ class Release:
                                                                       sdig))
         lines += [
             '', '## Source code and licences', '',
-            'The code is in the zip (`source\\`) and at the commit above: our own code under the MIT licence, '
-            'PS2Recomp (the runtime and recompiler it is built on) under GPL-3.0, which makes the game you build a '
-            'GPL-3.0 combined work. The build kit redistributes unmodified '
+            'The code is in the zip (`source\\`) and at the commit above: our own code and BozoEngine (the recompiler '
+            'and runtime it is built on) under the MIT licence. The build kit redistributes unmodified '
             'GPL / LGPL programs (GCC, binutils, mingw-w64, the DLLs CMake loads) and FFmpeg (LGPL-2.1+): '
             '`LICENSES\\` in the zip has their licences, and `LICENSES\\SOURCES.txt` lists each package with its exact '
             'source on repo.msys2.org.' +
@@ -944,8 +957,8 @@ def verify_zip(path):
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
         tops = set(n.split('/', 1)[0] for n in names)
-        if tops != {NAME}:
-            problems.append('the zip\'s top folders are %s, expected %s only' % (sorted(tops), NAME))
+        if tops != {TOP}:
+            problems.append('the zip\'s top folders are %s, expected %s only' % (sorted(tops), TOP))
         for info in zf.infolist():
             n = info.filename
             rel = n.split('/', 1)[1] if '/' in n else n
@@ -962,10 +975,11 @@ def verify_zip(path):
             if len(head) >= 0x8006 and head[0x8001:0x8006] == b'CD001':
                 problems.append('%s: an ISO9660 volume' % n)
         for need in ('TMB Launcher.exe', 'README.txt', 'CHANGELOG.md', 'LICENSES/TMB_Recomp/LICENSE',
-                     'LICENSES/PS2Recomp/LICENSE', 'source/release.ini', 'kit/kit_manifest.json',
-                     'kit/python/python.exe', 'source/tools/tmb_build.py'):
-            if '%s/%s' % (NAME, need) not in names:
-                problems.append('%s/%s is missing' % (NAME, need))
+                     'LICENSES/BozoEngine/LICENSE', 'source/release.ini', 'kit/kit_manifest.json',
+                     'kit/python/python.exe', 'source/tools/tmb_build.py', 'source/BozoEngine/CMakeLists.txt',
+                     'kit/deps/sdl3-src/CMakeLists.txt', 'kit/deps/imgui-src/imgui.cpp'):
+            if '%s/%s' % (TOP, need) not in names:
+                problems.append('%s/%s is missing' % (TOP, need))
     return problems
 
 
@@ -1007,12 +1021,10 @@ def licence_files_in_source_package(path):
 LICENSES_README = """{name}: licences
 
 TMB_Recomp\\LICENSE    TMB_Recomp's own code in source\\ (MIT)
-PS2Recomp\\LICENSE     PS2Recomp, the runtime and recompiler in source\\PS2Recomp (GPL-3.0); the game
-                      you build links its runtime, so that game is a GPL-3.0 combined work
+BozoEngine\\LICENSE    BozoEngine, the recompiler and runtime in source\\BozoEngine (MIT)
 kit\\                 the build kit's components: toolchain\\<MSYS2 package> (GCC, binutils, mingw-w64,
                       winpthreads, CMake, Ninja and the DLLs they load), ffmpeg\\, python\\
-libraries\\            the libraries compiled into the game and the launcher (raylib, Dear ImGui, rlImGui,
-                      ELFIO, toml11, fmt, libdwarf, rabbitizer)
+libraries\\            the libraries compiled into the game and the launcher (SDL3, Dear ImGui)
 launcher-font-exo2\\   the launcher's font, Exo 2 (SIL Open Font License 1.1)
 SOURCES.txt           where the source of every component is, with the exact MSYS2 source packages
 
@@ -1036,8 +1048,8 @@ Before you start: check the download
   The hash printed must be the same as on the release page (and in {name}.zip.sha256).
 
 Install
-  1. Unzip the whole zip anywhere you like, with about 10 GB free, for example into D:\\Games: that makes
-     D:\\Games\\TMB_Recomp. Not in "Program Files" (the launcher writes the game next to itself).
+  1. Unzip the whole zip anywhere you like, with about 5 GB free, for example into D:\\Games: that makes
+     D:\\Games\\TMB_Recomp_Bozo. Not in "Program Files" (the launcher writes the game next to itself).
      Keep the folders together: TMB Launcher.exe, source\\ and kit\\.
   2. Double-click "TMB Launcher.exe". It is not signed, so Windows may show
      "Windows protected your PC": click "More info", then "Run anyway".
@@ -1061,8 +1073,8 @@ Help
   https://github.com/{repo}/issues
   When preparing fails, the launcher's "Copy details" button copies what we need to know.
 
-Licences and source code: LICENSES\\ (SOURCES.txt says where every source is). Our code is MIT; PS2Recomp,
-the runtime it is built on, is GPL-3.0, and so is the game you build with it.
+Licences and source code: LICENSES\\ (SOURCES.txt says where every source is). Our code is MIT, and so is
+BozoEngine, the recompiler and runtime it is built on.
 Twisted Metal: Black (c) Sony Interactive Entertainment, developed by Incognito Entertainment.
 An unofficial fan project, not affiliated with or endorsed by them.
 
@@ -1080,8 +1092,8 @@ Avant de commencer : vérifiez le téléchargement
   L'empreinte affichée doit être la même que sur la page de la version (et dans {name}.zip.sha256).
 
 Installation
-  1. Décompressez tout le zip où vous voulez, avec environ 10 Go libres, par exemple dans D:\\Jeux : cela donne
-     D:\\Jeux\\TMB_Recomp. Pas dans « Program Files » (le lanceur écrit le jeu à côté de lui).
+  1. Décompressez tout le zip où vous voulez, avec environ 5 Go libres, par exemple dans D:\\Jeux : cela donne
+     D:\\Jeux\\TMB_Recomp_Bozo. Pas dans « Program Files » (le lanceur écrit le jeu à côté de lui).
      Gardez les dossiers ensemble : TMB Launcher.exe, source\\ et kit\\.
   2. Double-cliquez sur « TMB Launcher.exe ». Il n'est pas signé : si Windows affiche
      « Windows a protégé votre ordinateur », cliquez sur « Informations complémentaires », puis « Exécuter quand même ».
@@ -1106,7 +1118,7 @@ Aide
   Si la préparation échoue, le bouton « Copier les détails » du lanceur copie ce dont nous avons besoin.
 
 Licences et code source : LICENSES\\ (SOURCES.txt indique où se trouve chaque source). Notre code est sous
-licence MIT ; PS2Recomp, le moteur sur lequel il repose, est sous GPL-3.0, tout comme le jeu que vous construisez.
+licence MIT, tout comme BozoEngine, le recompilateur et le moteur sur lesquels il repose.
 Twisted Metal: Black (c) Sony Interactive Entertainment, développé par Incognito Entertainment.
 Un projet de fans non officiel, ni affilié ni approuvé par eux.
 

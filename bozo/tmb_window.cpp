@@ -7,6 +7,7 @@
 //
 //   tmb [--iso image] [--elf SCUS_971.01] [--card-dir dir] [--width w --height h] [--fullscreen] [--no-vsync]
 //       [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] [--pad-script [n=]file]...
+//       [--no-sound] [--audio-latency ms] [--audio-stats] [--wav file]
 //
 // The user folder (%APPDATA%\TMB_Recomp, as the fork's TMB; PS2X_USER_DIR overrides it) holds input.ini, the memory
 // cards (mc0, mc1; --card-dir overrides) and the logs (logs/TMB_Recomp.log). Without --elf the game data is looked for
@@ -15,11 +16,17 @@
 // F8 saves the window as a PNG (--capture-dir, the current folder by default); --capture-frames saves it at the first
 // present after each of those game frames. F11 / Alt+Enter: fullscreen. --quit-after: close after that many frames.
 // PS2X_FRAME_STATS=1: the frames' work times every 2 s (the FramePacer).
+//
+// Sound (milestone M3): the mixer's samples, made on the EE clock at each frame's end, go to the default playback device
+// (bozo::app::AudioDevice: a queue of --audio-latency ms, 32 by default, plus the device's buffer). --audio-stats: the
+// queue, latency and underruns every 2 s. --wav (or PS2X_AUDIO_RECORD): what the mixer made, also to a WAV file.
 #include "tmb_host.h"
 #include "tmb_port.h"
 
 #include "bozo/app/app.h"
+#include "bozo/app/audio_device.h"
 #include "bozo/app/determinism.h"
+#include "bozo/audio/wav.h"
 #include "bozo/app/device_pad.h"
 #include "bozo/app/input_bindings.h"
 #include "bozo/app/window.h"
@@ -55,6 +62,11 @@ int main(int argc, char **argv)
     opt.quiet = true;
     bozo::app::WindowOptions window;
     window.title = "Twisted Metal: Black (BozoEngine)";
+    bozo::app::AudioOptions audio;
+    bool sound = true;
+    std::string wavPath;
+    if (const char *record = std::getenv("PS2X_AUDIO_RECORD"); record && *record)
+        wavPath = record;
     for (int k = 1; k < argc; ++k)
     {
         const std::string a = argv[k];
@@ -100,11 +112,19 @@ int main(int argc, char **argv)
             window.quitAfterFrames = std::stoull(value());
         else if (a == "--print")
             opt.printGameOutput = true;
+        else if (a == "--no-sound")
+            sound = false;
+        else if (a == "--audio-latency")
+            audio.latencyMs = std::stod(value());
+        else if (a == "--audio-stats")
+            audio.stats = true;
+        else if (a == "--wav")
+            wavPath = value();
         else
         {
             std::fprintf(stderr, "usage: tmb [--iso image] [--elf path] [--card-dir dir] [--width w] [--height h] [--fullscreen] "
                                  "[--no-vsync] [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] "
-                                 "[--pad-script [n=]file]... [--print]\n");
+                                 "[--pad-script [n=]file]... [--print] [--no-sound] [--audio-latency ms] [--audio-stats] [--wav file]\n");
             return 2;
         }
     }
@@ -165,10 +185,33 @@ int main(int argc, char **argv)
     std::fprintf(stderr, "tmb: %s, %zu overrides, ELF %s, disc %s\n", port->title, registry.functions().size(), opt.elf.c_str(),
                  opt.iso.c_str());
 
+    // The sound: what the mixer makes at each frame's end, to the device (and the WAV file).
+    bozo::app::AudioDevice device(audio);
+    bozo::audio::WavWriter wav;
+    if (!wavPath.empty() && !wav.open(wavPath))
+        std::fprintf(stderr, "tmb: cannot write %s\n", wavPath.c_str());
+    if (sound)
+        device.open();
+    if (device.isOpen() || wav.isOpen())
+        host.onAudio = [&](uint64_t, const int16_t *samples, size_t count) {
+            device.push(samples, count);
+            wav.write(samples, count);
+        };
+
     bozo::app::Game game;
     game.run = [&]
     {
         const uint64_t frames = host.run();
+        if (device.isOpen())
+        {
+            const bozo::app::AudioDevice::Stats a = device.stats();
+            std::fprintf(stderr, "tmb: sound: %.1f s pushed, %llu frames dropped, %llu underruns (%.1f ms of silence); queue %.1f ms "
+                                 "(%.1f-%.1f) + device %.1f ms; ratio %.4f\n",
+                         a.pushed / 48000.0, static_cast<unsigned long long>(a.dropped), static_cast<unsigned long long>(a.underruns),
+                         a.missing / 48.0, a.queueMs, a.minQueueMs, a.maxQueueMs, a.deviceMs, a.ratio);
+            device.close();
+        }
+        wav.close();
         std::fprintf(stderr, "tmb: the game ended after %llu frames: %s\n", static_cast<unsigned long long>(frames),
                      host.endReason().empty() ? "every thread ended" : host.endReason().c_str());
         return host.endReason().rfind("FAULT", 0) == 0 ? 1 : 0;

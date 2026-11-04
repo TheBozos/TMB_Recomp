@@ -2,11 +2,13 @@
 // disc image read, BozoEngine's own timing (free mode), TMB's overrides native; the native renderer records its frames.
 //
 //   tmb-headless [--frames n] [--elf SCUS_971.01] [--iso image] [--pad-script [n=]file]... [--card-dir dir]
-//                [--out run.ref] [--report n] [--quiet]
+//                [--out run.ref] [--report n] [--quiet] [--wav file [--wav-frames a-b]] [--no-sound]
 //
 // --pad-script n=file: player n's frame-keyed script (1 when omitted; players 2-4 are the multitap's slots, as the
 // reference's PS2X_PAD2_SCRIPT..PS2X_PAD4_SCRIPT).
 //
+// --wav: the sound the mixer made (48 kHz stereo, 16-bit), from game frame a to b (all of it by default); --no-sound:
+// the mixer is not brought up at the frames' ends (as before milestone M3).
 // Every --report frames (500 by default) and at the end: the frame, the EE clock, the function that waited for the
 // frame's end (the game's loop: uiTitle_Main__Fv at the title), the Shell (the menus' object, gp - 0x4148) and the
 // overrides that ran.
@@ -14,6 +16,7 @@
 #include "tmb_port.h"
 
 #include "bozo/app/determinism.h"
+#include "bozo/audio/wav.h"
 #include "bozo/ee/dispatcher.h"
 #include "bozo/host/free_host.h"
 #include "bozo/render/renderer.h"
@@ -35,6 +38,8 @@ int main(int argc, char **argv)
     bozo::host::FreeOptions opt;
     opt.elf = BOZO_RUN_DEFAULT_ELF;
     uint64_t report = 500;
+    std::string wavPath;
+    uint64_t wavFrom = 0, wavTo = UINT64_MAX;
     for (int k = 1; k < argc; ++k)
     {
         const std::string a = argv[k];
@@ -66,10 +71,22 @@ int main(int argc, char **argv)
             opt.quiet = true;
         else if (a == "--print")
             opt.printGameOutput = true;
+        else if (a == "--wav")
+            wavPath = value();
+        else if (a == "--wav-frames")
+        {
+            const std::string range = value();
+            const size_t dash = range.find('-');
+            wavFrom = std::stoull(range.substr(0, dash));
+            if (dash != std::string::npos && dash + 1 < range.size())
+                wavTo = std::stoull(range.substr(dash + 1));
+        }
+        else if (a == "--no-sound")
+            opt.sound = false;
         else
         {
             std::fprintf(stderr, "usage: tmb-headless [--frames n] [--elf path] [--iso image] [--pad-script [n=]file]... [--card-dir dir] "
-                                 "[--out run.ref] [--report n] [--print] [--quiet]\n");
+                                 "[--out run.ref] [--report n] [--print] [--quiet] [--wav file [--wav-frames a-b]] [--no-sound]\n");
             return 2;
         }
     }
@@ -163,7 +180,25 @@ int main(int argc, char **argv)
         if (report && (frame + 1) % report == 0 && !opt.quiet)
             state(frame + 1);
     };
+    bozo::audio::WavWriter wav;
+    if (!wavPath.empty())
+    {
+        if (!wav.open(wavPath))
+        {
+            std::fprintf(stderr, "tmb-headless: cannot write %s\n", wavPath.c_str());
+            return 2;
+        }
+        host.onAudio = [&](uint64_t frame, const int16_t *samples, size_t count) {
+            if (frame >= wavFrom && frame <= wavTo)
+                wav.write(samples, count);
+        };
+    }
     const uint64_t frames = host.run();
+    if (wav.isOpen())
+    {
+        std::printf("wav: %s, %.1f s of sound\n", wavPath.c_str(), wav.frames() / 48000.0);
+        wav.close();
+    }
     state(frames);
     const bozo::host::FreeStats &s = host.stats();
     std::printf("end: %s; %llu frames; %llu library calls, %llu kernel calls, %llu override calls, %llu VU0 programs, %llu "

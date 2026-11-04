@@ -843,7 +843,9 @@ namespace
     // point hit through the game's own Vehicle::vehicleTakeHit (0x1ae070: a0 vehicle, a1 hit point, a2 damage, a3
     // type), so it dies as if shot and the kill counts ("kill 7 enemies to advance"). A scripted run then gets through
     // story levels without aiming. Called on a copy of the context at the top of the update, where the stack below sp
-    // is free.
+    // is free. Guest code on a copy never leaves the override (BozoEngine kernel.md section 3b, "Guest code on an
+    // override's own context": no event, no stop, its inner and recursive returns plain returns); before that rule a
+    // hit leaving at bspVecTestIn's inner return 0x2014f0 faulted the free story run at frame 5458.
     void killEnemies(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         static const uint32_t s_interval = []

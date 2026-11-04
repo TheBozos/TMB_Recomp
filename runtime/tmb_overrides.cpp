@@ -616,8 +616,9 @@ namespace
         const uint64_t accounted = bozo::port::now(runtime) - g_frameEndCycle;
         if (real > accounted)
             bozo::port::accountCycles(runtime, ctx, real - accounted);
-        g_frameEndCycle = bozo::port::now(runtime);
         bozo::port::frameEnd(runtime, ctx);
+        // The frame's end as the host has it (a checked run moves the clock to the reference's frame end).
+        g_frameEndCycle = bozo::port::now(runtime);
         return step;
     }
 

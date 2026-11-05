@@ -843,9 +843,12 @@ class Release:
             '**TMB Launcher.exe**. It is not signed: on *Windows protected your PC*, click **More info**, then '
             '**Run anyway**.',
             '3. Select your USA disc image (SCUS-97101), **Prepare the game** (a few minutes, once), **Play**.', '',
-            'Updating from an earlier release: unzip this one where you unzipped it (the zip holds a `%s` ' % TOP +
-            'folder; replace the files), then **Rebuild now** when the launcher offers it: only what changed is built '
-            'again. Saves and settings are in `%APPDATA%\\TMB_Recomp` and stay.',
+            'For a new/separate installation, use `%s.zip` (`%s/`). ' % (self.name, TOP) +
+            'For an existing v0.3.2 installation, use the launcher\'s **Update**, or extract `%s` over its ' %
+            os.path.basename(self.migration_zip) +
+            '`TMB_Recomp/` installation. Both ZIPs contain the same BozoEngine payload; neither retains the old runtime.',
+            'Then **Rebuild now** when the launcher offers it. Saves and settings stay in `%APPDATA%\\TMB_Recomp`. '
+            'Subsequent BozoEngine updates use `-bozo.zip` with either installation folder name.',
             '',
             '## Build information', '',
             '- Code: %s (`%s`), BozoEngine `%s`' % (REPO, self.commit, self.engine_commit),

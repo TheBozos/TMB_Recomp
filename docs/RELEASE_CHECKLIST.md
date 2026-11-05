@@ -11,15 +11,16 @@ Publication is separate from a successful build; this checklist records what was
 - [x] Local engine instruction/runtime/library/audio tests and whole-function replay pass.
 - [x] Pinned boot and 1P match agree on RAM, scratchpad, calls, threads and draws (the established final-frame exception is recorded).
 - [x] Stage 6 passes its previous interrupt point. Report native sound-model differences separately from runs using recorded IOP-time replies.
-- [ ] Native story completion, card writes and restart/readback work without a reference log.
+- [ ] Full native story completion. Card writes and a 6,000-frame restart/readback pass; the 26,000-frame story progression does not cover the campaign ending.
 
 ## Timing and rendering
 
 - [x] Menus: timer ticks and fields advance at their real-time rates, independently of presentation FPS.
-- [ ] Movies: measure decoded picture cadence, then watch/listen to an intro and a story movie. Run `tools/check_timing.py` on the log.
+- [x] Movies: measure decoded picture cadence and run `tools/check_timing.py` on the log.
+- [ ] Human watch/listen acceptance of a full intro and story movie.
 - [x] Native clock pacing stays active even with an old `TMB_NATIVE_FRAMES=0` environment setting.
 - [x] Heat haze defaults on; `BOZO_HEAT_HAZE=0` restores the earlier port's rendering for comparisons.
-- [ ] 1P, four-player selection/split-screen, bots and the effects-heavy stage hold the 60 Hz target; keep timing logs.
+- [x] 1P with bots, actual four-player selection/split-screen, and the effects-heavy stage hold the 60 Hz target; timing logs are retained.
 - [x] Recheck the previous four-player present dip around frames 7000–7300 with captures at 6000 and 7000 (same opponent-selection screen, 60 presents/s).
 - [ ] F2 Controls/Video/Cheats, mouse/keyboard launcher navigation and fullscreen switching remain usable.
 
@@ -31,9 +32,10 @@ Publication is separate from a successful build; this checklist records what was
 - [ ] The corresponding-source ZIP and licences accompany a published release.
 - [x] README and release notes state Windows 10/11, AVX2 + FMA, OpenGL 3.3 and approximately 10 GB free.
 - [x] Extract the player ZIP, then build from the player's USA disc with only its bundled kit, offline.
-- [ ] Test a path with spaces/non-ASCII, cancellation/resume, Play, F2, and restart.
+- [x] Test a path with spaces/non-ASCII, cancellation/resume, Play, and restart.
+- [ ] Human F2 controls/video/cheats and fullscreen switching on the final package.
 - [x] Test the migration ZIP through the previous updater; source files removed by this release disappear, saves/settings survive, rebuild starts the BozoEngine executable.
-- [ ] Test future updates of both folder layouts with the BozoEngine updater.
+- [x] Test future updates of both folder layouts with the BozoEngine updater, including replacement of its own bundled Python DLLs.
 
 ## Clean-PC and player acceptance
 

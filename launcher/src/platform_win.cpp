@@ -610,4 +610,9 @@ namespace plat
             buffer.resize(buffer.size() * 2);
         }
     }
+
+    void messageBox(const std::string &title, const std::string &text)
+    {
+        MessageBoxW(nullptr, widen(text).c_str(), widen(title).c_str(), MB_OK | MB_ICONERROR);
+    }
 }

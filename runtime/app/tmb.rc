@@ -16,8 +16,8 @@ BEGIN
         BEGIN
             VALUE "FileDescription", "Twisted Metal: Black"
             VALUE "ProductName", "Twisted Metal: Black (TMB_Recomp, a native PC port)"
-            VALUE "InternalName", "ps2EntryRunner"
-            VALUE "OriginalFilename", "ps2EntryRunner.exe"
+            VALUE "InternalName", "tmb"
+            VALUE "OriginalFilename", "tmb.exe"
             VALUE "FileVersion", "1.0.0.0"
             VALUE "ProductVersion", "1.0.0.0"
         END

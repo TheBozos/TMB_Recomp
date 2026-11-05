@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """make_build_kit: assembles the build kit tools/tmb_build.py uses on a PC with nothing installed (no MSYS2, git,
-network or Python): a compiler, CMake and Ninja, a minimal static FFmpeg, the libraries' sources, the prebuilt
-recompilers and an embeddable Python. Run once on the developer's PC (MSYS2 UCRT64 installed, network for the
-downloads); the kit is build output, never committed.
+network or Python): a compiler, CMake and Ninja, a minimal static FFmpeg, the libraries' sources (SDL3, Dear ImGui)
+and an embeddable Python. The game is built on BozoEngine, whose sources come with TMB_Recomp's (the BozoEngine
+submodule, in a release's source/BozoEngine): its recompiler is built on the player's PC with the rest. Run once on the
+developer's PC (MSYS2 UCRT64 installed, network for the downloads); the kit is build output, never committed.
 
   python tools/make_build_kit.py --out D:/tmb_kit/kit [--downloads D:/tmb_kit/downloads] [--zip D:/tmb_kit/kit.zip]
 
@@ -13,16 +14,17 @@ The kit (tmb_build uses it when it sits in <TMB_Recomp>/kit or next to the TMB_R
                libraries, old / Store / API-set import libraries, the CMake GUI and tests), plus the DLLs the kept
                programs load. The folder keeps MSYS2's name: GCC finds its sysroot as <bin>/../../ucrt64.
   ffmpeg/      FFmpeg (official release tarball, pinned, SHA-256 checked) configured LGPL-only with nothing but the
-               MPEG-2 video decoder, the MPEG video parser, avcodec, swscale and avutil, built static with the kit's
-               compiler (configure in MSYS2's sh; the objects through Ninja, the list read from FFmpeg's Makefiles)
-  deps/        <name>-src: the FetchContent sources at the tags the CMake files pin (git, without .git)
-  tools/       ps2_recomp.exe and ps2_vu_aot.exe built with the kit, statically linked
+               MPEG-2 video decoder, the MPEG video parser, avcodec and avutil (BozoEngine's libmpeg uses no swscale),
+               built static with the kit's compiler (configure in MSYS2's sh; the objects through Ninja, the list read
+               from FFmpeg's Makefiles)
+  deps/        <name>-src: the FetchContent sources BozoEngine's CMake files pin (the same release archives, the same
+               SHA-256), unpacked: sdl3-src (SDL 3.4.20) and imgui-src (Dear ImGui v1.92.7-docking, b1bcb12a)
   python/      the Windows embeddable Python (python.org, pinned, SHA-256 checked)
   sources/     the FFmpeg tarball the kit's FFmpeg is built from (LGPL: its corresponding source)
-  licenses/    each package's license files
+  licenses/    each package's license files (licenses/deps/<name>: SDL3's zlib licence, ImGui's MIT)
   kit_manifest.json   versions, sources, hashes, licenses, sizes
 
-Steps (--only <step> runs one): toolchain, python, deps, ffmpeg, tools, manifest; then --zip.
+Steps (--only <step> runs one): toolchain, python, deps, ffmpeg, manifest; then --zip.
 
 The toolchain's MSYS2 packages are pinned in tools/build_kit_packages.json (committed): the packages the kit is made of
 and every package they depend on, each with its exact version, its file on repo.msys2.org and that file's SHA-256. The
@@ -53,7 +55,7 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 from tmb_build import pe_imports, cmake_rc_flags  # noqa: E402
 
-KIT_VERSION = 1
+KIT_VERSION = 2  # 2: BozoEngine (SDL3 and ImGui sources, no prebuilt recompilers, no swscale)
 
 # ---- pinned downloads (official upstream; a mirror of ours only as a fallback, held to the same SHA-256) ----
 FFMPEG = {
@@ -73,32 +75,25 @@ PYTHON = {
     'sha256': '90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159',
     'license': 'PSF-2.0',
 }
-# FetchContent sources: (name as tmb_build's --fetch-cache wants it, repository, tag, the CMake file pinning it)
+# FetchContent sources: the release archives BozoEngine's CMake files pin (runtime/CMakeLists.txt: URL and URL_HASH),
+# unpacked as deps/<name>-src for tmb_build's FETCHCONTENT_SOURCE_DIR_<NAME>. 'top': the archive's top folder.
 DEPS = [
-    ('raylib', 'https://github.com/raysan5/raylib.git', '5.5', 'PS2Recomp/ps2xRuntime/CMakeLists.txt', 'Zlib'),
-    ('imgui', 'https://github.com/ocornut/imgui.git', 'v1.92.7-docking', 'PS2Recomp/ps2xRuntime/CMakeLists.txt', 'MIT'),
-    ('rlimgui', 'https://github.com/raylib-extras/rlImGui.git', 'Raylib_5_5', 'PS2Recomp/ps2xRuntime/CMakeLists.txt',
-     'Zlib'),
-    ('elfio', 'https://github.com/serge1/ELFIO.git', 'Release_3.12', 'PS2Recomp/ps2xRecomp/CMakeLists.txt', 'MIT'),
-    ('toml11', 'https://github.com/ToruNiina/toml11.git', 'v4.4.0', 'PS2Recomp/ps2xRecomp/CMakeLists.txt', 'MIT'),
-    ('fmt', 'https://github.com/fmtlib/fmt.git', '12.1.0', 'PS2Recomp/ps2xRecomp/CMakeLists.txt', 'MIT'),
-    ('libdwarf', 'https://github.com/davea42/libdwarf-code.git', 'v2.2.0', 'PS2Recomp/ps2xRecomp/CMakeLists.txt',
-     'LGPL-2.1 (libdwarf)'),
-    ('rabbitizer', 'https://github.com/Decompollaborate/rabbitizer.git', '1.14.3',
-     'PS2Recomp/ps2xRecomp/CMakeLists.txt', 'MIT'),
+    {'name': 'sdl3', 'version': '3.4.20', 'top': 'SDL3-3.4.20',
+     'url': 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz',
+     'sha256': 'f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f',
+     'cmake_file': 'BozoEngine/runtime/CMakeLists.txt', 'license': 'Zlib', 'license_files': ['LICENSE.txt']},
+    {'name': 'imgui', 'version': 'v1.92.7-docking (b1bcb12a624af7509894c8e77dd47416997777fa)',
+     'top': 'imgui-b1bcb12a624af7509894c8e77dd47416997777fa',
+     'url': 'https://github.com/ocornut/imgui/archive/b1bcb12a624af7509894c8e77dd47416997777fa.tar.gz',
+     'sha256': '123926eb22d4990dea06bec0739d92f7790c8ee505b3d903fe2de7e5940f2c27',
+     'cmake_file': 'BozoEngine/runtime/CMakeLists.txt', 'license': 'MIT', 'license_files': ['LICENSE.txt']},
 ]
 
-# What the build never reads in those sources (raylib's examples are only added with BUILD_EXAMPLES; rlImGui and imgui
-# are compiled from their top-level files; rlImGui's premake binaries are executables nothing runs; ELFIO's examples and
-# tests are only added when it is the top-level project, libdwarf's test/ with DO_TESTING: their sample ELF files would
-# also be the only ELF files in a release, which tools/make_release.py refuses).
+# What the build never reads in those sources (SDL3's tests and examples are only added with SDL_TESTS /
+# SDL_EXAMPLES, which BozoEngine turns off; the IDE projects; ImGui is compiled from its top-level files and backends/).
 DEP_PRUNE = {
-    'elfio': ['tests', 'examples', 'doc'],
-    'libdwarf': ['test'],
-    'raylib': ['examples', 'projects'],
-    'imgui': ['examples', 'docs'],
-    'rlimgui': ['examples', 'resources', 'premake5', 'premake5.exe', 'premake5.osx', 'premake5.lua',
-                'raylib_premake5.lua', 'premake-VisualStudio.bat', 'premake-mingw.bat'],
+    'sdl3': ['test', 'examples', 'docs', 'Xcode', 'VisualC', 'VisualC-GDK', 'android-project'],
+    'imgui': ['examples', 'docs', 'misc/fonts'],
 }
 
 # ---- the toolchain ----
@@ -613,39 +608,55 @@ class Kit:
 
     # -- deps
 
-    def git(self):
-        for c in (shutil.which('git'), r'C:\Program Files\Git\cmd\git.exe'):
-            if c and os.path.isfile(c):
-                return c
-        raise KitError('git is needed to fetch the libraries\' sources')
-
     def step_deps(self):
-        git = self.git()
+        """The pinned archives (SHA-256 checked, the same BozoEngine's CMake files pin), unpacked as deps/<name>-src
+        with what the build never reads left out; their licences in licenses/deps/<name>."""
         dst_root = os.path.join(self.out, 'deps')
         os.makedirs(dst_root, exist_ok=True)
+        for old in os.listdir(dst_root):  # a kit of the fork's build (raylib, rlimgui, the recompilers' libraries)
+            if old.endswith('-src') and old[:-4] not in [d['name'] for d in DEPS]:
+                rmtree(os.path.join(dst_root, old))
         info = {}
-        for name, repo, tag, cmake_file, lic in DEPS:
-            with open(os.path.join(ROOT, cmake_file), encoding='utf-8') as f:
+        for dep in DEPS:
+            name = dep['name']
+            with open(os.path.join(ROOT, dep['cmake_file']), encoding='utf-8') as f:
                 text = f.read()
-            if not re.search(r'GIT_REPOSITORY\s+"?%s"?\s+GIT_TAG\s+"?%s"?' % (re.escape(repo), re.escape(tag)), text):
-                raise KitError('%s no longer pins %s at %s: update DEPS' % (cmake_file, repo, tag))
+            if dep['url'] not in text or ('SHA256=' + dep['sha256']) not in text:
+                raise KitError('%s no longer pins %s (SHA-256 %s): update DEPS' % (dep['cmake_file'], dep['url'],
+                                                                                  dep['sha256']))
+            archive = download(dep, self.downloads)
             dst = os.path.join(dst_root, name + '-src')
             rmtree(dst)
-            run([git, '-c', 'advice.detachedHead=false', 'clone', '--quiet', '--depth', '1', '--branch', tag,
-                 repo, dst])
-            commit = run([git, '-C', dst, 'rev-parse', 'HEAD']).strip()
-            rmtree(os.path.join(dst, '.git'))
+            tmp = os.path.join(self.work, 'deps-' + name)
+            rmtree(tmp)
+            os.makedirs(tmp)
+            with tarfile.open(archive) as tf:
+                for m in tf.getmembers():
+                    parts = m.name.split('/')
+                    if m.name.startswith('/') or '..' in parts or not (m.isfile() or m.isdir()):
+                        if m.issym() or m.islnk():
+                            continue  # no links in a kit (none of these archives needs one)
+                        raise KitError('%s: unexpected entry %s' % (archive, m.name))
+                tf.extractall(tmp, **({'filter': 'data'} if hasattr(tarfile, 'data_filter') else {}))
+            top = os.path.join(tmp, dep['top'])
+            if not os.path.isdir(top):
+                raise KitError('%s has no %s/' % (archive, dep['top']))
+            shutil.move(top, dst)
+            rmtree(tmp)
             for rel in DEP_PRUNE.get(name, []):
-                p = os.path.join(dst, rel)
+                p = os.path.join(dst, *rel.split('/'))
                 if os.path.isdir(p):
                     rmtree(p)
                 elif os.path.isfile(p):
                     os.remove(p)
+            lic = self.licenses_dir(os.path.join('deps', name))
+            for n in dep['license_files']:
+                shutil.copy2(os.path.join(dst, n), lic)
             size, nfiles = dir_size(dst)
-            info[name] = {'repository': repo, 'tag': tag, 'commit': commit, 'license': lic,
-                          'left_out': DEP_PRUNE.get(name, []),
-                          'bytes': size, 'files': nfiles}
-            log('  %s %s %s (%.1f MB)' % (name, tag, commit[:12], size / 1e6))
+            info[name] = {'version': dep['version'], 'url': dep['url'], 'sha256': dep['sha256'],
+                          'pinned_by': dep['cmake_file'], 'license': dep['license'],
+                          'left_out': DEP_PRUNE.get(name, []), 'bytes': size, 'files': nfiles}
+            log('  %s %s (%.1f MB)' % (name, dep['version'], size / 1e6))
         self.part('deps', info)
 
     # -- ffmpeg
@@ -707,66 +718,26 @@ class Kit:
         log('  ffmpeg %s: %s, %.1f MB' % (FFMPEG['version'], ', '.join('%s %d objects' % (lib, len(libs[lib]['objs']))
                                                                      for lib in FFMPEG_LIBS), size / 1e6))
 
-    # -- tools
-
-    def step_tools(self):
-        build = os.path.join(self.work, 'tools-build')
-        rmtree(build)
-        env = clean_env([self.bin])
-        b = lambda n: os.path.join(self.bin, n + '.exe').replace('\\', '/')  # noqa: E731
-        deps = os.path.join(self.out, 'deps')
-        fetch = ['-DFETCHCONTENT_SOURCE_DIR_%s=%s' % (n.upper(), os.path.join(deps, n + '-src').replace('\\', '/'))
-                 for n, *_ in DEPS if os.path.isdir(os.path.join(deps, n + '-src'))]
-        fetch.append('-DFETCHCONTENT_FULLY_DISCONNECTED=ON')
-        logf = os.path.join(self.work, 'tools.log')
-        if os.path.exists(logf):
-            os.remove(logf)
-        run([b('cmake'), '-S', os.path.join(ROOT, 'PS2Recomp'), '-B', build, '-G', 'Ninja',
-             '-DCMAKE_BUILD_TYPE=Release', '-DPS2X_BUILD_RUNTIME=OFF', '-DPS2X_BUILD_STUDIO=OFF',
-             '-DPS2X_BUILD_TEST=OFF', '-DPS2X_BUILD_ANALYZER=OFF',
-             '-DCMAKE_C_COMPILER=' + b('gcc'), '-DCMAKE_CXX_COMPILER=' + b('g++'), '-DCMAKE_MAKE_PROGRAM=' + b('ninja'),
-             '-DCMAKE_EXE_LINKER_FLAGS=-static'] + cmake_rc_flags() + fetch, env=env, logfile=logf)
-        run([b('cmake'), '--build', build, '--target', 'ps2_recomp', 'ps2_vu_aot', '-j', str(self.args.jobs)],
-            env=env, logfile=logf)
-        dst = os.path.join(self.out, 'tools')
-        rmtree(dst)
-        os.makedirs(dst)
-        info = {}
-        for t in ('ps2_recomp', 'ps2_vu_aot'):
-            exe = os.path.join(build, 'ps2xRecomp', t + '.exe')
-            run([b('strip'), '--strip-debug', exe], env=env)
-            shutil.copy2(exe, dst)
-            imports = pe_imports(exe)
-            local = [n for n in imports if os.path.isfile(os.path.join(self.bin, n))]
-            if local:
-                raise KitError('%s still loads %s' % (t, ', '.join(local)))
-            info[t] = {'bytes': os.path.getsize(exe), 'sha256': sha256_file(exe), 'imports': sorted(imports)}
-            log('  %s: %.1f MB, imports %s' % (t, info[t]['bytes'] / 1e6, ', '.join(sorted(imports))))
-        info['fork_commit'] = release_stamp().get('fork_commit') or \
-            run([self.git(), '-C', os.path.join(ROOT, 'PS2Recomp'), 'rev-parse', 'HEAD']).strip()
-        self.part('tools', info)
-
     # -- manifest
 
     def step_manifest(self):
-        parts = {n: self.part(n) for n in ('toolchain', 'python', 'deps', 'ffmpeg', 'tools')}
+        parts = {n: self.part(n) for n in ('toolchain', 'python', 'deps', 'ffmpeg')}
         sizes = {}
-        for d in ('ucrt64', 'ffmpeg', 'deps', 'tools', 'python', 'sources', 'licenses'):
+        for d in ('ucrt64', 'ffmpeg', 'deps', 'python', 'sources', 'licenses'):
             sizes[d] = dir_size(os.path.join(self.out, d))[0]
         manifest = {
-            'kit': 'TMB_Recomp build kit', 'kit_version': KIT_VERSION,
+            'kit': 'TMB_Recomp build kit', 'kit_version': KIT_VERSION, 'engine': 'BozoEngine',
             'made': time.strftime('%Y-%m-%d %H:%M:%S'), 'made_from': self.tmb_commit(),
             'layout': {
                 'ucrt64': 'the toolchain: GCC, binutils, mingw-w64, winpthreads, CMake, Ninja (MSYS2 UCRT64 '
                           'packages, pruned)',
-                'ffmpeg': 'static FFmpeg: avcodec (mpeg2video decoder, mpegvideo parser), swscale, avutil',
-                'deps': '<name>-src FetchContent sources',
-                'tools': 'ps2_recomp.exe, ps2_vu_aot.exe (static)',
+                'ffmpeg': 'static FFmpeg: avcodec (mpeg2video decoder, mpegvideo parser), avutil',
+                'deps': '<name>-src FetchContent sources: sdl3 (SDL 3.4.20), imgui (Dear ImGui b1bcb12a)',
                 'python': 'Windows embeddable Python',
                 'sources': 'FFmpeg source tarball',
                 'licenses': 'license files per component'},
             'toolchain': parts['toolchain'], 'ffmpeg': parts['ffmpeg'], 'python': parts['python'],
-            'deps': parts['deps'], 'tools': parts['tools'], 'bytes': sizes, 'total_bytes': sum(sizes.values()),
+            'deps': parts['deps'], 'bytes': sizes, 'total_bytes': sum(sizes.values()),
             'licenses': {
                 'gcc': 'GPL-3.0-or-later; the runtime libraries it links into a program (libgcc, libstdc++, '
                        'libatomic) under the GCC Runtime Library Exception 3.1: the built game carries no GPL '
@@ -778,7 +749,7 @@ class Kit:
                 'ffmpeg': 'LGPL-2.1-or-later, configured without --enable-gpl / --enable-version3 / '
                           '--enable-nonfree; its source in sources/',
                 'python': 'PSF-2.0',
-                'deps': {n: lic for n, _r, _t, _c, lic in DEPS},
+                'deps': {d['name']: d['license'] for d in DEPS},
                 'gpl_source_note': 'GCC, binutils and the other MSYS2 binaries are redistributed unmodified: their '
                                    'corresponding sources are the MSYS2 source packages of the versions listed in '
                                    'toolchain.msys2_packages (repo.msys2.org/mingw/sources); a public kit must ship or '
@@ -788,6 +759,13 @@ class Kit:
             json.dump(manifest, f, indent=1)
         log('  kit: %.1f MB (%s)' % (sum(sizes.values()) / 1e6,
                                      ', '.join('%s %.1f' % (k, v / 1e6) for k, v in sizes.items())))
+
+    @staticmethod
+    def git():
+        for c in (shutil.which('git'), r'C:\Program Files\Git\cmd\git.exe'):
+            if c and os.path.isfile(c):
+                return c
+        raise KitError('git is needed to read the commit the kit is made from')
 
     def tmb_commit(self):
         if release_stamp().get('commit'):
@@ -813,15 +791,15 @@ class Kit:
 
 # ---- FFmpeg: configure flags, the Makefiles read, the Ninja file ----
 
-FFMPEG_LIBS = ['avcodec', 'swscale', 'avutil']  # link order
+FFMPEG_LIBS = ['avcodec', 'avutil']  # link order (BozoEngine's libmpeg: no swscale)
 FFMPEG_CONFIGURE = [
     '--prefix=/kit/ffmpeg', '--arch=x86_64', '--target-os=mingw32',
     '--cc=gcc', '--cxx=g++', '--ar=ar', '--nm=nm', '--ranlib=ranlib', '--strip=strip', '--windres=windres',
     '--pkg-config=false',
     '--enable-static', '--disable-shared', '--disable-programs', '--disable-doc', '--disable-debug',
     '--disable-everything', '--disable-autodetect', '--disable-network',
-    '--disable-avdevice', '--disable-avformat', '--disable-avfilter', '--disable-swresample',
-    '--enable-avcodec', '--enable-swscale', '--enable-avutil',
+    '--disable-avdevice', '--disable-avformat', '--disable-avfilter', '--disable-swresample', '--disable-swscale',
+    '--enable-avcodec', '--enable-avutil',
     '--enable-decoder=mpeg2video', '--enable-parser=mpegvideo',
     '--enable-w32threads', '--disable-x86asm',
 ]
@@ -1107,7 +1085,7 @@ def write_pc(path, lib, version, mk):
                 % (lib, lib, version, lib, private))
 
 
-STEPS = ['toolchain', 'python', 'deps', 'ffmpeg', 'tools', 'manifest']
+STEPS = ['toolchain', 'python', 'deps', 'ffmpeg', 'manifest']
 
 
 def main():
@@ -1115,7 +1093,7 @@ def main():
     ap.add_argument('--out', help='the kit folder to write (outside the repository, or under build/)')
     ap.add_argument('--msys', default='C:/msys64', help='the MSYS2 installation the toolchain comes from')
     ap.add_argument('--downloads', help='where the FFmpeg and Python downloads are kept (default: next to --out)')
-    ap.add_argument('--work', help='scratch folder for the FFmpeg and tools builds (default: next to --out)')
+    ap.add_argument('--work', help='scratch folder for the FFmpeg build and the archives (default: next to --out)')
     ap.add_argument('--only', choices=STEPS, action='append', help='run only these steps')
     ap.add_argument('--zip', help='also write the kit as this .zip')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)

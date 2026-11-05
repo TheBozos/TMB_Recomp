@@ -17,7 +17,7 @@ SLUS_*
 *.irx
 *.IMG
 
-# PS2Recomp is a git submodule; local build trees live here
+# Local build trees
 build/
 out/
 cmake-build-*/
@@ -41,3 +41,6 @@ ps2_log.txt
 # Debug UI layout the runtime writes in the working directory
 imgui.ini
 __pycache__/
+
+# Retired local checkout (not a dependency; preserves untracked local files during migration)
+/PS2Recomp/

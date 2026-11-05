@@ -6,16 +6,16 @@
 
 namespace
 {
-    // tools/tmb_build.py's STEPS, with their usual seconds on a player's build with the kit (8 cores, SSD): the
-    // compile is most of it.
+    // tools/tmb_build.py's STEPS (the build on BozoEngine), with their usual seconds on a player's build with the kit
+    // (16 threads, SSD; a first build): SDL3's configure checks and the compile are most of it.
     struct StepInfo
     {
         const char *id;
         double weight;
     };
     const StepInfo kSteps[] = {
-        {"verify", 1},    {"extract", 12}, {"tools", 1},     {"recompile", 4}, {"packs", 24},
-        {"iop", 3},       {"configure", 7}, {"compile", 150}, {"stage", 2},
+        {"verify", 1},  {"extract", 2},   {"configure", 60}, {"tools", 7},
+        {"recompile", 2}, {"packs", 32}, {"compile", 55},   {"stage", 1},
     };
 
     int indexOf(const std::vector<BuildStep> &steps, const std::string &id)

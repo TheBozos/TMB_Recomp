@@ -16,11 +16,9 @@
 // The pack's container, its loader and the decoders (PSM, CSM1 palettes, TEXA alpha) are the fork's
 // (runtime/native/native_texture_pack.h, tools/native_pack/texture.py); what is TMB's here is the key scheme above.
 
-#include "game_overrides.h"
-#include "ps2_runtime.h"
-#include "ps2_recompiled_functions.h"
-#include "runtime/native/native_texture_cache.h"
-#include "runtime/native/native_texture_pack.h"
+#include "tmb_port.h"
+#include "bozo/render/texture.h"
+#include "bozo/render/texture_pack.h"
 #include "tmb_meshes.h"
 
 #include <algorithm>
@@ -42,7 +40,7 @@ namespace tmb::textures
 {
     namespace
     {
-        using Texture = ps2x::native::TextureCache::Texture;
+        using Texture = bozo::render::Texture;
 
         constexpr uint32_t kTexInfo = 0x004D1930u; // texInfo[1000], 16 bytes each
         constexpr uint32_t kFileReadf = 0x001C21D0u;
@@ -59,9 +57,9 @@ namespace tmb::textures
         constexpr uint32_t kResLoadReturn = 0x001F8AB4u; // texmLoadResTexture's call of sceGsSetDefLoadImage
         constexpr uint32_t kFontInit = 0x001C3E48u;
 
-        using ps2x::native::packs::psmIndexed;
-        using ps2x::native::packs::psmIsH;
-        using Record = ps2x::native::packs::TextureRecord;
+        using bozo::render::packs::psmIndexed;
+        using bozo::render::packs::psmIsH;
+        using Record = bozo::render::packs::TextureRecord;
         bool isH(uint32_t psm) { return psmIsH(psm); }
         bool indexed(uint32_t psm) { return psmIndexed(psm); }
 
@@ -69,7 +67,7 @@ namespace tmb::textures
         {
             std::mutex mutex;
             bool loaded = false;
-            ps2x::native::packs::TexturePack pack; // file name -> its records in order
+            bozo::render::packs::TexturePack pack; // file name -> its records in order
             std::unordered_map<uint32_t, std::string> nameAt;          // destination -> the disc file read there
             std::vector<std::string> texFiles, resFiles;               // the level's, in the game's order
             uint32_t texOrdinal = 0, resOrdinal = 0;
@@ -303,7 +301,7 @@ namespace tmb::textures
                         mismatch("resident record", n, r, psm, width, height);
                 }
             }
-            sceGsSetDefLoadImage_0x203f30(rdram, ctx, runtime);
+            bozo::port::callLibrary(runtime, ctx, kSceGsSetDefLoadImage); // the library (BozoEngine's), not the game's copy
         }
 
         void fontInitOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -317,10 +315,10 @@ namespace tmb::textures
             fontInit__F10_vramAddrs_0x1c3e48(rdram, ctx, runtime);
         }
 
-        // A record's entry as RGBA with the GS's alpha (0x80 is 1.0), as ps2x::native::TextureCache gives it.
+        // A record's entry as RGBA with the GS's alpha (0x80 is 1.0), as bozo::render::TextureCache gives it.
         uint32_t colour(const Record &r, uint32_t index, uint64_t texa)
         {
-            return ps2x::native::packs::recordColour(r, index, texa);
+            return bozo::render::packs::recordColour(r, index, texa);
         }
     }
 
@@ -406,7 +404,7 @@ namespace tmb::textures
                 for (uint32_t i = 0; i < 16u && !paletteFound; ++i)
                 {
                     uint32_t px = 0, py = 0;
-                    ps2x::native::csm1Position(ps2x::native::packs::psmEightBit(psm) ? i : (csa * 16u + i) & 0xffu, px, py);
+                    bozo::render::csm1Position(bozo::render::packs::psmEightBit(psm) ? i : (csa * 16u + i) & 0xffu, px, py);
                     paletteFound = paletteEntry(px, py, ignored);
                 }
                 if (const auto it = s.byBlock.find(cbp); it != s.byBlock.end())
@@ -433,7 +431,7 @@ namespace tmb::textures
 
             uint32_t colours[256] = {};
             if (indexed(psm))
-                ps2x::native::packs::csm1Palette(psm, csa,
+                bozo::render::packs::csm1Palette(psm, csa,
                                                  [&](uint32_t px, uint32_t py, uint32_t &out)
                                                  {
                                                      if (palette && palette == fontPalette)
@@ -449,7 +447,7 @@ namespace tmb::textures
             Texture texture;
             texture.key = key;
             texture.version = ++s.decodes;
-            ps2x::native::packs::decodeRecord(texture, width, height, psm, *texels, colours, texa);
+            bozo::render::packs::decodeRecord(texture, width, height, psm, *texels, colours, texa);
             // A texture with no texel showing: reported once (a palette or texels taken from the wrong record).
             if (std::all_of(texture.rgba.begin(), texture.rgba.end(), [](uint32_t c) { return (c >> 24) == 0u; }))
             {
@@ -521,14 +519,14 @@ namespace tmb::textures
         for (size_t i = 0; i < texture.rgba.size(); ++i)
         {
             uint32_t px = 0, py = 0;
-            ps2x::native::csm1Position(texels.texels[i] & 0xfu, px, py);
+            bozo::render::csm1Position(texels.texels[i] & 0xfu, px, py);
             texture.rgba[i] = px < palette.width && py < palette.height ? colour(palette, py * palette.width + px, 0u) : 0u;
         }
         s_font = std::make_shared<const Texture>(std::move(texture));
         return s_font;
     }
 
-    void install(PS2Runtime &runtime)
+    void install(tmb::Registry &runtime)
     {
         runtime.registerFunction(kFileReadf, &fileReadfOverride);
         runtime.registerFunction(kZipInflateAll, &zipInflateAllOverride);

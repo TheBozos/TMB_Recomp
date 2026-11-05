@@ -9,13 +9,10 @@
 // font's packet, which fontDmaFontData sends to the GS. Here the same sprite is drawn natively, and fontDmaFontData
 // only resets what it would after sending (the font's texture from the texture pack: no upload).
 
-#include "game_overrides.h"
-#include "ps2_runtime.h"
-#include "ps2_recompiled_functions.h"
-#include "runtime/native/native_renderer.h"
-#include "runtime/native/native_texture_cache.h"
-#include "runtime/ps2_store_patch.h"
-#include "runtime/native/native_movie.h"
+#include "tmb_port.h"
+#include "bozo/render/renderer.h"
+#include "bozo/render/texture.h"
+#include "bozo/render/movie.h"
 #include <mutex>
 
 #include <cstdio>
@@ -35,7 +32,7 @@ namespace tmb::native
 
 namespace tmb::textures
 {
-    std::shared_ptr<const ps2x::native::TextureCache::Texture> font();
+    std::shared_ptr<const bozo::render::Texture> font();
 }
 
 namespace tmb::native
@@ -51,10 +48,10 @@ namespace tmb::twod
     {
         // The movie pictures (sceMpegGetPicture, below), shared by loadImage and the loading bar.
         std::mutex g_movieMutex;
-        std::shared_ptr<const ps2x::native::TextureCache::Texture> g_moviePicture; // under g_movieMutex
+        std::shared_ptr<const bozo::render::Texture> g_moviePicture; // under g_movieMutex
         // The picture loadImage last put in the display buffers (under g_movieMutex): the one shown through the display's
-        // circuit 2 (ps2x::native::setDisplayPicture).
-        std::shared_ptr<const ps2x::native::TextureCache::Texture> g_menuPicture;
+        // circuit 2 (bozo::render::setDisplayPicture).
+        std::shared_ptr<const bozo::render::Texture> g_menuPicture;
         std::atomic<bool> g_imageReplaced{false}; // loadImage drew a picture instead of transferring it (this vblank)
 
         constexpr uint32_t kFontBuildPrim = 0x001C4918u;
@@ -131,7 +128,7 @@ namespace tmb::twod
             std::memcpy(&rgba, rdram + record + 0x18u, 4);
 
             // The sprite as two triangles: positions in GS pixels (12.4 / 16), texture coordinates over the 128 x 128 font.
-            ps2x::native::Vertex corners[4];
+            bozo::render::Vertex corners[4];
             const float xs[2] = {x0 / 16.0f, x1 / 16.0f}, ys[2] = {y0 / 16.0f, y1 / 16.0f};
             const float us[2] = {u0 / 16.0f / 128.0f, u1 / 16.0f / 128.0f}, vs[2] = {v0 / 16.0f / 128.0f, v1 / 16.0f / 128.0f};
             for (int i = 0; i < 4; ++i)
@@ -143,12 +140,12 @@ namespace tmb::twod
                 corners[i].rgba = rgba;
                 corners[i].fog = 1.0f;
             }
-            const ps2x::native::Vertex triangles[6] = {corners[0], corners[1], corners[2], corners[1], corners[3], corners[2]};
+            const bozo::render::Vertex triangles[6] = {corners[0], corners[1], corners[2], corners[1], corners[3], corners[2]};
             // fontInitPacket's state: ALPHA (Cs - Cd) As + Cd, TEST alpha greater than 8, TEX1 bilinear.
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = true;
             material.tex0 = 0xf0f7f0f7u; // the font's own GPU copy
-            material.blend = ps2x::native::Material::Blend::Alpha;
+            material.blend = bozo::render::Material::Blend::Alpha;
             material.alphaTest = true;
             material.alphaRef = 8;
             material.clampU = material.clampV = true;
@@ -160,7 +157,7 @@ namespace tmb::twod
             if (s_log && s_logged < 6000u && !s_seen[place] && (s_seen[place] = true) && ++s_logged)
                 std::fprintf(stderr, "[tmb:2d] glyph %c: (%.1f %.1f)-(%.1f %.1f) uv (%.3f %.3f)-(%.3f %.3f) rgba %08x view %u centre %d %d size %dx%d\n",
                              static_cast<char>(c), xs[0], ys[0], xs[1], ys[1], us[0], vs[0], us[1], vs[1], rgba, view, centreX, centreY, viewW, viewH);
-            ps2x::native::Renderer::instance().drawOverlay(material, triangles, 6u, tmb::textures::font());
+            bozo::render::Renderer::instance().drawOverlay(material, triangles, 6u, tmb::textures::font());
 
             // What fontBuildPrim leaves: its sprites' tag started (mode 2, where it would be), the cursor advanced, the
             // glyph counted.
@@ -256,17 +253,17 @@ namespace tmb::twod
 
         // The HUD's primitives on the overlay: GS pixel coordinates, colours as the GS has them (0x80 is 1.0); ABE: the
         // packet's ALPHA_1 (Cs - Cd) As + Cd, else opaque.
-        void hudTriangles(const ps2x::native::Vertex *v, uint32_t count, bool blend)
+        void hudTriangles(const bozo::render::Vertex *v, uint32_t count, bool blend)
         {
-            ps2x::native::Material material;
+            bozo::render::Material material;
             material.textured = false;
-            material.blend = blend ? ps2x::native::Material::Blend::Alpha : ps2x::native::Material::Blend::Opaque;
-            ps2x::native::Renderer::instance().drawOverlay(material, v, count, nullptr);
+            material.blend = blend ? bozo::render::Material::Blend::Alpha : bozo::render::Material::Blend::Opaque;
+            bozo::render::Renderer::instance().drawOverlay(material, v, count, nullptr);
         }
         uint32_t rgba(uint32_t r, uint32_t g, uint32_t b, uint32_t a) { return (r & 0xffu) | ((g & 0xffu) << 8) | ((b & 0xffu) << 16) | ((a & 0xffu) << 24); }
-        ps2x::native::Vertex vertex(float x, float y, uint32_t colour)
+        bozo::render::Vertex vertex(float x, float y, uint32_t colour)
         {
-            ps2x::native::Vertex v;
+            bozo::render::Vertex v;
             v.x = x;
             v.y = y;
             v.rgba = colour;
@@ -277,7 +274,7 @@ namespace tmb::twod
         void hudSprite(float x0, float y0, float x1, float y1, uint32_t colour, bool blend)
         {
             const float l = std::min(x0, x1), r = std::max(x0, x1), t = std::min(y0, y1), b = std::max(y0, y1);
-            const ps2x::native::Vertex v[6] = {vertex(l, t, colour), vertex(r, t, colour), vertex(l, b, colour),
+            const bozo::render::Vertex v[6] = {vertex(l, t, colour), vertex(r, t, colour), vertex(l, b, colour),
                                                vertex(r, t, colour), vertex(r, b, colour), vertex(l, b, colour)};
             hudTriangles(v, 6u, blend);
         }
@@ -288,7 +285,7 @@ namespace tmb::twod
             if (!(length > 0.0f))
                 return;
             const float nx = -dy / length * 0.5f, ny = dx / length * 0.5f;
-            const ps2x::native::Vertex v[6] = {vertex(x0 + nx, y0 + ny, colour), vertex(x1 + nx, y1 + ny, colour), vertex(x0 - nx, y0 - ny, colour),
+            const bozo::render::Vertex v[6] = {vertex(x0 + nx, y0 + ny, colour), vertex(x1 + nx, y1 + ny, colour), vertex(x0 - nx, y0 - ny, colour),
                                                vertex(x1 + nx, y1 + ny, colour), vertex(x1 - nx, y1 - ny, colour), vertex(x0 - nx, y0 - ny, colour)};
             hudTriangles(v, 6u, blend);
         }
@@ -461,7 +458,7 @@ namespace tmb::twod
                                                                                               dbl(rdram, kAlphaConstants + 16u)) + 0x1e);
                 }
                 colour = (colour & 0xffffffu) | (std::min<uint32_t>(alpha, 0xffu) << 24);
-                const ps2x::native::Vertex v[3] = {vertex(sx - 12.0f, sy - 6.0f, colour), vertex(sx, sy, colour), vertex(sx + 12.0f, sy - 6.0f, colour)};
+                const bozo::render::Vertex v[3] = {vertex(sx - 12.0f, sy - 6.0f, colour), vertex(sx, sy, colour), vertex(sx + 12.0f, sy - 6.0f, colour)};
                 hudTriangles(v, 3u, true);
             }
         }
@@ -754,12 +751,12 @@ namespace tmb::twod
                       static_cast<float>(bottom), rgba(0x4c, 0x1a, 0x0d, 0x80), false);
             const uint32_t def = word(rdram, kViews + 4u);
             const float width = half(rdram, def + 8u), height = half(rdram, def + 0xau);
-            ps2x::native::Screen screen;
+            bozo::render::Screen screen;
             screen.width = width > 0.0f ? width : 640.0f;
             screen.height = height > 0.0f ? height : 448.0f;
             screen.originX = 2048.0f - screen.width * 0.5f;
             screen.originY = 2048.0f - screen.height * 0.5f;
-            ps2x::native::Renderer::instance().publishOverlay(screen);
+            bozo::render::Renderer::instance().publishOverlay(screen);
         }
 
         // buildProgressBar(progress): the bar at min(progress, 1024) / 1024, drawn instead of sent.
@@ -777,7 +774,7 @@ namespace tmb::twod
             {
                 std::lock_guard<std::mutex> lock(g_movieMutex);
                 g_menuPicture.reset();
-                ps2x::native::clearDisplayPicture();
+                bozo::render::clearDisplayPicture();
             }
             setWord(rdram, gp + kGpBarProgress, std::min<uint32_t>(getRegU32(ctx, 4), 0x400u));
             loadingBar(rdram, gp);
@@ -827,6 +824,7 @@ namespace tmb::twod
             const float left = static_cast<float>(v.cx - (v.w >> 1)), top = static_cast<float>(v.cy - (v.h >> 1));
             hudSprite(left, top, left + static_cast<float>(v.w), top + static_cast<float>(v.h), rgba(0, 0, 0x0a, 0x21), true);
         }
+        // bozo:store kDialogKick (the generated code sets ctx->pc before that store: tools/tmb_overrides_list.py)
         bool dialogKick(uint32_t pc, uint32_t address, uint32_t)
         {
             return pc == kDialogKick && address == 0x1000a000u && on();
@@ -843,14 +841,14 @@ namespace tmb::twod
         void moviePicture(uint32_t, uint32_t width, uint32_t height, const uint8_t *rgba)
         {
             static uint64_t s_version = 0;
-            ps2x::native::TextureCache::Texture picture;
+            bozo::render::Texture picture;
             picture.width = width;
             picture.height = height;
             picture.key = 0x4d4f5649u; // one picture at a time: its GPU copy replaced
             picture.version = ++s_version;
             picture.rgba.resize(static_cast<size_t>(width) * height);
             std::memcpy(picture.rgba.data(), rgba, picture.rgba.size() * 4u);
-            auto shared = std::make_shared<const ps2x::native::TextureCache::Texture>(std::move(picture));
+            auto shared = std::make_shared<const bozo::render::Texture>(std::move(picture));
             std::lock_guard<std::mutex> lock(g_movieMutex);
             g_moviePicture = std::move(shared);
         }
@@ -860,7 +858,7 @@ namespace tmb::twod
         // are drawn over it with alpha 0 where it shows (PMODE merges the circuits by the frame's alpha), and it stays
         // there after the clip ends (blitLastMovieFrame) until a load starts. A movie on its own (no menu frames) is
         // also shown under the overlay.
-        void showOnCircuit2(const ps2x::native::TextureCache::Texture &picture)
+        void showOnCircuit2(const bozo::render::Texture &picture)
         {
             constexpr uint32_t kFrameWidth = 640u, kFrameHeight = 448u;
             auto frame = std::make_shared<std::vector<uint32_t>>(static_cast<size_t>(kFrameWidth) * kFrameHeight, 0x80000000u);
@@ -869,12 +867,12 @@ namespace tmb::twod
             for (uint32_t y = 0; y < height; ++y)
                 for (uint32_t x = 0; x < width; ++x)
                     (*frame)[(y0 + y) * kFrameWidth + x0 + x] = (picture.rgba[y * picture.width + x] & 0x00ffffffu) | 0x80000000u;
-            ps2x::native::setDisplayPicture(std::move(frame), kFrameWidth, kFrameHeight);
+            bozo::render::setDisplayPicture(std::move(frame), kFrameWidth, kFrameHeight);
         }
 
         void loadImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            std::shared_ptr<const ps2x::native::TextureCache::Texture> picture;
+            std::shared_ptr<const bozo::render::Texture> picture;
             {
                 std::lock_guard<std::mutex> lock(g_movieMutex);
                 picture = g_moviePicture;
@@ -890,14 +888,14 @@ namespace tmb::twod
                 return;
             }
             constexpr float kFrameHeight = 448.0f;
-            ps2x::native::Screen screen;
+            bozo::render::Screen screen;
             screen.originX = 2048.0f - 320.0f;
             screen.originY = 2048.0f - kFrameHeight * 0.5f;
             screen.width = 640.0f;
             screen.height = kFrameHeight;
             const float width = static_cast<float>(picture->width), height = static_cast<float>(picture->height);
             if (!tmb::native::menusDrawn())
-                ps2x::native::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
+                bozo::render::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
                                                            screen.originY + (kFrameHeight - height) * 0.5f, width, height);
             g_imageReplaced.store(true, std::memory_order_relaxed);
             const uint32_t held = getRegU32(ctx, 28) + static_cast<uint32_t>(kImageHeld);
@@ -987,7 +985,7 @@ namespace tmb::twod
         const uint8_t *rdram = g_rdram.load(std::memory_order_relaxed);
         if (!rdram)
         {
-            ps2x::native::Renderer::instance().publishOverlay();
+            bozo::render::Renderer::instance().publishOverlay();
             return;
         }
         // The whole display: every view the game shows (viewGetNumViews), e.g. a rear view over the main one.
@@ -1005,18 +1003,18 @@ namespace tmb::twod
         }
         if (!(right > left && bottom > top))
         {
-            ps2x::native::Renderer::instance().publishOverlay();
+            bozo::render::Renderer::instance().publishOverlay();
             return;
         }
-        ps2x::native::Screen screen;
+        bozo::render::Screen screen;
         screen.originX = left;
         screen.originY = top;
         screen.width = right - left;
         screen.height = bottom - top;
-        ps2x::native::Renderer::instance().publishOverlay(screen);
+        bozo::render::Renderer::instance().publishOverlay(screen);
     }
 
-    void install(PS2Runtime &runtime)
+    void install(tmb::Registry &runtime)
     {
         runtime.registerFunction(kFontBuildPrim, &fontBuildPrimOverride);
         runtime.registerFunction(kFontDmaFontData, &fontDmaFontDataOverride);
@@ -1034,11 +1032,11 @@ namespace tmb::twod
         runtime.registerFunction(kInformProgressBar, &informProgressBarOverride);
         runtime.registerFunction(kBarVSync, &barVSyncOverride);
         runtime.registerFunction(kFinishShellLoop, &finishShellLoopOverride);
-        ps2x::setStorePatch(&dialogKick);
+        bozo::port::setStorePatch(&dialogKick);
         runtime.registerFunction(kLoadImage, &loadImageOverride);
         runtime.registerFunction(kVblankHandler, &vblankHandlerOverride);
         if (on())
-            ps2x::native::setMoviePictureHook(&moviePicture);
+            bozo::render::setMoviePictureHook(&moviePicture);
         runtime.registerFunction(kOverheat, &overheatOverride);
     }
 }

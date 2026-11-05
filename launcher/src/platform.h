@@ -1,7 +1,7 @@
 #pragma once
 
 // The launcher's operating-system layer (platform_win.cpp): everything that needs <windows.h>, kept out of the
-// raylib / ImGui translation units (their names clash: CloseWindow, DrawText, Rectangle...). Strings are UTF-8.
+// ImGui and SDL translation units. Strings are UTF-8.
 
 #include <atomic>
 #include <cstddef>
@@ -91,4 +91,7 @@ namespace plat
 
     // This program's own file (the launcher's exe, to start it again after an update).
     std::string exePath();
+
+    // A message box (the window could not open).
+    void messageBox(const std::string &title, const std::string &text);
 }

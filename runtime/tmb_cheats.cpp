@@ -24,11 +24,10 @@
 //   EvaluateEnduranceStatus clears 2 Freeway, 15 and 18 when their endurance kills are reached), and per character its
 //   movies, three arrays of 14 at + 0x2220, + 0x2258, + 0x2290 (uiMovies; 2 for a movie the character does not have).
 
-#include "game_overrides.h"
-#include "ps2_runtime.h"
-#include "ps2_recompiled_functions.h"
-#include "runtime/ps2_debug_ui.h"
-#if defined(PS2X_ENABLE_DEBUG_UI)
+#include "tmb_port.h"
+#include "bozo/app/determinism.h"
+#if defined(BOZO_SETTINGS_UI)
+#include "bozo/app/settings_tabs.h"
 #include "imgui.h"
 #endif
 #include <algorithm>
@@ -217,7 +216,7 @@ namespace tmb::cheats
             Screen(rdram, ctx, runtime);
         }
 
-#if defined(PS2X_ENABLE_DEBUG_UI)
+#if defined(BOZO_SETTINGS_UI)
         void perPlayer(const char *label, std::atomic<uint32_t> &flags, int players)
         {
             ImGui::PushID(label);
@@ -354,7 +353,7 @@ namespace tmb::cheats
             const char *value = std::getenv("TMB_CHEATS_TOGGLE");
             return value && *value ? std::atof(value) : 0.0;
         }();
-        if (s_toggle > 0.0)
+        if (s_toggle > 0.0 && !bozo::det::enabled()) // deterministic mode: nothing the user does may change the run
         {
             const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
             static double s_next = now + s_toggle;
@@ -438,7 +437,7 @@ namespace tmb::cheats
         }
     }
 
-    void install(PS2Runtime &runtime)
+    void install(tmb::Registry &runtime)
     {
         g_noAi.store(std::getenv("TMB_NO_AI") && *std::getenv("TMB_NO_AI") == '1');
         g_unlockAll.store(std::getenv("TMB_UNLOCK_ALL") && *std::getenv("TMB_UNLOCK_ALL") == '1');
@@ -455,8 +454,8 @@ namespace tmb::cheats
         runtime.registerFunction(kUiCarSel, &shellScreenOverride<&uiCarSel__Fv_0x1963b0>);
         runtime.registerFunction(kUiAiSel, &shellScreenOverride<&uiAiSel__Fv_0x1986a8>);
         runtime.registerFunction(kUiMovies, &shellScreenOverride<&uiMovies__Fv_0x190760>);
-#if defined(PS2X_ENABLE_DEBUG_UI)
-        ps2x::debugui::registerTab("Cheats", &drawTab);
+#if defined(BOZO_SETTINGS_UI)
+        bozo::app::ui::registerTab("Cheats", &drawTab);
 #endif
     }
 }

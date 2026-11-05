@@ -56,17 +56,14 @@
 // order and the adapter reports, per object, the stream's order and GS state against them ([tmb:order]), besides its
 // VU 0-21, matrix and strips against its own translation.
 
-#include "game_overrides.h"
-#include "ps2_runtime.h"
-#include "ps2_recompiled_functions.h"
+#include "tmb_port.h"
+#include "tmb_host.h"
 #include "tmb_meshes.h"
 #include "tmb_vu1_shading.h"
-#include "runtime/native/native_mesh_draw.h"
-#include "runtime/native/native_mesh_pack.h"
-#include "runtime/native/native_renderer.h"
-#include "runtime/native/native_texture_cache.h"
-#include "runtime/ps2_memory.h"
-#include "ps2_app.h"
+#include "bozo/render/mesh_draw.h"
+#include "bozo/render/mesh_pack.h"
+#include "bozo/render/renderer.h"
+#include "bozo/render/texture.h"
 
 #include <algorithm>
 #include <cmath>
@@ -89,8 +86,8 @@
 
 namespace tmb::textures
 {
-    std::shared_ptr<const ps2x::native::TextureCache::Texture> lookupId(uint32_t id, uint64_t tex0, uint64_t texa);
-    std::shared_ptr<const ps2x::native::TextureCache::Texture> lookup(uint64_t tex0, uint64_t texa);
+    std::shared_ptr<const bozo::render::Texture> lookupId(uint32_t id, uint64_t tex0, uint64_t texa);
+    std::shared_ptr<const bozo::render::Texture> lookup(uint64_t tex0, uint64_t texa);
     uint32_t idAtTbp(uint32_t tbp);
     std::string nameAt(uint32_t address);
 }
@@ -143,13 +140,13 @@ namespace tmb::meshes
         // pool it uses); the sections the morph deltas (kAux), where each pool's positions are in the image (kSources),
         // the environment map's parameter batches (kParams) and a skinned object's bones and weights (kSkin); the
         // file's register blocks the hier traversal's GS context blocks (ALPHA_1, TEST_1, ZBUF_1 writes).
-        using ps2x::native::packs::MeshFile;
-        using ps2x::native::packs::MeshObject;
-        using ps2x::native::packs::MeshSection;
-        constexpr uint32_t kAux = ps2x::native::packs::fourcc("AUX ");
-        constexpr uint32_t kSources = ps2x::native::packs::fourcc("SRCS");
-        constexpr uint32_t kParams = ps2x::native::packs::fourcc("PRMS");
-        constexpr uint32_t kSkin = ps2x::native::packs::fourcc("SKIN");
+        using bozo::render::packs::MeshFile;
+        using bozo::render::packs::MeshObject;
+        using bozo::render::packs::MeshSection;
+        constexpr uint32_t kAux = bozo::render::packs::fourcc("AUX ");
+        constexpr uint32_t kSources = bozo::render::packs::fourcc("SRCS");
+        constexpr uint32_t kParams = bozo::render::packs::fourcc("PRMS");
+        constexpr uint32_t kSkin = bozo::render::packs::fourcc("SKIN");
         constexpr uint32_t kAttributeSize = 40u;
         uint32_t poolFrom(const MeshObject &o)
         {
@@ -165,9 +162,9 @@ namespace tmb::meshes
             return v;
         }
 
-        ps2x::native::packs::MeshPack &pack()
+        bozo::render::packs::MeshPack &pack()
         {
-            static ps2x::native::packs::MeshPack s_pack;
+            static bozo::render::packs::MeshPack s_pack;
             static bool s_loaded = false;
             if (s_loaded)
                 return s_pack;
@@ -180,7 +177,7 @@ namespace tmb::meshes
                     std::fprintf(stderr, "[tmb:mesh] no mesh pack at %s (tools/tmb_mesh_pack.py): objects stay on the stream path\n", path);
                 else
                     std::fprintf(stderr, "[tmb:mesh] %s: %s (%s: run tools/tmb_mesh_pack.py again)\n", path, s_pack.error().c_str(),
-                                 ps2x::native::packs::MeshPack::kMagic);
+                                 bozo::render::packs::MeshPack::kMagic);
                 return s_pack;
             }
             std::fprintf(stderr, "[tmb:mesh] mesh pack %s: %zu files, %zu objects\n", path, s_pack.files().size(), s_pack.objectCount());
@@ -189,13 +186,13 @@ namespace tmb::meshes
 
         // ---- the NGP files as the game loaded them ----
 
-        ps2x::native::packs::LoadedImages g_loaded;
+        bozo::render::packs::LoadedImages g_loaded;
 
         void noteNgp(uint8_t *rdram, R5900Context *ctx, bool only)
         {
             const uint32_t base = getRegU32(ctx, 4), size = getRegU32(ctx, 5);
             const std::string name = tmb::textures::nameAt(base);
-            const ps2x::native::packs::LoadedImages::Bound bound = g_loaded.bind(pack(), rdram, name, base, size, only);
+            const bozo::render::packs::LoadedImages::Bound bound = g_loaded.bind(pack(), rdram, name, base, size, only);
             if (bound.named && !bound.image.file)
                 std::fprintf(stderr, "[tmb:mesh] %s at %#x: %u bytes (crc %#x), the pack's is %u bytes (crc %#x): not used\n", name.c_str(), base, size,
                              bound.crc, bound.named->size, bound.named->crc);
@@ -286,7 +283,7 @@ namespace tmb::meshes
                      contextsDiffering = 0, skid = 0;
         } g_stats;
 
-        void vf(const R5900Context *ctx, int reg, float out[4]) { _mm_storeu_ps(out, ctx->vu0_vf[reg]); }
+        void vf(const R5900Context *ctx, int reg, float out[4]) { std::memcpy(out, ctx->vu0_vf[reg].f, 16); }
 
         // ---- the game's order ----
         //
@@ -309,7 +306,7 @@ namespace tmb::meshes
         uint64_t g_listDrops = 0, g_submitted[2] = {}, g_built[2] = {}, g_kicks[2] = {};
         // The vertex arrays of the objects drawn last, kept (cleared) for the next objects' batches: each one grew from
         // nothing every frame, a few hundred objects' worth of allocations and copies (the game thread only).
-        std::vector<std::vector<ps2x::native::Vertex>> g_vertexPool;
+        std::vector<std::vector<bozo::render::Vertex>> g_vertexPool;
 
         void recycleVertices(Drawn &drawn)
         {
@@ -321,16 +318,16 @@ namespace tmb::meshes
                 }
         }
 
-        std::vector<ps2x::native::Vertex> pooledVertices()
+        std::vector<bozo::render::Vertex> pooledVertices()
         {
             if (g_vertexPool.empty())
                 return {};
-            std::vector<ps2x::native::Vertex> vertices = std::move(g_vertexPool.back());
+            std::vector<bozo::render::Vertex> vertices = std::move(g_vertexPool.back());
             g_vertexPool.pop_back();
             return vertices;
         }
 
-        struct ViewList : ps2x::native::MeshViewList<Drawn>
+        struct ViewList : bozo::render::MeshViewList<Drawn>
         {
             // Built by hier2p: sent only by hier2pFlushDma. On the frame a split screen ends hier2p builds its view once
             // more and nothing sends it (the game drops the chain), so it is dropped too rather than drawn in the next view.
@@ -353,8 +350,8 @@ namespace tmb::meshes
         // The GS registers the hier objects' draws depend on, as their context and register blocks leave them in the
         // order the objects are sent (they persist from one object to the next, as in the GS): the submitter's
         // (runtime/native/native_mesh_draw.h), which follows them, makes each batch's material and clips its triangles.
-        using GsState = ps2x::native::MeshGsState;
-        ps2x::native::MeshSubmitter g_submitter;
+        using GsState = bozo::render::MeshGsState;
+        bozo::render::MeshSubmitter g_submitter;
 
         // A batch's material as the GS state has it (TMB_NATIVE_MESHES_CHECK compares it with the stream's).
         struct Mat
@@ -395,7 +392,7 @@ namespace tmb::meshes
         // TMB_LIVE_TOGGLES=<file> (a diagnostic): words read from the file every 60 frames, while the game runs:
         // nodepth (the hier objects drawn without the depth test), nofog, noclip (no view clip), flat (each object
         // untextured in a colour of its own), opaque, noatest, notex, noguard (no clip volume), dump.
-        ps2x::native::MeshLiveToggles &g_live = g_submitter.live;
+        bozo::render::MeshLiveToggles &g_live = g_submitter.live;
         void readLiveToggles()
         {
             static const char *s_path = std::getenv("TMB_LIVE_TOGGLES");
@@ -405,10 +402,10 @@ namespace tmb::meshes
         }
 
         // TMB_NATIVE_MESHES_CHECK=1: what the submitter applies, per marked object, recorded for compareOrders.
-        struct CheckObserver : ps2x::native::MeshSubmitter::Observer
+        struct CheckObserver : bozo::render::MeshSubmitter::Observer
         {
             CheckRecord *record = nullptr;
-            void draw(const ps2x::native::MeshDraw &d) override
+            void draw(const bozo::render::MeshDraw &d) override
             {
                 const Drawn &drawn = static_cast<const Drawn &>(d);
                 record = nullptr;
@@ -467,7 +464,7 @@ namespace tmb::meshes
         {
             const MeshFile *file = nullptr;
             uint32_t base = 0;
-            g_loaded.forEach([&](const ps2x::native::packs::LoadedImages::Image &l)
+            g_loaded.forEach([&](const bozo::render::packs::LoadedImages::Image &l)
                              {
                                  if (at >= l.base && at < l.base + l.size)
                                  {
@@ -488,7 +485,7 @@ namespace tmb::meshes
                 ++g_stats.contextsDefault;
                 return readContext(ee, at, out);
             }
-            const ps2x::native::packs::RegisterBlock *block = file->block(at - base);
+            const bozo::render::packs::RegisterBlock *block = file->block(at - base);
             if (!block)
             {
                 ++g_stats.contextsMissing;
@@ -666,8 +663,8 @@ namespace tmb::meshes
             bool textured = false;
             uint32_t texnum = ~0u;
             Batch *batch = nullptr;
-            static thread_local std::vector<ps2x::native::Vertex> s_strip; // kept from call to call (its capacity)
-            std::vector<ps2x::native::Vertex> &strip = s_strip;
+            static thread_local std::vector<bozo::render::Vertex> s_strip; // kept from call to call (its capacity)
+            std::vector<bozo::render::Vertex> &strip = s_strip;
             strip.clear();
             static const bool s_check = std::getenv("TMB_NATIVE_MESHES_CHECK") != nullptr;
             for (uint32_t si = 0; si < strips; ++si)
@@ -743,7 +740,7 @@ namespace tmb::meshes
                 {
                     // One sprite (one point, one colour, four corners' texture coordinates) or one ribbon segment (two
                     // points, four colours and texture coordinates): the converter checked the shapes.
-                    std::vector<ps2x::native::Vertex> &triangles = batch->vertices;
+                    std::vector<bozo::render::Vertex> &triangles = batch->vertices;
                     const size_t from = triangles.size();
                     const auto vertexAt = [&](uint32_t v) { return vertices + v * 16u; };
                     const auto pointOf = [&](uint32_t v, float out4[4])
@@ -769,7 +766,7 @@ namespace tmb::meshes
                             st[v][0] = pair[0];
                             st[v][1] = pair[1];
                         }
-                        ps2x::native::Vertex quad[4];
+                        bozo::render::Vertex quad[4];
                         static const int kOrder[6] = {0, 1, 2, 1, 2, 3};
                         if (tmb::vu1::spriteQuad(g_vu, m, point, rgba, st, quad))
                             for (int i : kOrder)
@@ -805,7 +802,7 @@ namespace tmb::meshes
                                 words[2] = words[3] = 0x1000u;
                             }
                         };
-                        tmb::vu1::ribbonStrip<ps2x::native::Vertex>(g_vu, m, read, triangles);
+                        tmb::vu1::ribbonStrip<bozo::render::Vertex>(g_vu, m, read, triangles);
                     }
                     if (s_check)
                         out.checkStrips.emplace_back(triangles.begin() + static_cast<std::ptrdiff_t>(from), triangles.end());
@@ -821,7 +818,7 @@ namespace tmb::meshes
                         const uint8_t *vx = vertices + v * 16u;
                         uint16_t index;
                         std::memcpy(&index, vx, 2);
-                        ps2x::native::Vertex outV;
+                        bozo::render::Vertex outV;
                         if (index >= positionCount)
                         {
                             outV.rgba = 0xdeadu;
@@ -856,7 +853,7 @@ namespace tmb::meshes
                         const uint8_t *vx = vertices + v * 16u;
                         uint16_t index;
                         std::memcpy(&index, vx, 2);
-                        ps2x::native::Vertex outV;
+                        bozo::render::Vertex outV;
                         if (index >= positionCount)
                         {
                             outV.rgba = 0xdeadu;
@@ -896,7 +893,7 @@ namespace tmb::meshes
                     const uint8_t *vx = vertices + v * 16u;
                     uint16_t index;
                     std::memcpy(&index, vx, 2);
-                    ps2x::native::Vertex outV;
+                    bozo::render::Vertex outV;
                     if (index >= positionCount)
                     {
                         outV.rgba = 0xdeadu; // a break: no triangle uses it
@@ -1049,7 +1046,7 @@ namespace tmb::meshes
         {
             if (active() && hookOrder())
             {
-                const Ee ee{rdram, runtime->memory().getScratchpad()};
+                const Ee ee{rdram, bozo::port::scratchpad(runtime)};
                 skidSnapshot(ee, getRegU32(ctx, 4));
             }
             draw__9SkidMarks_0x169490(rdram, ctx, runtime);
@@ -1088,7 +1085,7 @@ namespace tmb::meshes
                 return;
             ++g_stats.calls;
             g_rdramForDump = rdram;
-            const Ee ee{rdram, runtime->memory().getScratchpad()};
+            const Ee ee{rdram, bozo::port::scratchpad(runtime)};
             const uint32_t fp = ee.u16(obj + 0xcu); // lh $fp, 0xC($s5): the flags' bits 32-47
             // TMB_NATIVE_MESHES_DUMP: the objects of the kinds other than the rigid strips, once each (a skinned one with
             // its per-instance chain and bones), for the offline comparison with the dump.
@@ -1263,7 +1260,7 @@ namespace tmb::meshes
                 // submitDrawn takes. Drawn here as the others.
                 ++g_stats.extra;
             }
-            ps2x::native::packs::LoadedImages::Image file;
+            bozo::render::packs::LoadedImages::Image file;
             const bool inFile = g_loaded.find(obj, file);
             // The skid marks' object (skidBuffer, which SkidMarks::draw fills): drawn from the marks themselves.
             const bool skid = obj == kSkidBuffer && g_skid.valid && !resume;
@@ -1481,7 +1478,7 @@ namespace tmb::meshes
                 g_previous.valid = false;
                 if (static const bool s_dumpLog = std::getenv("TMB_NATIVE_MESHES_DUMP") != nullptr; s_dumpLog)
                 {
-                    const Ee ee{rdram, runtime->memory().getScratchpad()};
+                    const Ee ee{rdram, bozo::port::scratchpad(runtime)};
                     const uint32_t obj = getRegU32(ctx, 6), inst = ee.u32(0x70000020u);
                     static std::unordered_map<uint32_t, bool> s_seen;
                     if (!s_seen[obj])
@@ -1511,7 +1508,7 @@ namespace tmb::meshes
                     vf(ctx, 30, depth);
                     int32_t bucket = 1;
                     if (depth[0] > 8.0f)
-                        bucket = FPU_CVT_W_S((depth[0] > 1024.0f ? 1016.0f : depth[0]) * 0.125f) + 1;
+                        bucket = tmb::cvtWS((depth[0] > 1024.0f ? 1016.0f : depth[0]) * 0.125f) + 1;
                     list.link(std::clamp(bucket, 0, 128));
                 }
             }
@@ -1529,7 +1526,7 @@ namespace tmb::meshes
             }
             tmb::native::applyViewClip();
             if (g_live.noClip)
-                ps2x::native::Renderer::instance().clearClip();
+                bozo::render::Renderer::instance().clearClip();
             g_submitIndex = 0;
             const int which = g_inHier2pFlush ? 1 : 0; // hier__Fi's, hier2p's
             ++g_kicks[which];
@@ -1581,7 +1578,7 @@ namespace tmb::meshes
             hierCacheForAsm_0x2020e4(rdram, ctx, runtime);
             if (!active())
                 return;
-            const Ee ee{rdram, runtime->memory().getScratchpad()};
+            const Ee ee{rdram, bozo::port::scratchpad(runtime)};
             for (uint32_t q = 0; q < 3u; ++q)
                 std::memcpy(g_lastLights[q], ee.at(kConstVu5 + 16u + q * 16u), 16);
             g_previous.valid = false;
@@ -1605,7 +1602,7 @@ namespace tmb::meshes
             return builtIn;
         // A copy of the runner with its data (the pack beside the game's files, or beside the runner).
         const std::filesystem::path name = std::filesystem::path(builtIn).filename();
-        for (const std::filesystem::path &dir : {PS2Runtime::getIoPaths().elfDirectory, ps2x::app::executableDirectory()})
+        for (const std::filesystem::path &dir : {std::filesystem::path(tmb::host::elfDirectory()), std::filesystem::path(tmb::host::executableDirectory())})
             if (!dir.empty() && std::filesystem::exists(dir / name, ec))
                 return (dir / name).string();
         return builtIn;
@@ -1810,7 +1807,7 @@ namespace tmb::meshes
         }
     }
 
-    void install(PS2Runtime &runtime)
+    void install(tmb::Registry &runtime)
     {
         if (!active())
             return;

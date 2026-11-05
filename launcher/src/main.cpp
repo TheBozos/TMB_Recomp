@@ -1,13 +1,14 @@
 // TMB Launcher: what a player double-clicks. Their disc image is checked, the game is built from it on their PC
 // (tools/tmb_build.py run by the build kit's Python, in the background), then started. The look is the team's:
-// RecompWatcher's PS2 BIOS blue, boot towers and glass (ui.cpp).
+// RecompWatcher's PS2 BIOS blue, boot towers and glass (ui.cpp), drawn with Dear ImGui in an SDL3 window (ImGui's own
+// SDL3 and OpenGL 3 backends; window.h).
 //
 // The release folder it expects (its own folder, or --release <dir>):
 //   TMB Launcher.exe
-//   source\   the TMB_Recomp code (tools\tmb_build.py, PS2Recomp...)
+//   source\   the TMB_Recomp code (tools\tmb_build.py, BozoEngine\...)
 //   kit\      the build kit (kit\python\python.exe, the compiler...)
 //   build\    tmb_build's work folder (made here)
-//   game\     the game folder the build stages (made here): ps2EntryRunner.exe, disc\, disc.iso, the packs
+//   game\     the game folder the build stages (made here): tmb.exe, SCUS_971.01, disc.iso, the packs
 // The player's settings: launcher.ini in the runner's user folder (%APPDATA%\TMB_Recomp, or PS2X_USER_DIR), next to
 // the game's video.ini, which the Settings tab writes in the runner's format.
 //
@@ -18,10 +19,8 @@
 #include "platform.h"
 #include "ui.h"
 
-#include "raylib.h"
-#include "rlgl.h"
+#include "window.h"
 #include "imgui.h"
-#include "rlImGui.h"
 
 #include <algorithm>
 #include <atomic>
@@ -57,9 +56,11 @@ static const char *kCommit = TMB_COMMIT;
 // The update check: GitHub's latest release of the main repository (drafts and pre-releases are never "latest").
 static const char *kLatestReleaseApi = "https://api.github.com/repos/TheBozos/TMB_Recomp/releases/latest";
 static const char *kReleasePagePrefix = "https://github.com/TheBozos/TMB_Recomp/releases/tag/";
-// A release's files (the Update button): <prefix><tag>/TMB_Recomp-<version>.zip and its .sha256, the address made
-// here from the tag like the page's, never one read from the API's response.
+// A release's files (the Update button): <prefix><tag>/TMB_Recomp-<version>-bozo.zip and its .sha256 (the build on
+// BozoEngine: the release's other zip, TMB_Recomp-<version>.zip, is the fork build's), the address made here from the
+// tag like the page's, never one read from the API's response.
 static const char *kReleaseDownloadPrefix = "https://github.com/TheBozos/TMB_Recomp/releases/download/";
+static std::string releaseZipName(const std::string &version) { return "TMB_Recomp-" + version + "-bozo.zip"; }
 
 // ---- language ----
 
@@ -71,15 +72,13 @@ static const char *stepTitle(const std::string &id)
     if (id == "verify")
         return L("Checking the disc", "Vérification du disque");
     if (id == "extract")
-        return L("Copying the disc's files", "Copie des fichiers du disque");
+        return L("Reading the disc's files", "Lecture des fichiers du disque");
     if (id == "tools")
         return L("Preparing the recompiler", "Préparation du recompilateur");
     if (id == "recompile")
         return L("Recompiling the game's code", "Recompilation du code du jeu");
     if (id == "packs")
         return L("Converting textures and models", "Conversion des textures et modèles");
-    if (id == "iop")
-        return L("Recompiling sound and controllers", "Recompilation du son et des manettes");
     if (id == "configure")
         return L("Configuring the build", "Configuration de la compilation");
     if (id == "compile")
@@ -341,7 +340,7 @@ enum class Phase
 
 struct Paths
 {
-    std::string release, source, kit, python, script, buildOut, buildLogs, game, gameExe, elf;
+    std::string release, source, kit, python, script, buildOut, buildLogs, game, gameExe, elf, iso;
     std::string releaseIni, builtFrom; // the source's release stamp, and the one of the code the game was built from
     std::string user, launcherIni, videoIni, logs, crashes;
 };
@@ -432,8 +431,9 @@ struct App
         p.buildOut = plat::str(r / L"build");
         p.buildLogs = plat::str(r / L"build" / L"logs");
         p.game = plat::str(r / L"game");
-        p.gameExe = plat::str(r / L"game" / L"ps2EntryRunner.exe");
-        p.elf = plat::str(r / L"game" / L"disc" / L"SCUS_971.01");
+        p.gameExe = plat::str(r / L"game" / L"tmb.exe");
+        p.elf = plat::str(r / L"game" / L"SCUS_971.01");
+        p.iso = plat::str(r / L"game" / L"disc.iso");
         p.releaseIni = plat::str(r / L"source" / L"release.ini");
         p.builtFrom = plat::str(r / L"game" / L"built_from.ini");
         p.user = plat::userDirectory();
@@ -512,7 +512,7 @@ struct App
         updateStep = UpdateStep::Downloading;
         if (downloader.joinable())
             downloader.join();
-        const std::string name = "TMB_Recomp-" + version + ".zip";
+        const std::string name = releaseZipName(version);
         const std::string url = downloadPrefix + tag + "/" + name;
         const std::string zip = plat::str(plat::path(updateDir()) / plat::path(name));
         downloader = std::thread([this, url, zip]
@@ -554,7 +554,7 @@ struct App
                 updateError = std::string(L("The download failed: ", "Le téléchargement a échoué : ")) + error + ".";
                 return;
             }
-            const std::string zip = plat::str(plat::path(updateDir()) / plat::path("TMB_Recomp-" + updateVersion + ".zip"));
+            const std::string zip = plat::str(plat::path(updateDir()) / plat::path(releaseZipName(updateVersion)));
             const std::vector<std::string> args = {"-I", "-X", "utf8", plat::str(plat::path(p.source) / L"tools" / L"apply_update.py"),
                                                    "--zip", zip, "--sha256", zip + ".sha256", "--version", updateVersion,
                                                    "--install", p.release};
@@ -648,7 +648,7 @@ struct App
 
     void pickDisc()
     {
-        const std::string file = plat::pickDiscImage(GetWindowHandle(), L("Select your Twisted Metal: Black disc image",
+        const std::string file = plat::pickDiscImage(win::nativeHandle(), L("Select your Twisted Metal: Black disc image",
                                                                         "Choisir l'image disque de Twisted Metal: Black"),
                                                      L("Disc images", "Images disque"), L("All files", "Tous les fichiers"));
         if (!file.empty())
@@ -853,14 +853,14 @@ struct App
         launchError.clear();
         notice.clear();
         std::string error;
-        // Nothing to set: the runner's defaults are the native port, and it finds the packs and disc.iso beside it.
-        if (!game.start(p.gameExe, {p.elf}, p.game, false, error))
+        // The game on BozoEngine: its ELF and disc image beside it (the packs too, found beside the ELF).
+        if (!game.start(p.gameExe, {"--elf", p.elf, "--iso", p.iso}, p.game, false, error))
         {
             launchError = error;
             return;
         }
         gameRunning = true;
-        SetWindowState(FLAG_WINDOW_HIDDEN);
+        win::hide();
         hidden = true;
     }
 
@@ -878,9 +878,8 @@ struct App
                 crashReport = f.first;
             }
         gameProblem = crashReport.empty() && gameExit != 0;
-        ClearWindowState(FLAG_WINDOW_HIDDEN);
+        win::show();
         hidden = false;
-        SetWindowFocused();
     }
 };
 
@@ -1147,7 +1146,7 @@ static void drawReady(App &app, float inner)
                                 "et environ 10 Go d'espace libre."),
                         19, ui::color::ink, 0.92f);
         const double freeGb = plat::freeBytes(app.p.release) / 1073741824.0;
-        if (freeGb > 0 && freeGb < 10)
+        if (freeGb > 0 && freeGb < 5)
         {
             char buf[160];
             std::snprintf(buf, sizeof(buf), L("Only %.1f GB free on this drive.", "Seulement %.1f Go libres sur ce disque."), freeGb);
@@ -1303,8 +1302,7 @@ static void drawSettings(App &app, float inner)
     }
     gap(6);
     ui::text(L("Resolution", "Résolution"), 17, ui::color::inkFaint);
-    const int monitor = GetCurrentMonitor();
-    const auto sizes = offeredResolutions(GetMonitorWidth(monitor), GetMonitorHeight(monitor));
+    const auto sizes = offeredResolutions(win::monitorWidth(), win::monitorHeight());
     auto label = [&](int w, int h)
     {
         char buf[96];
@@ -1457,7 +1455,7 @@ static void drawIncomplete(App &app)
 
 static void drawFrame(App &app)
 {
-    const float W = static_cast<float>(GetScreenWidth()), H = static_cast<float>(GetScreenHeight());
+    const float W = static_cast<float>(win::width()), H = static_cast<float>(win::height());
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(W, H));
     ImGui::Begin("##root", nullptr,
@@ -1617,6 +1615,7 @@ struct Selftest
 {
     std::string iso, shots, wrong;
     bool errorDemo = false, cancel = false, screensOnly = false;
+    bool failed = false;
     double playSeconds = 40, crashSeconds = 0;
     std::FILE *log = nullptr;
 
@@ -1806,6 +1805,12 @@ struct Selftest
                              say("build ended after %s s: %s", std::to_string(plat::now() - buildStart),
                                  app.phase == Phase::Ready ? "ready" : "failed: " + app.model.errorMessage);
                              say("notice: %s (launcher.ini last_build_seconds %s)", app.notice, std::to_string(app.cfg.lastBuildSeconds));
+                             if (!errorDemo && (app.phase != Phase::Ready || !app.built()))
+                             {
+                                 say("FAIL build did not produce a playable game");
+                                 failed = true;
+                                 app.quit = true;
+                             }
                              return true;
                          }});
         steps.push_back(shot("09-built", 1.0));
@@ -1836,6 +1841,12 @@ struct Selftest
                                  captureInto("play");
                                  app.play();
                                  say("game started (pid %s)", std::to_string(app.game.pid()));
+                                 if (!errorDemo && !app.gameRunning)
+                                 {
+                                     say("FAIL game did not start");
+                                     failed = true;
+                                     app.quit = true;
+                                 }
                                  return false;
                              }
                              if (app.gameRunning && t >= playSeconds && t < playSeconds + 0.1)
@@ -1850,6 +1861,8 @@ struct Selftest
                              if (app.gameRunning)
                                  return false;
                              say("game exited, code %s, crash report: %s", std::to_string(app.gameExit), app.crashReport.empty() ? "none" : app.crashReport);
+                             if (!errorDemo && app.gameExit != 0)
+                                 failed = true;
                              return true;
                          }});
         steps.push_back(shot("15-after-play", 1.5));
@@ -1866,6 +1879,12 @@ struct Selftest
                                      plat::setEnv("PS2X_TEST_CRASH", "");
                                      plat::setEnv("PS2X_NO_DIALOGS", "");
                                      say("game started to crash (pid %s)", std::to_string(app.game.pid()));
+                                     if (!errorDemo && !app.gameRunning)
+                                     {
+                                         failed = true;
+                                         app.quit = true;
+                                         say("FAIL crash-test game did not start");
+                                     }
                                      return false;
                                  }
                                  if (app.gameRunning && t > crashSeconds + 90)
@@ -1873,6 +1892,8 @@ struct Selftest
                                  if (app.gameRunning)
                                      return false;
                                  say("game exited, code %s, crash report: %s", std::to_string(app.gameExit), app.crashReport.empty() ? "none" : app.crashReport);
+                                 if (!errorDemo && (app.gameExit == 0 || app.crashReport.empty()))
+                                     failed = true;
                                  return true;
                              }});
             steps.push_back(shot("16-crash", 1.5));
@@ -2033,7 +2054,7 @@ int main(int argc, char **argv)
             uiScale = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--update-url") // a test: another address answering as GitHub's latest-release API
             updateUrl = next();
-        else if (a == "--download-prefix") // a test: another address serving <tag>/TMB_Recomp-<version>.zip
+        else if (a == "--download-prefix") // a test: another address serving <tag>/TMB_Recomp-<version>-bozo.zip
             downloadPrefix = next();
         else if (a == "--update-now") // a test: presses Update once the check finds a newer release
             updateNow = true;
@@ -2052,32 +2073,15 @@ int main(int argc, char **argv)
     App app;
     app.init(release);
 
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
-    SetTraceLogLevel(LOG_WARNING);
-    InitWindow(1120, 760, "TMB Launcher");
+    std::string error;
+    if (!win::open("TMB Launcher", 1120, 760, uiScale, error))
     {
-        const Vector2 dpi = GetWindowScaleDPI();
-        ui::scale = std::clamp(uiScale > 0 ? uiScale : dpi.x, 1.0f, 3.0f);
-        if (ui::scale > 1.0f)
-        {
-            // The layout is made for 1120 x 760 at 1x: at Windows' 150 % on a 1920 x 1080 screen (1680 x 1140) it would
-            // not fit, so the scale is lowered until the window does (1.32 there; text still half as large again).
-            const int m = GetCurrentMonitor();
-            const float fit = std::min((GetMonitorWidth(m) - 40) / 1120.0f, (GetMonitorHeight(m) - 80) / 760.0f);
-            if (fit > 0.5f)
-                ui::scale = std::max(1.0f, std::min(ui::scale, fit));
-            const int w = static_cast<int>(1120 * ui::scale), h = static_cast<int>(760 * ui::scale);
-            SetWindowSize(std::min(w, GetMonitorWidth(m) - 40), std::min(h, GetMonitorHeight(m) - 80));
-            SetWindowPosition((GetMonitorWidth(m) - GetScreenWidth()) / 2, (GetMonitorHeight(m) - GetScreenHeight()) / 2);
-        }
+        plat::messageBox("TMB Launcher", error);
+        return 1;
     }
-    SetWindowMinSize(static_cast<int>(980 * ui::scale), static_cast<int>(700 * ui::scale));
-    SetExitKey(KEY_NULL);
-    SetTargetFPS(60);
-    rlImGuiBeginInitImGui();
+    win::setMinimumSize(static_cast<int>(980 * ui::scale), static_cast<int>(700 * ui::scale));
     ImGui::StyleColorsDark();
     ui::setup();
-    rlImGuiEndInitImGui();
 
     // The update check at start (setting "update_check"): not for a development launcher, unless pointed somewhere.
     if (!updateUrl.empty())
@@ -2110,7 +2114,7 @@ int main(int argc, char **argv)
     const double t0 = plat::now();
     while (!app.quit)
     {
-        if (WindowShouldClose())
+        if (win::pollEvents()) // the window's close button (or Alt+F4)
         {
             if (app.building)
                 app.wantQuit = true;
@@ -2135,31 +2139,19 @@ int main(int argc, char **argv)
             test.tick(app);
         if (app.hidden)
         {
-            PollInputEvents();
-            WaitTime(0.1);
+            win::idle(0.1);
             continue;
         }
-        BeginDrawing();
-        ClearBackground(Color{1, 3, 10, 255});
+        win::beginFrame();
         ui::drawBackground(app.time, app.cfg.motion);
-        rlImGuiBegin();
         drawFrame(app);
-        rlImGuiEnd();
-        if (!app.pendingShot.empty())
-        {
-            rlDrawRenderBatchActive();
-            Image img = LoadImageFromScreen();
-            ExportImage(img, app.pendingShot.c_str());
-            UnloadImage(img);
-            app.pendingShot.clear();
-        }
-        EndDrawing();
+        win::endFrame(app.pendingShot); // the selftest's screenshot of this frame, when asked
+        app.pendingShot.clear();
     }
     app.cancelBuild();
-    rlImGuiShutdown();
-    ui::releaseBackground();
-    CloseWindow();
+    win::close();
     if (test.log)
         std::fclose(test.log);
-    return 0;
+    const bool incomplete = !selftestIso.empty() && test.index < test.steps.size();
+    return test.failed || incomplete ? 1 : 0;
 }

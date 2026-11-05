@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """apply_update: installs a downloaded release over this one, for the launcher's Update button.
 
-  python -I tools/apply_update.py --zip <TMB_Recomp-x.y.z.zip> --sha256 <its .sha256 file> --version x.y.z
+  python -I tools/apply_update.py --zip <TMB_Recomp-x.y.z-bozo.zip> --sha256 <its .sha256 file> --version x.y.z
                                   --install <the release folder> [--keep-zip]
 
-Checks the zip's SHA-256 against the release's .sha256, checks every name in it (one top folder TMB_Recomp/, no
+Checks the zip's SHA-256 against the release's .sha256, checks every name in it (one top folder TMB_Recomp_Bozo/, no
 absolute or parent paths, nothing under build/, game/ or update/, the launcher and source/release.ini of the version
 asked for), extracts it whole to <install>/update/staging, and only then moves its files over the release folder.
 A file in use (the launcher that started this, the kit's Python running it) is renamed to <name>.tmb-old first, as
@@ -22,7 +22,7 @@ import shutil
 import sys
 import zipfile
 
-TOP = 'TMB_Recomp/'
+TOP = 'TMB_Recomp_Bozo/'  # the BozoEngine build's zip (tools/make_release.py's TOP)
 LAUNCHER = 'TMB Launcher.exe'
 PROTECTED = ('build/', 'game/', 'update/')  # the player's build and game, and this update's own folder
 

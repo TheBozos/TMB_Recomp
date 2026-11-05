@@ -1,97 +1,45 @@
-# Release checklist: a clean Windows PC before each release
+# Release checklist: BozoEngine-only TMB
 
-Take the draft the release workflow made from the version tag (README, "Making a release"; or `tools/make_release.py`
-by hand), then check the zip on a Windows 10 or 11 PC that has never seen
-the project: a fresh VM or a spare PC, nothing installed (no MSYS2, git, Python, Visual C++ redistributables), a
-standard user account, Defender on. Tick each line, write what differed in "Notes", and keep the filled copy with the
-release (or in the release's issue).
+Use a scratch `PS2X_USER_DIR` for every automated run. Keep game data and generated code out of Git and release ZIPs.
+Publication is separate from a successful build; this checklist records what was actually verified.
 
-Release: `TMB_Recomp-<version>.zip`, SHA-256 `<from the .sha256>`, commit `<commit>`.
+## Source and CI
 
-## Download and unzip
+- [x] TMB's only runtime submodule is `BozoEngine`, pinned to a public, reviewed commit.
+- [x] No PS2Recomp gitlink, CMake target, Python import fallback, IOP recompiler or legacy runner script remains.
+- [x] Engine Windows/Linux CI and TMB release-tool Windows/Linux CI pass.
+- [x] Local engine instruction/runtime/library/audio tests and whole-function replay pass.
+- [x] Pinned boot and 1P match agree on RAM, scratchpad, calls, threads and draws (the established final-frame exception is recorded).
+- [x] Stage 6 passes its previous interrupt point. Report native sound-model differences separately from runs using recorded IOP-time replies.
+- [ ] Native story completion, card writes and restart/readback work without a reference log.
 
-- [ ] The release page's SHA-256 equals `Get-FileHash .\TMB_Recomp-<version>.zip` (and `certutil -hashfile <zip>
-      SHA256`).
-- [ ] Unzip with Explorer's "Extract all" (the zip carries the Mark of the Web from the browser).
-- [ ] SmartScreen: double-click `TMB Launcher.exe`: "Windows protected your PC", **More info**, **Run anyway**; it starts.
-      (Once per exe; the downloaded zip's files carry the mark, the game built on the PC does not.)
-- [ ] Defender: no detection while unzipping, at the launcher's start, during the build (it scans the compiler's
-      output; note how much it slows the compile: Task Manager, "Antimalware Service Executable"), at Play.
-- [ ] A path with spaces and non-ASCII characters: `C:\Users\Jérôme\Jeux\TMB_Recomp-<version>\` (a user name with an
-      accent puts the user folder `%APPDATA%\TMB_Recomp` under it too).
-- [ ] Not in `C:\Program Files`: unzip there, start the launcher: preparing fails to write (the README says not to);
-      note the message the player gets.
+## Timing and rendering
 
-## The disc
+- [x] Menus: timer ticks and fields advance at their real-time rates, independently of presentation FPS.
+- [ ] Movies: measure decoded picture cadence, then watch/listen to an intro and a story movie. Run `tools/check_timing.py` on the log.
+- [x] Native clock pacing stays active even with an old `TMB_NATIVE_FRAMES=0` environment setting.
+- [x] Heat haze defaults on; `BOZO_HEAT_HAZE=0` restores the earlier port's rendering for comparisons.
+- [ ] 1P, four-player selection/split-screen, bots and the effects-heavy stage hold the 60 Hz target; keep timing logs.
+- [x] Recheck the previous four-player present dip around frames 7000–7300 with captures at 6000 and 7000 (same opponent-selection screen, 60 presents/s).
+- [ ] F2 Controls/Video/Cheats, mouse/keyboard launcher navigation and fullscreen switching remain usable.
 
-- [ ] The USA ISO on another drive than the release (or on a USB disk): accepted; `game\disc.iso` is a copy (3.8 GB
-      more on the release's drive; the launcher asks for about 10 GB free), not a hard link.
-- [ ] The USA ISO on the same drive: `game\disc.iso` a hard link (no extra space).
-- [ ] A `.bin` + `.cue` (MODE2/2352): accepted, converted to `game\disc.iso` (a copy).
-- [ ] The European disc: refused, "This is the European disc. Only the USA disc (SCUS-97101) is supported."
-- [ ] Another PS2 game, a non-disc file: refused with a plain message.
+## Packages
 
-## Preparing
+- [x] `TMB_Recomp-<version>-bozo.zip` contains one `TMB_Recomp_Bozo/` folder.
+- [x] `TMB_Recomp-<version>.zip` contains the identical BozoEngine payload under `TMB_Recomp/` for the old launcher's Update path.
+- [x] Both player ZIPs pass the package audit and their SHA-256 checks. Neither contains PS2Recomp or game-derived files.
+- [ ] The corresponding-source ZIP and licences accompany a published release.
+- [x] README and release notes state Windows 10/11, AVX2 + FMA, OpenGL 3.3 and approximately 10 GB free.
+- [x] Extract the player ZIP, then build from the player's USA disc with only its bundled kit, offline.
+- [ ] Test a path with spaces/non-ASCII, cancellation/resume, Play, F2, and restart.
+- [x] Test the migration ZIP through the previous updater; source files removed by this release disappear, saves/settings survive, rebuild starts the BozoEngine executable.
+- [ ] Test future updates of both folder layouts with the BozoEngine updater.
 
-- [ ] No internet (cable out / VM network off) from the launcher's start to Play: the build needs nothing from the
-      network; the update check stays silent.
-- [ ] Timing on a 4-core / 8 GB PC (and on the 8-core reference): each step's time from `build\logs` or the launcher,
-      the total "Prepared in". The PC stays usable meanwhile.
-- [ ] Stop at the compile, close the launcher (it asks first), start it again: "Continue preparing" resumes; "Prepared
-      in" is the sum of both runs.
-- [ ] Free space: the launcher warns under 10 GB.
+## Clean-PC and player acceptance
 
-## Playing
+- [ ] On a fresh standard-user Windows installation: SmartScreen/Mark of the Web, Defender, no MSYS2/Python/git/VC++ redist installed.
+- [ ] 150%/200% display scaling and controller interaction checked on real hardware.
+- [ ] Existing saves read correctly; movies, menus and matches feel right to the owner.
+- [ ] Record any remaining limitations explicitly in release notes before publication.
 
-- [ ] Play: the boot movies, the main menu, a match; the launcher hides and comes back when the game closes.
-- [ ] F2 settings in the game; Settings' window mode / size in the launcher used at the next start.
-- [ ] A crash (`PS2X_TEST_CRASH=25`, or `--selftest ... --crash-seconds 25`): the launcher offers the crash report.
-- [ ] High DPI: Windows' scaling at 150 % and 200 % (Settings, Display): the launcher readable, nothing clipped on
-      each tab; the game's window and F2 panel usable.
-
-## Updating and removing
-
-- [ ] With an older release published: "Version X is available" on the Play tab, "Open the release page" opens it.
-- [ ] Settings, "Check for updates at start: off": no request at start (a proxy log, or offline: nothing changes).
-- [ ] With an older release installed: **Update** on the Play tab downloads, installs and restarts the launcher on the
-      new version (Maintenance shows it); no `update\` folder or `*.tmb-old` file is left after the next start.
-- [ ] Unzip the new release over the old one: the Play tab says the new version is installed and offers **Rebuild
-      now**; after it, the notice is gone, the memory cards (`%APPDATA%\TMB_Recomp\mc0`, `mc1`) and settings are
-      unchanged, the game plays.
-- [ ] Uninstall: delete the release folder, then `%APPDATA%\TMB_Recomp`: nothing else was written (no registry, no
-      Start menu entry, no other folder: check `%LOCALAPPDATA%`, `%TEMP%`; `%ProgramData%\TMB_Recomp\paths` empty or
-      absent: the junctions of a non-ASCII path are removed after each build).
-
-## Before publishing
-
-- [ ] `CHANGELOG.md`'s section for the version says what changed, for players; the draft's body is that section
-      (plus the hashes and the source offer). The launcher's "What's new" (footer) shows the same section.
-- [ ] The draft has the zip, its `.sha256`, the sources zip and its `.sha256` (the GPL / LGPL corresponding source of
-      the kit's MSYS2 binaries); the workflow's smoke checks passed (its summary).
-- [ ] Published by the owner on GitHub (the workflow only ever makes a draft).
-
-## Results on the development PC
-
-2026-11-01, Windows 10 Home 22H2 (16 threads, 1920 x 1080 at 100 %), not a clean PC: what could be checked here.
-Release `TMB_Recomp-0.1.0-test.zip` (commit ac63080, fork 1466e9d, SHA-256
-`8fc2cb3713f171d9493646587c83c21944221868d5e719da0410bfa0aaaeb214`), then `0.1.1-test` (commit 29179f4) over it.
-
-| Check | Result |
-|---|---|
-| SHA-256 | `Get-FileHash` equals the `.sha256` file |
-| Unzip | PowerShell's `Expand-Archive` (no Mark of the Web: SmartScreen not exercised) into `D:\tmb_rel_test\Jérôme Jeux\` (spaces and accents), 96 s |
-| Non-ASCII path with spaces | **Failed three times, fixed**: ps2_recomp could not open the ELF (UTF-8 manifest, fork), windres's preprocessor (a space in the path: bare `gcc`), ld (junctions with plain names). Then: built and played from there |
-| European disc | Refused: "This is the European disc. Only the USA disc (SCUS-97101) is supported." (launcher screenshot; `tmb_build --check` exit 1) |
-| `.bin` + `.cue` | A MODE2/2352 image made from the ISO (4.36 GB) in `D:\tmb_rel_test\bin cue Jérôme\`: `--check` OK; extract 30.9 s, `disc.iso` a copy (1 link) byte-identical to the ISO. The copy path is the one an ISO on another drive takes; no second drive here (C: has 12 GB free) |
-| ISO on the same drive | `game\disc.iso` a hard link |
-| Preparing, Stop / resume | From an empty folder 186.6 s (extract 3.4, recompile 5.2, packs 33.4, iop 2.8, configure 5.3, compile 20 + 114.4 after a stop at 40 %, stage 0.2); "Prepared in 3:07", the sum of both runs |
-| 4-core / 8 GB | Not available here (16 threads) |
-| No internet | Not unplugged. The update check pointed at a closed port: silent, no notice; the real API (no release published yet, 404): silent. The build's network use is none by construction (FetchContent fully disconnected, the kit's sources) |
-| Defender | On, no detection while unzipping, building or playing; scan time not measured |
-| Play | Boot movies and the main menu (window captures), `GS scale 1` from video.ini, closed with code 0, the launcher back |
-| Crash report | `PS2X_TEST_CRASH=25`: exit 0xC0000005, the report offered |
-| High DPI | No 150 % / 200 % display here: `--ui-scale 1.5` and `2`. The layout did not fit a 1920 x 1080 screen at 150 % (1680 x 1140): the scale is now lowered to fit (1.32), every tab readable, nothing clipped; the Maintenance rows were made fixed-height (six rows overflowed the card at 1x). A real high-DPI monitor is still to check |
-| Update notice | A local server answering as the API with `v0.2.0`: "Version 0.2.0 is available", the link `.../releases/tag/v0.2.0`, "update available" in the footer and Maintenance |
-| Rebuild after an update | 0.1.1-test unzipped over 0.1.0-test (`-Force`): "Version 0.1.1-test is installed", Rebuild now; 31.8 s (recompile, packs, iop, configure again; nothing to compile); `built_from.ini` updated; the memory card file and video.ini byte-identical before and after; played again |
-| Uninstall | Not run here; the launcher writes only the release folder and the user folder (and, for a non-ASCII path, junctions under `%ProgramData%\TMB_Recomp\paths` removed after each build) |
-| Program Files | Not run (needs administrator rights to unzip there) |
+The development PC can verify an isolated source/build-kit flow, but cannot prove the fresh-OS, SmartScreen or real high-DPI checks by itself.

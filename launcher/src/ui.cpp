@@ -1,7 +1,7 @@
 #include "ui.h"
 #include "platform.h"
+#include "window.h"
 
-#include "raylib.h"
 #include "imgui_internal.h"
 
 #include <algorithm>
@@ -114,57 +114,60 @@ namespace ui
 
     namespace
     {
-        Texture2D g_gradient{};
-        bool g_hasGradient = false;
-
         float smoothstep(float a, float b, float x)
         {
             const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
             return t * t * (3 - 2 * t);
         }
 
-        void makeGradient()
+        // icon.svg's radialGradient (#14328f at the bottom centre, 0.55 #050b26, 1 #01030a) stretched to the window,
+        // with global.css's vignette baked in: the colour at (u, v) in 0..1.
+        ImU32 gradientAt(float u, float v)
         {
-            // icon.svg's radialGradient (#14328f at the bottom centre, 0.55 #050b26, 1 #01030a) stretched to the
-            // window, with global.css's vignette baked in.
-            const int w = 384, h = 240;
-            Image img = GenImageColor(w, h, BLACK);
-            auto *px = static_cast<Color *>(img.data);
             auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
             const float s0[3] = {0x14, 0x32, 0x8f}, s1[3] = {0x05, 0x0b, 0x26}, s2[3] = {0x01, 0x03, 0x0a};
-            for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x)
-                {
-                    const float u = (x + 0.5f) / w, v = (y + 0.5f) / h;
-                    const float d = std::sqrt(((u - 0.5f) / 0.62f) * ((u - 0.5f) / 0.62f) + ((v - 1.02f) / 1.05f) * ((v - 1.02f) / 1.05f));
-                    float rgb[3];
-                    for (int k = 0; k < 3; ++k)
-                        rgb[k] = d < 0.55f ? lerp(s0[k], s1[k], d / 0.55f) : lerp(s1[k], s2[k], std::min(1.0f, (d - 0.55f) / 0.45f));
-                    const float e = std::sqrt((u - 0.5f) * (u - 0.5f) * 4 + (v - 0.5f) * (v - 0.5f) * 4) / 1.414f;
-                    const float vignette = 1.0f - 0.65f * smoothstep(0.45f, 1.0f, e);
-                    px[y * w + x] = Color{static_cast<unsigned char>(rgb[0] * vignette), static_cast<unsigned char>(rgb[1] * vignette),
-                                          static_cast<unsigned char>(rgb[2] * vignette), 255};
-                }
-            g_gradient = LoadTextureFromImage(img);
-            SetTextureFilter(g_gradient, TEXTURE_FILTER_BILINEAR);
-            UnloadImage(img);
-            g_hasGradient = true;
+            const float d = std::sqrt(((u - 0.5f) / 0.62f) * ((u - 0.5f) / 0.62f) + ((v - 1.02f) / 1.05f) * ((v - 1.02f) / 1.05f));
+            float rgb[3];
+            for (int k = 0; k < 3; ++k)
+                rgb[k] = d < 0.55f ? lerp(s0[k], s1[k], d / 0.55f) : lerp(s1[k], s2[k], std::min(1.0f, (d - 0.55f) / 0.45f));
+            const float e = std::sqrt((u - 0.5f) * (u - 0.5f) * 4 + (v - 0.5f) * (v - 0.5f) * 4) / 1.414f;
+            const float vignette = 1.0f - 0.65f * smoothstep(0.45f, 1.0f, e);
+            return IM_COL32(static_cast<int>(rgb[0] * vignette), static_cast<int>(rgb[1] * vignette),
+                            static_cast<int>(rgb[2] * vignette), 255);
         }
 
-        Color col(unsigned rgb, float alpha)
+        // The gradient as a mesh of coloured quads (the GPU interpolates between the vertices: no texture), 48 x 30
+        // cells as raylib's 384 x 240 texture was bilinearly stretched.
+        void drawGradient(ImDrawList *dl, float W, float H)
         {
-            return Color{static_cast<unsigned char>((rgb >> 16) & 255), static_cast<unsigned char>((rgb >> 8) & 255),
-                         static_cast<unsigned char>(rgb & 255), static_cast<unsigned char>(std::clamp(alpha, 0.0f, 1.0f) * 255)};
+            constexpr int cols = 48, rows = 30;
+            static std::vector<ImU32> colours;
+            if (colours.empty())
+                for (int y = 0; y <= rows; ++y)
+                    for (int x = 0; x <= cols; ++x)
+                        colours.push_back(gradientAt(static_cast<float>(x) / cols, static_cast<float>(y) / rows));
+            const ImVec2 uv = ImGui::GetFontTexUvWhitePixel();
+            dl->PrimReserve(cols * rows * 6, (cols + 1) * (rows + 1));
+            const ImDrawIdx base = static_cast<ImDrawIdx>(dl->_VtxCurrentIdx);
+            for (int y = 0; y <= rows; ++y)
+                for (int x = 0; x <= cols; ++x)
+                    dl->PrimWriteVtx(ImVec2(W * x / cols, H * y / rows), uv, colours[static_cast<size_t>(y * (cols + 1) + x)]);
+            for (int y = 0; y < rows; ++y)
+                for (int x = 0; x < cols; ++x)
+                {
+                    const ImDrawIdx a = static_cast<ImDrawIdx>(base + y * (cols + 1) + x), b = static_cast<ImDrawIdx>(a + 1),
+                                    c = static_cast<ImDrawIdx>(a + cols + 1), d = static_cast<ImDrawIdx>(c + 1);
+                    dl->PrimWriteIdx(a), dl->PrimWriteIdx(b), dl->PrimWriteIdx(d);
+                    dl->PrimWriteIdx(a), dl->PrimWriteIdx(d), dl->PrimWriteIdx(c);
+                }
         }
     }
 
     void drawBackground(double time, bool motion)
     {
-        if (!g_hasGradient)
-            makeGradient();
-        const float W = static_cast<float>(GetScreenWidth()), H = static_cast<float>(GetScreenHeight());
-        DrawTexturePro(g_gradient, Rectangle{0, 0, static_cast<float>(g_gradient.width), static_cast<float>(g_gradient.height)},
-                       Rectangle{0, 0, W, H}, Vector2{0, 0}, 0, WHITE);
+        ImDrawList *dl = ImGui::GetBackgroundDrawList();
+        const float W = static_cast<float>(win::width()), H = static_cast<float>(win::height());
+        drawGradient(dl, W, H);
 
         // The boot towers: faint glowing columns rising from the bottom, as on the PS2's boot screen.
         const double t = motion ? time : 0.0;
@@ -183,25 +186,23 @@ namespace ui
             for (int g = 3; g >= 1; --g)
             {
                 const float pad = S(5.0f * g * g * 0.7f);
-                DrawRectangleRounded(Rectangle{x - w / 2 - pad, top - pad, w + 2 * pad, hgt + pad}, 0.3f, 6,
-                                     col(0x4f74ff, 0.03f * breathe / g));
+                const ImVec2 a(x - w / 2 - pad, top - pad), b(x + w / 2 + pad, top + hgt);
+                // raylib's DrawRectangleRounded roundness 0.3: 30 % of the shorter side's half.
+                dl->AddRectFilled(a, b, rgba(0x4f74ff, 0.03f * breathe / g), 0.3f * 0.5f * std::min(b.x - a.x, b.y - a.y));
             }
-            DrawRectangleGradientV(static_cast<int>(x - w / 2), static_cast<int>(top), static_cast<int>(w), static_cast<int>(hgt),
-                                   col(0x6f8dff, 0.26f * breathe), col(0x14328f, 0.06f * breathe));
-            DrawRectangle(static_cast<int>(x - w / 2), static_cast<int>(top), static_cast<int>(w), static_cast<int>(S(2)),
-                          col(0xc9dbff, 0.35f * breathe));
+            const float left = std::floor(x - w / 2), right = left + std::floor(w);
+            dl->AddRectFilledMultiColor(ImVec2(left, std::floor(top)), ImVec2(right, std::floor(top) + std::floor(hgt)),
+                                        rgba(0x6f8dff, 0.26f * breathe), rgba(0x6f8dff, 0.26f * breathe),
+                                        rgba(0x14328f, 0.06f * breathe), rgba(0x14328f, 0.06f * breathe));
+            dl->AddRectFilled(ImVec2(left, std::floor(top)), ImVec2(right, std::floor(top) + std::floor(S(2))),
+                              rgba(0xc9dbff, 0.35f * breathe));
         }
         // Scanlines (global.css's .vignette: 1 px of white at 1.8 % every 3 px).
         for (int y = 0; y < static_cast<int>(H); y += 3)
-            DrawRectangle(0, y, static_cast<int>(W), 1, Color{255, 255, 255, 5});
+            dl->AddRectFilled(ImVec2(0, static_cast<float>(y)), ImVec2(W, static_cast<float>(y + 1)), IM_COL32(255, 255, 255, 5));
     }
 
-    void releaseBackground()
-    {
-        if (g_hasGradient)
-            UnloadTexture(g_gradient);
-        g_hasGradient = false;
-    }
+    void releaseBackground() {}
 
     // ---- text ----
 

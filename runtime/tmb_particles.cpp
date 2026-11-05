@@ -48,12 +48,9 @@
 // TMB_NATIVE_PARTICLES_CHECK=1 (a diagnostic): nothing drawn here; types 1, 4, 6 (not on a sphere), 7 and 8 computed and
 // compared with what runtime/tmb_native.cpp's translations draw from the same systems' packets.
 
-#include "game_overrides.h"
-#include "ps2_runtime.h"
-#include "ps2_recompiled_functions.h"
-#include "ps2_runtime_macros.h"
-#include "runtime/native/native_renderer.h"
-#include "runtime/native/native_texture_cache.h"
+#include "tmb_port.h"
+#include "bozo/render/renderer.h"
+#include "bozo/render/texture.h"
 
 #include <algorithm>
 #include <array>
@@ -78,16 +75,16 @@ namespace tmb::native
 
 namespace tmb::textures
 {
-    std::shared_ptr<const ps2x::native::TextureCache::Texture> lookupId(uint32_t id, uint64_t tex0, uint64_t texa);
+    std::shared_ptr<const bozo::render::Texture> lookupId(uint32_t id, uint64_t tex0, uint64_t texa);
 }
 
 namespace tmb::particles
 {
     namespace
     {
-        using ps2x::native::Material;
-        using ps2x::native::Vertex;
-        using TexturePtr = std::shared_ptr<const ps2x::native::TextureCache::Texture>;
+        using bozo::render::Material;
+        using bozo::render::Vertex;
+        using TexturePtr = std::shared_ptr<const bozo::render::Texture>;
 
         constexpr bool kRegionSupported = true;
         constexpr float kScreenTop = 2048.0f - 112.0f; // the field's top line (640 x 224)
@@ -116,7 +113,14 @@ namespace tmb::particles
                           kGpRainStep = -0x474c, kGpRainMul = -0x4740;
         constexpr int32_t kGpKite = -0x47d0;  // kitePacketInit's three constants (alpha factor, origin y, factor step)
         constexpr int32_t kGpSprine = -0x47c4; // sprinePacketInit's
-        void gameParticleDraw(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { particleDraw__Fi_0x1e9540(rdram, ctx, runtime); }
+        // From its start, or (ctx->pc inside it: the chain loop or its tail) from there, through its resume entry.
+        void gameParticleDraw(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (ctx->pc != kParticleDraw)
+                resume_0x1e9540(rdram, ctx, runtime);
+            else
+                particleDraw__Fi_0x1e9540(rdram, ctx, runtime);
+        }
         void gameTexSpriteBuild(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             texSpritePacketBuild__FP13_ParticleType_0x1e12d8(rdram, ctx, runtime);
@@ -275,10 +279,11 @@ namespace tmb::particles
         void putF(uint8_t *rdram, uint32_t address, float value) { std::memcpy(rdram + (address & 0x1fffffcu), &value, 4); }
         void put8(uint8_t *rdram, uint32_t address, uint8_t value) { rdram[address & 0x1ffffffu] = value; }
 
-        uint64_t reg64(const R5900Context *ctx, int reg) { return reg == 0 ? 0u : static_cast<uint64_t>(_mm_cvtsi128_si64(ctx->r[reg])); }
+        uint64_t reg64(const R5900Context *ctx, int reg) { return reg == 0 ? 0u : ctx->r[reg].ud[0]; }
         void setReg(R5900Context *ctx, int reg, uint32_t value)
         {
-            ctx->r[reg] = _mm_set_epi64x(0, static_cast<int64_t>(static_cast<int32_t>(value)));
+            ctx->r[reg].sd[0] = static_cast<int64_t>(static_cast<int32_t>(value));
+            ctx->r[reg].ud[1] = 0;
         }
 
         bool typeNative(uint32_t type) { return type < 32u && ((settings().types >> type) & 1u) != 0u; }
@@ -383,7 +388,7 @@ namespace tmb::particles
         // its place in the system's arrays (0 when the window is not interpolating: nothing kept).
         uint64_t particleId(uint32_t ps, uint32_t index)
         {
-            if (!ps2x::native::Renderer::instance().interpolating())
+            if (!bozo::render::Renderer::instance().interpolating())
                 return 0u;
             return ((static_cast<uint64_t>(g_view) + 1u) << 52) ^ (static_cast<uint64_t>(ps) << 16) ^ (index + 1u);
         }
@@ -397,11 +402,11 @@ namespace tmb::particles
             else if (batch.open && !batch.triangles.empty() && !batch.ids.empty())
             {
                 batch.ids.resize(batch.triangles.size() / 3u, 0u);
-                ps2x::native::Renderer::instance().drawTracked(batch.material, batch.triangles.data(),
+                bozo::render::Renderer::instance().drawTracked(batch.material, batch.triangles.data(),
                                                                static_cast<uint32_t>(batch.triangles.size()), batch.texture, batch.ids.data());
             }
             else if (batch.open && !batch.triangles.empty())
-                ps2x::native::Renderer::instance().draw(batch.material, kScreenSpace, batch.triangles.data(),
+                bozo::render::Renderer::instance().draw(batch.material, kScreenSpace, batch.triangles.data(),
                                                         static_cast<uint32_t>(batch.triangles.size()), batch.texture);
             batch.triangles.clear();
             batch.ids.clear();
@@ -1848,12 +1853,18 @@ namespace tmb::particles
         // The game's float arithmetic for the flares' (the checks compare them bit for bit): the FPU's (add.s ...
         // truncated, a zero divisor giving the largest float) and VU0's (macro mode: the host's rounding), each
         // operation on its own (no fused multiply-add).
-        float fpuAdd(float a, float b) { return ps2_fadd(a, b); }
-        float fpuSub(float a, float b) { return ps2_fsub(a, b); }
-        float fpuMul(float a, float b) { return ps2_fmul(a, b); }
-        float fpuDiv(float a, float b) { return ps2_fdiv(a, b); }
-        float vuAdd(float a, float b) { return _mm_cvtss_f32(ps2_vadd(_mm_set_ss(a), _mm_set_ss(b))); }
-        float vuMul(float a, float b) { return _mm_cvtss_f32(ps2_vmul(_mm_set_ss(a), _mm_set_ss(b))); }
+        // (BozoEngine's PS2 float arithmetic: bozo/ops_fpu.h, the FPU's; bozo/ops_vu0.h, VU0's.)
+        float fpuOp(uint32_t (*op)(uint32_t, uint32_t, uint32_t &), float a, float b)
+        {
+            uint32_t flags = 0;
+            return ps2Float(op(ps2Bits(a), ps2Bits(b), flags));
+        }
+        float fpuAdd(float a, float b) { return fpuOp(&bozo::ps2f::add, a, b); }
+        float fpuSub(float a, float b) { return fpuOp(&bozo::ps2f::sub, a, b); }
+        float fpuMul(float a, float b) { return fpuOp(&bozo::ps2f::mul, a, b); }
+        float fpuDiv(float a, float b) { return fpuOp(&bozo::ps2f::div, a, b); }
+        float vuAdd(float a, float b) { return fpuOp(&bozo::vu0::addf, a, b); }
+        float vuMul(float a, float b) { return fpuOp(&bozo::vu0::mulf, a, b); }
 
         // particleLensFlareTestZbuffer(view): each light through mathfTransform3dTo2d (its position plus the view's
         // viewGetWeTrans, times viewGetWorldToScreenMat's rows, over w); the ones inside the view (viewGetCenter -+
@@ -2375,7 +2386,7 @@ namespace tmb::particles
             if (count > 0)
             {
                 lensFlareVisibility(rdram, list, count, view);
-                ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+                bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
                 renderer.beginGroup(tmb::native::nextStreamGroup());
                 renderer.setKey(0);
                 drawLensFlares(rdram, list, count, view);
@@ -2468,7 +2479,7 @@ namespace tmb::particles
                 for (int k = 0; k < 4; ++k)
                     constants.vu[j][k] = f32(rdram, kEffectsVu + 16u * j + 4u * k);
             constants.fog = fogColour(rdram);
-            ps2x::native::Renderer &renderer = ps2x::native::Renderer::instance();
+            bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
             bool drewNative = false;
             std::vector<Sorted> left;
             left.reserve(sorted.size());
@@ -2595,13 +2606,13 @@ namespace tmb::particles
 
     bool checking() { return settings().on && settings().check; }
 
-    void compare(uint32_t pc, const ps2x::native::Vertex *vertices, size_t count)
+    void compare(uint32_t pc, const bozo::render::Vertex *vertices, size_t count)
     {
         if (checking())
             compareCaptured(pc, vertices, count);
     }
 
-    void install(PS2Runtime &runtime)
+    void install(tmb::Registry &runtime)
     {
         if (!settings().on || !tmb::native::enabled())
             return;

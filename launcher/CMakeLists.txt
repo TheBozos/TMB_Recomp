@@ -1,16 +1,20 @@
 cmake_minimum_required(VERSION 3.21)
 project(TMB_Launcher LANGUAGES C CXX)
 
+# No C++ modules are used; keep GCC's module mapper out of relocatable kits with spaced/non-ASCII paths.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # TMB Launcher.exe: what a player double-clicks. It checks their disc image, runs tools/tmb_build.py with the build kit
-# (kit\python), shows its progress, and starts the game. Its own small project (the runner's CMake needs the generated
-# code): raylib, Dear ImGui and rlImGui at the tags the fork's ps2xRuntime pins, built static, a GUI-subsystem exe that
-# needs no DLL. Windows only.
+# (kit\python), shows its progress, and starts the game. Its own small project (the game's CMake needs the disc): SDL3
+# and Dear ImGui at the releases BozoEngine pins (its runtime/CMakeLists.txt: the same archives and SHA-256), ImGui's own
+# SDL3 and OpenGL 3 backends, BozoEngine's PNG writer (the selftest's screenshots); built static, a GUI-subsystem exe
+# that needs no DLL. Windows only.
 #
 #   cmake -S launcher -B build/launcher -G Ninja -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build/launcher        -> build/launcher/TMB Launcher.exe
 #
-# Offline (the build kit): -DFETCHCONTENT_SOURCE_DIR_RAYLIB=<kit>/deps/raylib-src (IMGUI, RLIMGUI likewise) and
-# -DLAUNCHER_FONT_DIR=<dir with Exo2[wght].ttf and OFL.txt>.
+# Offline (the build kit): -DFETCHCONTENT_SOURCE_DIR_SDL3=<kit>/deps/sdl3-src -DFETCHCONTENT_SOURCE_DIR_IMGUI=<kit>/deps/
+# imgui-src and -DLAUNCHER_FONT_DIR=<dir with Exo2[wght].ttf and OFL.txt>.
 
 if(NOT WIN32)
     message(FATAL_ERROR "The launcher is Windows only (Linux players run tools/tmb_build.py).")
@@ -21,33 +25,47 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# BozoEngine's tree (the submodule beside launcher/): its PNG writer only.
+set(LAUNCHER_BOZO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../BozoEngine" CACHE PATH "BozoEngine's source tree")
+if(NOT EXISTS "${LAUNCHER_BOZO_DIR}/runtime/app/png.cpp")
+    message(FATAL_ERROR "No BozoEngine at ${LAUNCHER_BOZO_DIR} (git submodule update --init BozoEngine)")
+endif()
+
 include(FetchContent)
-if(POLICY CMP0169)
-    cmake_policy(SET CMP0169 OLD) # FetchContent_Populate, as the fork uses it
-endif()
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(raylib GIT_REPOSITORY "https://github.com/raysan5/raylib.git" GIT_TAG "5.5" GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(raylib)
-FetchContent_Declare(imgui GIT_REPOSITORY https://github.com/ocornut/imgui.git GIT_TAG "v1.92.7-docking" GIT_SHALLOW TRUE)
-FetchContent_Declare(rlImGui GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git GIT_TAG "Raylib_5_5" GIT_SHALLOW TRUE)
-FetchContent_GetProperties(imgui)
-if(NOT imgui_POPULATED)
-    FetchContent_Populate(imgui)
-endif()
-FetchContent_GetProperties(rlImGui)
-if(NOT rlimgui_POPULATED)
-    FetchContent_Populate(rlImGui)
-endif()
+# SDL3, static, without audio, camera, GPU or renderer (the launcher starts only the video subsystem: mouse and
+# keyboard, OpenGL).
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
+set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+set(SDL_GPU OFF CACHE BOOL "" FORCE)
+set(SDL_RENDER OFF CACHE BOOL "" FORCE)
+set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(SDL3
+    URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz
+    URL_HASH SHA256=f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f
+    DOWNLOAD_EXTRACT_TIMESTAMP ON)
+FetchContent_MakeAvailable(SDL3)
+FetchContent_Declare(imgui
+    URL https://github.com/ocornut/imgui/archive/b1bcb12a624af7509894c8e77dd47416997777fa.tar.gz
+    URL_HASH SHA256=123926eb22d4990dea06bec0739d92f7790c8ee505b3d903fe2de7e5940f2c27
+    DOWNLOAD_EXTRACT_TIMESTAMP ON)
+FetchContent_MakeAvailable(imgui) # no CMakeLists.txt of its own: only fetched
 
 add_library(launcher_imgui STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp" "${imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_SOURCE_DIR}/imgui_tables.cpp" "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
-    "${rlimgui_SOURCE_DIR}/rlImGui.cpp")
-target_include_directories(launcher_imgui PUBLIC "${imgui_SOURCE_DIR}" "${rlimgui_SOURCE_DIR}")
-# No Font Awesome merged into the fonts, no demo window.
-target_compile_definitions(launcher_imgui PUBLIC NO_FONT_AWESOME IMGUI_DISABLE_DEMO_WINDOWS IMGUI_DISABLE_DEBUG_TOOLS)
-target_link_libraries(launcher_imgui PUBLIC raylib)
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp" "${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp")
+target_include_directories(launcher_imgui PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
+# No demo window, no debug tools.
+target_compile_definitions(launcher_imgui PUBLIC IMGUI_DISABLE_DEMO_WINDOWS IMGUI_DISABLE_DEBUG_TOOLS
+                                                 IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+target_link_libraries(launcher_imgui PUBLIC SDL3::SDL3-static)
+target_compile_options(launcher_imgui PRIVATE -w)
 
 # The type: Exo 2 (SIL Open Font License 1.1) from google/fonts at a pinned commit, embedded as a resource with its
 # licence. Downloaded at configure time (never committed) unless LAUNCHER_FONT_DIR has the two files.
@@ -88,17 +106,20 @@ endif()
 list(JOIN LAUNCHER_VERSION_NUMBERS "," LAUNCHER_FILEVERSION)
 
 set(LAUNCHER_ICON "${_icon}")
+set(LAUNCHER_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/launcher.manifest")
 set(LAUNCHER_EXO2 "${_font_dir}/exo2.ttf")
 set(LAUNCHER_OFL "${_font_dir}/OFL.txt")
 configure_file(launcher.rc.in "${CMAKE_BINARY_DIR}/launcher.rc" @ONLY)
-set_source_files_properties("${CMAKE_BINARY_DIR}/launcher.rc" PROPERTIES OBJECT_DEPENDS "${_icon};${LAUNCHER_EXO2}")
+set_source_files_properties("${CMAKE_BINARY_DIR}/launcher.rc" PROPERTIES OBJECT_DEPENDS "${_icon};${LAUNCHER_EXO2};${LAUNCHER_MANIFEST}")
 enable_language(RC)
 
 add_executable(tmb_launcher WIN32
-    src/main.cpp src/ui.cpp src/build_model.cpp src/config.cpp src/platform_win.cpp
+    src/main.cpp src/ui.cpp src/window.cpp src/build_model.cpp src/config.cpp src/platform_win.cpp
+    "${LAUNCHER_BOZO_DIR}/runtime/app/png.cpp"
     "${CMAKE_BINARY_DIR}/launcher.rc")
 set_target_properties(tmb_launcher PROPERTIES OUTPUT_NAME "TMB Launcher")
-target_link_libraries(tmb_launcher PRIVATE launcher_imgui raylib comdlg32 shell32 ole32 winhttp)
+target_include_directories(tmb_launcher PRIVATE "${LAUNCHER_BOZO_DIR}/runtime/include")
+target_link_libraries(tmb_launcher PRIVATE launcher_imgui comdlg32 shell32 ole32 winhttp)
 target_compile_definitions(tmb_launcher PRIVATE TMB_VERSION="${LAUNCHER_VERSION}" TMB_COMMIT="${LAUNCHER_COMMIT}")
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # No DLL besides Windows' own: libstdc++, libgcc and winpthread linked in; no debug information.

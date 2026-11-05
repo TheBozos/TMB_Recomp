@@ -1,6 +1,8 @@
 #include "tmb_host.h"
 
 #include <cstdlib>
+#include <filesystem>
+#include <string>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -190,4 +192,26 @@ namespace tmb::host
         setenv(name, value, 0);
     }
 #endif
+
+    namespace
+    {
+        std::string g_elfDirectory;
+    }
+
+    std::string executableDirectory()
+    {
+#if defined(_WIN32)
+        wchar_t path[MAX_PATH];
+        const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH)
+            return {};
+        return std::filesystem::path(std::wstring(path, n)).parent_path().string();
+#else
+        std::error_code ec;
+        return std::filesystem::read_symlink("/proc/self/exe", ec).parent_path().string();
+#endif
+    }
+
+    std::string elfDirectory() { return g_elfDirectory; }
+    void setElfDirectory(const std::string &folder) { g_elfDirectory = folder; }
 }

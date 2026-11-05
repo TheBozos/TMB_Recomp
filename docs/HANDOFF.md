@@ -1,86 +1,67 @@
-# Handoff (2026-11-01)
+# TMB on BozoEngine — 2026-11-05
 
-Where the work stands and how to pick it up on another machine. Details and history are in `RECOMP_NOTES.md`.
+The goal is to remove the PS2Recomp fork from the project. This source tree now builds **only on BozoEngine**.
+The earlier v0.3.2 release remains in Git history and on GitHub for comparison; it is not a runtime dependency.
 
-## Goal
+## Architecture and build
 
-The game smooth (its own 60 fps, the USA release only: the European one is dropped) and fully playable as a true PC
-program: no PS2 hardware simulated where the PC can do the job itself. Locked runs on 2026-11-01: a 1P match
-57.7-60.4 fps, 4P split screen 55.8-60.4. Earlier:
+- One submodule: `BozoEngine`. No PS2Recomp gitlink, legacy CMake branch, import fallback, IOP recompilation or old runner scripts.
+- `tools/tmb_build.py`: verify → extract → configure → native tools → recompile → packs → compile → stage.
+- `scripts/build_runtime.sh` and the other retained shortcuts use that same pipeline.
+- Native frame pacing is unconditional. A legacy `TMB_NATIVE_FRAMES=0` environment setting cannot bypass it.
+- Heat haze defaults on, as requested. `BOZO_HEAT_HAZE=0` is the comparison switch.
+- Existing cards/settings keep their format and `%APPDATA%\TMB_Recomp` location. Agent runs must set a scratch `PS2X_USER_DIR`.
 
-| Release | Path | fps mean | slowest tenth |
-|---|---|---|---|
-| USA (`SCUS-97101`, NTSC) | native (`scripts/run_native.sh`, 2x resolution) | 58.9 | 58.5 |
+## Validation recorded in this continuation
 
-Windows, Ryzen 7 7800X3D, RTX 5070 Ti; scripted play through the menus into the first arena (`tools/play_script.py`).
+- Engine: all 5 local CTest checks pass, including the corrected FMAC overflow case and its new boundary cases.
+- Whole-function replay: **9,232/9,232 samples, 1,518/1,518 functions**, bit-exact.
+- Real-time menu/movie diagnostic: EE/PC **1.0001**, **576,005 ticks/s**, **59.97 fields/s**; movies **29.93–30.00 pictures/s**.
+  The owner also said the freshly launched build no longer felt too fast. This measurement used the handoff build's existing clock fixes;
+  the continuation adds a regression guard and removes the unpaced legacy frame switch.
+- Native story run without a call log: **26,000 frames**, stage progression, card files written, no fault.
+- Boot pinned: **MATCH**, 3,000/3,000 state frames; draws 2,999/3,000 (the established last-record exception).
+- Stage 6 pinned: the old frame-7105 interrupt mismatch is resolved. **11,000/11,000 state and draw frames match with recorded IOP-time sound replies**.
+  Two events retain an ancestor pc in the reference; the checker accepts these only with an active inner call, matching function/caller,
+  and an **exact cycle and checkpoint count**, and reports them separately. It does not shift their timing.
+- Release-tool regressions: 7 tests pass, including accelerated menus/movies, migration layout, forbidden runtime and game-file audits.
+- Engine Windows/Linux CI passes. Package and final run results are recorded below as they complete.
 
-## Setting up a new machine
+## Limits of the old reference comparisons
 
-1. Install the requirements in the README (CMake, Ninja, GCC 13+, FFmpeg dev libs, X11/Wayland + OpenGL headers,
-   bsdtar, an AVX2 CPU). The native port draws with OpenGL 3.3. A Vulkan driver is only needed for the PS2 path's
-   paraLLEl-GS (`scripts/run.sh`), fetched by CMake with its shaders precompiled.
-2. `git clone --recurse-submodules https://github.com/TheBozos/TMB_Recomp.git`. `PS2Recomp` is the fork
-   `TheBozos/PS2Recomp`; TMB pins a commit of its `native/renderer` branch (the native work, merged into `main` as it
-   settles).
-3. The game data is not in the repository (never commit it). Put your own ISO at the repo root, then follow "Build and
-   run" in the README: `extract_iso.sh`, `build_tools.sh`, `recomp.sh`, `build_runtime.sh`, optionally
-   `iop_recomp.sh` (`game_us/`, `generated_us/`, `build/game_us`).
-4. On Windows: MSYS2 UCRT64 with its GCC, as in the README's Windows section; `scripts/stage_dlls.sh` after a build
-   to start the runner outside the MSYS2 shell. No `perf`: use the fork's sampling profiler (`PS2X_PROFILE=<s>`).
-5. The first build compiles about 3500 generated files. A change to `ps2_runtime.h`, `ps2_memory.h` or
-   `gs_frontend.h` rebuilds all of them.
+- Native 989SND uses its own timing. Default pinned story/4P/stage runs can differ on opaque play handles or the instant a sound ends.
+  Recorded sound replies let the remaining native game state/draws be checked. Those replies are a checker option and never used by the player build.
+- The old pinned `save` recording still differs inside the test-only kill-enemies cheat's copied-context guest call at frame 5458.
+  The native campaign run does proceed through the kills, stage transitions and real card writes. Do not describe the old pinned save recording as MATCH.
+- Audio sample hashes are diagnostic, not an enforced equality claim; the existing handoff documents the few-sample timing differences.
+- A fresh standard-user Windows OS, SmartScreen/Mark of the Web, physical high-DPI displays and additional human/controller acceptance need real hardware testing.
 
-## Current state
+## Packaging and updates
 
-- **Playable.** Boot, movies (the USA release's story cinematics too), menus, loading, matches (driving, weapons, AI,
-  sound, HUD, split screen), deaths, respawns, game over, saving and loading. Story mode: level 1 of 8 checked.
-- **The native path** (`TMB_NATIVE=1`, `scripts/run_native.sh`):
-  - frames on the PC's clock (`timer1HandlerNative`, the fork's `FramePacer`; `TMB_NATIVE_FRAMES=0` for the vblanks);
-  - 3D from an offline mesh pack at the game's per-object hook, in the game's order, clipped to its own clip volume
-    (`runtime/tmb_meshes.cpp`); effects from the particle lists (`runtime/tmb_particles.cpp`); 2D builders rewritten
-    (`runtime/tmb_2d.cpp`); textures from an offline pack (`runtime/tmb_textures.cpp`); VU0 programs in C++
-    (`runtime/tmb_vu0.cpp`); no VU1 or VU0 interpreter;
-  - no GS front end: no GS object, memory or thread; the DMA kicks to GIF / VIF0 / VIF1 complete unread; the native
-    renderer presents the frame at 2x (`PS2X_GS_SCALE`);
-  - sound: the recompiled 989snd's libsd calls on the fork's native mixer, the SPU2 absent (`TMB_NATIVE_AUDIO=0`
-    brings it back);
-  - the IOP: no hardware model and no interpreted instruction (`[iop:hw]`); its kernel services answered natively.
-  - the settings window (F2): controls, video (resolution, windowed / fullscreen / borderless, render scale), cheats;
-    the window shows each game frame once (no periodic stutter).
-- **Controls.** Rebindable to keys, controllers and the mouse: F2 in the game, saved to `input.ini`.
-- **Known gaps.** Not checked yet: every arena and story level to the endings. Widescreen and frame rates above the
-  PS2's are not started (the game's update steps in whole fields).
+Both player ZIPs carry **the same BozoEngine build**:
 
-## Measuring
+| File | Root folder | Purpose |
+|---|---|---|
+| `TMB_Recomp-<version>-bozo.zip` | `TMB_Recomp_Bozo/` | Separate/new installation |
+| `TMB_Recomp-<version>.zip` | `TMB_Recomp/` | Existing launcher's in-place Update |
 
-- **Check runs.** A pad script reaching the match about 150 s in: `PS2X_PAD_SCRIPT="$(tools/play_script.py 230)"`,
-  with `TMB_TRACE_FRAMES=1` (frame split and CPU per host thread every 100 frames; under native frames also the game's
-  fields per real second, 60 when it runs at its own speed). `PS2X_CAPTURE_DIR` saves the presented picture
-  every few seconds, `PS2X_CAPTURE_WINDOW_DIR` the window as shown, `PS2X_WINDOW_SIZE=1280x960` a bigger window.
-- **Timeline.** `TMB_TRACE_TIMELINE=<file>`, then `tools/timeline.py <file> [frame] [count]`.
-- **What is still read or emulated.** `TMB_TRACE_PACKETS=1`: per 250 frames, packets read, chains walked, VU0
-  interpreter runs (all 0 by default); `[audio] native mixer` lines every 10 s with the SPU2 counters (all 0).
-- **Live diagnosis.** `TMB_LIVE_TOGGLES=<file>` (words read every 60 frames: nodepth, nofog, flat, noguard, dump...)
-  and F9 bursts of window captures: let the owner drive to a spot scripts can't reach.
-- **Comparison modes.** `TMB_NATIVE_VIF=1` (+ `TMB_NATIVE_MESHES_CHECK=1`), `TMB_NATIVE_MESHES=0 TMB_NATIVE_CHECK=<n>`
-  (VU1's own output beside the translation), `PS2X_VU0_HLE_CHECK=1`, `PS2X_AUDIO_RECORD=<wav>` on either sound path.
-- **Shared machine.** Only timed runs go through the bench lock (`tools/bench_lock.sh`); builds and visual checks run
-  freely. Discard the first run after a build on Windows (Defender scans the new files).
+The older ZIP name does not retain the older engine. The existing updater can install the migration ZIP;
+the new launcher subsequently uses `-bozo.zip` updates regardless of its installation folder name.
+The corresponding-source ZIP and every SHA-256 accompany a published release.
 
-## Next steps
+Requirements: Windows 10/11, **AVX2 + FMA**, OpenGL 3.3, about 10 GB free. Only the USA disc is supported.
+Follow [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Do not publish a release tag merely because a test artifact builds.
 
-1. Story levels 2-8 to the endings, fixing what shows up (the owner's reports first); every Challenge arena is checked
-   (the Cheats tab's Unlock everything, `TMB_UNLOCK_ALL=1`, opens the locked ones).
-2. Widescreen; frame rates above the PS2's (interpolating between game updates).
-3. Later, a bigger project: the PS2-shaped software layer the recompiled code still runs in (guest threads, DMA kicks,
-   the IOP modules' RPC) replaced by the game's systems as PC code.
+## Working rules
 
-## Working conventions
+- Clean-room rules in `BozoEngine/docs/PLAN.md` still apply: do not read the old fork, its generated code or emulator source when writing engine code.
+- Push engine changes before the TMB pin; use reviewed branches/PRs and green CI. End commits with a `Co-Authored-By` line.
+- Do not modify game/disc files or commit derived content. Never modify the owner's real user folder during agent runs.
+- Keep scratch/builds on D:. Never edit a script while a job runs it, send input to other windows, or kill another project's processes.
+- The shared benchmark mechanism is for timing runs only; builds and functional checks do not take it. Do not announce its state.
 
-- Commit as `Thomas Martin <304581853+boubou666@users.noreply.github.com>`, never a personal e-mail. End commits with
-  the `Co-Authored-By` line used in the history.
-- Fixes to the runtime, IOP or recompiler go into the fork `TheBozos/PS2Recomp`, not into workarounds here. Push the
-  fork first, then bump the submodule here.
-- Run the fork tests before pushing (`ps2x_tests`, 610+ cases), and a TMB check run on the USA release.
-- Push with Git for Windows (`/c/Program Files/Git/cmd/git.exe`): MSYS2's git hangs without credentials.
-- Never edit a script a running or queued job will execute; clear a stale bench lock entry if a job dies holding it.
+## Local evidence
+
+Continuation scratch: `D:\BozoScratch\finish`. Source worktrees: `D:\TMB_bozo` and `D:\BozoEngine`.
+Logs include `diag.log`, `ctest-final.log`, `replay/report.txt`, `pin-boot.log`, `pin-match1p.log`, `pin-stage6.log`,
+`save-free.log` and the deliberately retained failing `save-fixes.log` comparison.

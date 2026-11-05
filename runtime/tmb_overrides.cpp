@@ -378,7 +378,6 @@ namespace
     }
 
     constexpr uint32_t kVblankHandler = 0x001C1890u;
-    bool g_nativeFrames = false; // native frames, TMB_NATIVE_FRAMES=0 off (timer1HandlerNative)
     constexpr uint32_t kHier = 0x001D2EA0u;
 
     double g_hierMs = 0, g_updateMs = 0;
@@ -553,7 +552,7 @@ namespace
             *frameTicks = g_maxFrameTicks;
     }
 
-    // Native frames (docs/native.md, layer 1; TMB_NATIVE_FRAMES=0 off): the game's frames on the PC clock instead of the PS2's vblanks.
+    // Native frames: the game's frames on the PC clock.
     // Each frame of the match and the menus ends in timer1Handler: it adds the timer ticks of the frame (T0, 576000 a
     // second) to the game's tick total, waits a vblank (sceGsSyncV), then adds the fields the frame took (the ticks
     // rounded up to 1/50 s) to the game's field count, which TheGame::Update moves the cars by. The loading screens,
@@ -656,10 +655,11 @@ namespace
                 static double s_lastEe = 0.0, s_lastPc = 0.0;
                 const double pc = wall - s_firstTime;
                 std::fprintf(stderr,
-                             "[tmb:clock] frame %llu: EE %.3f s, PC %.3f s, EE ahead %.3f s (%.2f%%); last 300 frames EE/PC %.4f; debt %.1f ms\n",
+                             "[tmb:clock] frame %llu: EE %.3f s, PC %.3f s, EE ahead %.3f s (%.2f%%); last 300 frames EE/PC %.4f; debt %.1f ms; ticks %d fields %d\n",
                              static_cast<unsigned long long>(s_frames), ee, pc, ee - pc, pc > 0.0 ? 100.0 * (ee / pc - 1.0) : 0.0,
                              pc > s_lastPc ? (ee - s_lastEe) / (pc - s_lastPc) : 0.0,
-                             1000.0 * static_cast<double>(g_clockDebt) / static_cast<double>(bozo::port::kEeClockHz));
+                             1000.0 * static_cast<double>(g_clockDebt) / static_cast<double>(bozo::port::kEeClockHz),
+                             *gpWord(rdram, gp, kTicsGpOffset), *gpWord(rdram, gp, kFieldCountGpOffset));
                 s_lastEe = ee;
                 s_lastPc = pc;
             }
@@ -1150,9 +1150,6 @@ namespace
     {
         for (uint32_t address : kLgStubs)
             runtime.registerFunction(address, &returnZero);
-        // The frames on the PC clock (timer1HandlerNative); TMB_NATIVE_FRAMES=0 keeps them on the vblanks.
-        if (const char *frames = std::getenv("TMB_NATIVE_FRAMES"); !(frames && *frames == '0'))
-            g_nativeFrames = true;
         runtime.registerFunction(kVblankHandler, &vblankHandlerOverride);
         runtime.registerFunction(kHier, &hierOverride);
         tmb::native::install();          // TMB_NATIVE
@@ -1182,8 +1179,6 @@ namespace
             if (const char *seconds = std::getenv("TMB_TRACE_TIMELINE_SECONDS"); seconds && *seconds)
                 g_timeline.durationNs = static_cast<int64_t>(std::max(1.0, std::atof(seconds)) * 1e9);
             runtime.registerFunction(0x00203C18u, &sceGsSyncPathTimeline);
-            if (!g_nativeFrames)
-                runtime.registerFunction(0x00203B80u, &sceGsSyncVTimeline);
         }
         runtime.registerFunction(kSubstepReturn, &substepReturn);
         runtime.registerFunction(kMtapInit, &mtapInit);
@@ -1198,11 +1193,8 @@ namespace
             runtime.registerFunction(kFxTestReturn, &fxTestReturn);
         }
         // Native frames: the frames on the PC clock (timer1HandlerNative).
-        if (g_nativeFrames)
-        {
-            runtime.registerFunction(kTimer1Handler, &timer1HandlerNative);
-            runtime.registerFunction(kSceGsSyncV, &sceGsSyncVNative);
-        }
+        runtime.registerFunction(kTimer1Handler, &timer1HandlerNative);
+        runtime.registerFunction(kSceGsSyncV, &sceGsSyncVNative);
         if (const char *path = std::getenv("TMB_TRACE_BLACKBOX"); path && *path)
             g_blackboxPath = path;
         if (const char *path = std::getenv("TMB_TRACE_POS"); path && *path)

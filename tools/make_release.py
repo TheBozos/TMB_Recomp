@@ -363,6 +363,7 @@ class Release:
         self.source = os.path.join(self.stage, 'source')
         self.kit = os.path.join(self.stage, 'kit')
         self.zip = os.path.join(self.out, self.name + '.zip')
+        self.migration_zip = os.path.join(self.out, '%s-%s.zip' % (NAME, self.version))
         self.sources_zip = os.path.join(self.out, self.name + '-sources.zip')
         self.commit_date = int(git('show', '-s', '--format=%ct', self.commit))
         self.engine_commit = None
@@ -401,10 +402,6 @@ class Release:
         extract_tar_stream([find_git(), 'archive', '--format=tar', self.engine_commit], engine_dst, engine_repo)
         for skip in ENGINE_SKIP:
             rmtree(os.path.join(engine_dst, skip))
-        # The fork's submodule (PS2Recomp) is not part of this build: the empty folder git archive leaves goes too.
-        fork_dir = os.path.join(self.source, 'PS2Recomp')
-        if os.path.isdir(fork_dir) and not os.listdir(fork_dir):
-            os.rmdir(fork_dir)
         # The list of the source's files: tmb_build removes the ones a newer release unzipped over this one no longer
         # has (CMake globs runtime/*.cpp: a deleted file left behind would still be compiled).
         files = sorted(os.path.relpath(os.path.join(d, n), self.source).replace('\\', '/')
@@ -813,6 +810,15 @@ class Release:
             % (os.path.basename(self.zip), len(names), os.path.getsize(self.zip) / 1e6, dir_size(self.stage) / 1e6,
                time.time() - t, self.zip_sha256))
 
+    def step_migration_zip(self):
+        """The same BozoEngine-only install under the old folder/asset name, for existing launchers' Update."""
+        zip_dir(self.stage, self.migration_zip, NAME, self.zip_time())
+        problems = verify_zip(self.migration_zip, top=NAME)
+        if problems:
+            raise ReleaseError('invalid migration zip:\n  ' + '\n  '.join(problems[:20]))
+        self.migration_sha256 = write_sha256(self.migration_zip)
+        log('  %s: SHA-256 %s' % (os.path.basename(self.migration_zip), self.migration_sha256))
+
     def step_notes(self):
         sources = os.path.isfile(self.sources_zip + '.sha256')
         lines = [
@@ -824,7 +830,8 @@ class Release:
             '1. `%s.zip` below. Check its SHA-256 before running anything:' % self.name,
             '   `Get-FileHash .\\%s.zip` (PowerShell) must print' % self.name, '',
             '   ```', '   %s' % self.zip_sha256.upper(), '   ```', '',
-            '2. Unzip it anywhere you like except Program Files, with about 5 GB free, and double-click '
+            'Requires Windows 10/11, an AVX2 and FMA capable CPU, and OpenGL 3.3.', '',
+            '2. Unzip it anywhere you like except Program Files, with about 10 GB free, and double-click '
             '**TMB Launcher.exe**. It is not signed: on *Windows protected your PC*, click **More info**, then '
             '**Run anyway**.',
             '3. Select your USA disc image (SCUS-97101), **Prepare the game** (a few minutes, once), **Play**.', '',
@@ -838,6 +845,8 @@ class Release:
             % (self.pkg_version('gcc'), self.pkg_version('cmake'), self.pkg_version('ninja'),
                self.manifest['ffmpeg']['version'], self.manifest['python']['version']),
             '- `%s.zip`: %.1f MB, SHA-256 `%s`' % (self.name, os.path.getsize(self.zip) / 1e6, self.zip_sha256),
+            '- `%s`: the same BozoEngine build in `TMB_Recomp/`, for the previous launcher\'s in-place update; '
+            'SHA-256 `%s`' % (os.path.basename(self.migration_zip), self.migration_sha256),
         ]
         if sources:
             with open(self.sources_zip + '.sha256') as f:
@@ -866,7 +875,7 @@ class Release:
         return info['version'] if info else '?'
 
     def publish(self):
-        assets = [self.zip, self.zip + '.sha256']
+        assets = [self.zip, self.zip + '.sha256', self.migration_zip, self.migration_zip + '.sha256']
         if os.path.isfile(self.sources_zip):
             assets += [self.sources_zip, self.sources_zip + '.sha256']
         else:
@@ -906,6 +915,9 @@ class Release:
             raise ReleaseError('%s:\n  %s' % (self.zip, '\n  '.join(problems[:40])))
         if not sha256_matches(self.zip):
             raise ReleaseError('%s does not match its .sha256' % self.zip)
+        problems = verify_zip(self.migration_zip, top=NAME)
+        if problems or not sha256_matches(self.migration_zip):
+            raise ReleaseError('migration zip audit or SHA-256 failed: %s' % problems)
         self.publish()
 
     def main(self):
@@ -917,7 +929,7 @@ class Release:
                  ('licenses', self.step_licenses), ('readme', self.step_readme)]
         if self.args.with_sources:
             steps.append(('sources', self.step_sources))
-        steps += [('zip', self.step_zip), ('notes', self.step_notes)]
+        steps += [('zip', self.step_zip), ('migration zip', self.step_migration_zip), ('notes', self.step_notes)]
         if self.args.publish:
             steps.append(('publish', self.publish))
         t0 = time.time()
@@ -950,18 +962,20 @@ def changelog_section(text, version):
     return None
 
 
-def verify_zip(path):
+def verify_zip(path, top=TOP):
     """The zip audited as the release folder is (--verify-zip): names of the game's files or the build's folders, ELF
     and ISO9660 contents, the top folder, the files a release must have. Problems as a list of strings."""
     problems = []
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
         tops = set(n.split('/', 1)[0] for n in names)
-        if tops != {TOP}:
-            problems.append('the zip\'s top folders are %s, expected %s only' % (sorted(tops), TOP))
+        if tops != {top}:
+            problems.append('the zip\'s top folders are %s, expected %s only' % (sorted(tops), top))
         for info in zf.infolist():
             n = info.filename
             rel = n.split('/', 1)[1] if '/' in n else n
+            if rel.replace('\\', '/').lower().startswith('source/ps2recomp/'):
+                problems.append('%s: retired runtime in a BozoEngine-only release' % n)
             if n.endswith('/'):
                 if game_name(rel):
                     problems.append('%s: a generated / game folder' % n)
@@ -978,8 +992,8 @@ def verify_zip(path):
                      'LICENSES/BozoEngine/LICENSE', 'source/release.ini', 'kit/kit_manifest.json',
                      'kit/python/python.exe', 'source/tools/tmb_build.py', 'source/BozoEngine/CMakeLists.txt',
                      'kit/deps/sdl3-src/CMakeLists.txt', 'kit/deps/imgui-src/imgui.cpp'):
-            if '%s/%s' % (TOP, need) not in names:
-                problems.append('%s/%s is missing' % (TOP, need))
+            if '%s/%s' % (top, need) not in names:
+                problems.append('%s/%s is missing' % (top, need))
     return problems
 
 
@@ -1039,6 +1053,7 @@ by The Bozos (boubou666 & Arzaroth)
 What this is
   A native PC version of Twisted Metal: Black (PS2), built on your own PC from YOUR OWN disc.
   Nothing of the game is in this download: no game files, no code taken from the game.
+  Requires Windows 10/11, an AVX2 and FMA capable CPU, and OpenGL 3.3.
   You need a disc image of the USA release (SCUS-97101): a .iso, or a .bin with its .cue.
   The European disc is not supported.
 
@@ -1048,8 +1063,8 @@ Before you start: check the download
   The hash printed must be the same as on the release page (and in {name}.zip.sha256).
 
 Install
-  1. Unzip the whole zip anywhere you like, with about 5 GB free, for example into D:\\Games: that makes
-     D:\\Games\\TMB_Recomp_Bozo. Not in "Program Files" (the launcher writes the game next to itself).
+  1. Unzip the whole zip anywhere you like, with about 10 GB free, for example into D:\\Games: that makes
+     D:\\Games\\TMB_Recomp_Bozo (TMB_Recomp for the migration ZIP). Not in "Program Files" (the launcher writes the game next to itself).
      Keep the folders together: TMB Launcher.exe, source\\ and kit\\.
   2. Double-click "TMB Launcher.exe". It is not signed, so Windows may show
      "Windows protected your PC": click "More info", then "Run anyway".
@@ -1083,6 +1098,7 @@ An unofficial fan project, not affiliated with or endorsed by them.
 De quoi s'agit-il
   Une version PC native de Twisted Metal: Black (PS2), construite sur votre PC à partir de VOTRE PROPRE disque.
   Rien du jeu n'est dans ce téléchargement : aucun fichier du jeu, aucun code issu du jeu.
+  Nécessite Windows 10/11, un processeur compatible AVX2 et FMA, et OpenGL 3.3.
   Il vous faut une image disque de la version américaine (SCUS-97101) : un .iso, ou un .bin avec son .cue.
   Le disque européen n'est pas pris en charge.
 
@@ -1092,8 +1108,8 @@ Avant de commencer : vérifiez le téléchargement
   L'empreinte affichée doit être la même que sur la page de la version (et dans {name}.zip.sha256).
 
 Installation
-  1. Décompressez tout le zip où vous voulez, avec environ 5 Go libres, par exemple dans D:\\Jeux : cela donne
-     D:\\Jeux\\TMB_Recomp_Bozo. Pas dans « Program Files » (le lanceur écrit le jeu à côté de lui).
+  1. Décompressez tout le zip où vous voulez, avec environ 10 Go libres, par exemple dans D:\\Jeux : cela donne
+     D:\\Jeux\\TMB_Recomp_Bozo (TMB_Recomp pour le ZIP de migration). Pas dans « Program Files » (le lanceur écrit le jeu à côté de lui).
      Gardez les dossiers ensemble : TMB Launcher.exe, source\\ et kit\\.
   2. Double-cliquez sur « TMB Launcher.exe ». Il n'est pas signé : si Windows affiche
      « Windows a protégé votre ordinateur », cliquez sur « Informations complémentaires », puis « Exécuter quand même ».

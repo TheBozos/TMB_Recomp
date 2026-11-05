@@ -14,7 +14,7 @@ again; within a step CMake and Ninja rebuild only what changed):
              outside tool (BozoEngine's tools/native_pack/ps2_disc.py); and the image itself as <game>/disc.iso (the
              game reads the disc from it): a hard link to the .iso on the same drive, else a copy (a .bin / .cue
              converted)
-  configure  cmake (Ninja) of TMB on BozoEngine (TMB_BOZO, cmake/bozo.cmake): SDL3 and Dear ImGui from the kit's
+  configure  cmake (Ninja) of TMB on BozoEngine (cmake/bozo.cmake): SDL3 and Dear ImGui from the kit's
              deps/, FFmpeg from the kit's ffmpeg/
   tools      BozoEngine's recompiler and externals writer (bozo-recomp, bozo-externals), built from its sources
   recompile  the externals list (the ELF's library symbols, TMB's overrides, recomp/tmb_stubs.txt) and bozo-recomp
@@ -565,7 +565,7 @@ class Build:
                 text = f.read()
             m = re.search(r'^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$', text, re.M)
             moved = m and os.path.normcase(os.path.normpath(m.group(1))) != os.path.normcase(os.path.normpath(ROOT))
-            if moved or not re.search(r'^TMB_BOZO:BOOL=ON$', text, re.M):
+            if moved or not re.search(r'^BOZO_ENGINE_DIR:PATH=', text, re.M):
                 emit('INFO', 'configure', 'the build folder was configured %s: configured again'
                      % ('from %s' % m.group(1) if moved else 'for the fork'))
                 os.remove(cache)
@@ -573,7 +573,7 @@ class Build:
         fwd = lambda p: p.replace('\\', '/')  # noqa: E731
         cmd = [self.tool('cmake'), '-S', ROOT, '-B', self.cmake_build, '-G', 'Ninja',
                '-DCMAKE_BUILD_TYPE=' + self.args.build_type,
-               '-DTMB_BOZO=ON', '-DBOZO_ENGINE_DIR=' + fwd(ENGINE),
+               '-DBOZO_ENGINE_DIR=' + fwd(ENGINE),
                '-DTMB_ELF=' + fwd(self.elf()), '-DTMB_DISC_DIR=' + fwd(self.disc_dir),
                '-DBOZO_BUILD_TOOLS=OFF', '-DBUILD_TESTING=OFF', '-DTMB_GUI_SUBSYSTEM=ON',
                '-DPython3_EXECUTABLE=' + fwd(sys.executable),

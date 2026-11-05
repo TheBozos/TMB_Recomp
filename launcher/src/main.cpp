@@ -1141,9 +1141,9 @@ static void drawReady(App &app, float inner)
         gap(4);
         ui::textWrapped(app.cfg.buildPending
                             ? L("It continues where it left off.", "Elle reprend là où elle s'était arrêtée.")
-                            : L("The game is built once, from your disc. It takes a few minutes and about 5 GB of free space.",
+                            : L("The game is built once, from your disc. It takes a few minutes and about 10 GB of free space.",
                                 "Le jeu est construit une seule fois, à partir de votre disque. Cela prend quelques minutes "
-                                "et environ 5 Go d'espace libre."),
+                                "et environ 10 Go d'espace libre."),
                         19, ui::color::ink, 0.92f);
         const double freeGb = plat::freeBytes(app.p.release) / 1073741824.0;
         if (freeGb > 0 && freeGb < 5)

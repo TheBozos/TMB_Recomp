@@ -1,7 +1,7 @@
 # TMB on BozoEngine (phase 4, BozoEngine's docs/phase4-inventory.md): TMB's runtime/ built against BozoEngine instead
 # of the PS2Recomp fork. Milestone M0: headless; M1: the window (tmb), the packs built from the disc.
 #
-#   cmake -S . -B build/bozo -G Ninja -DTMB_BOZO=ON -DBOZO_ENGINE_DIR=<BozoEngine> -DTMB_ELF=<SCUS_971.01>
+#   cmake -S . -B build/bozo -G Ninja -DBOZO_ENGINE_DIR=<BozoEngine> -DTMB_ELF=<SCUS_971.01>
 #         -DTMB_ISO=<the disc image> [-DBOZO_FFMPEG_ROOT=<kit>/ffmpeg] [-DTMB_WINDOW=OFF]
 #
 # Targets:
@@ -28,10 +28,10 @@ set(TMB_ISO "" CACHE FILEPATH "TMB's disc image (the packs are built from its fi
 set(TMB_DISC_DIR "" CACHE PATH "The packs' files already extracted from the disc (tools/tmb_build.py: <dir>/.extracted marks them done); else read from TMB_ISO here")
 option(TMB_WINDOW "Build tmb, the game in a window (BozoEngine's bozo_app: SDL3, OpenGL 3.3)" ON)
 if(NOT BOZO_ENGINE_DIR OR NOT EXISTS "${BOZO_ENGINE_DIR}/CMakeLists.txt")
-    message(FATAL_ERROR "TMB_BOZO: set BOZO_ENGINE_DIR to BozoEngine's source tree")
+    message(FATAL_ERROR "TMB: set BOZO_ENGINE_DIR to BozoEngine's source tree")
 endif()
 if(NOT TMB_ELF OR NOT EXISTS "${TMB_ELF}")
-    message(FATAL_ERROR "TMB_BOZO: set TMB_ELF to the game's executable (SCUS_971.01)")
+    message(FATAL_ERROR "TMB: set TMB_ELF to the game's executable (SCUS_971.01)")
 endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -112,8 +112,7 @@ set(TMB_RUNTIME_OPT "-O2" CACHE STRING "Optimisation of TMB's runtime (the refer
 target_compile_options(tmb_runtime PRIVATE ${TMB_RUNTIME_ARCH} ${TMB_RUNTIME_OPT})
 target_compile_options(bozo_render PRIVATE ${TMB_RUNTIME_ARCH})
 # The packs: from the disc image's files (only those they read: .TEX, .RTX, .NGP, .PTR), into the build folder; with
-# TMB_DISC_DIR, from those files already extracted there (tools/tmb_build.py). Without either, where the fork's build put
-# them (generated_us/).
+# TMB_DISC_DIR, from files already extracted there (tools/tmb_build.py). Both paths build the packs locally.
 if(TMB_ISO OR TMB_DISC_DIR)
     set(pack_dir "${CMAKE_BINARY_DIR}/packs")
     set(disc_dir "${CMAKE_BINARY_DIR}/disc")
@@ -146,8 +145,7 @@ if(TMB_ISO OR TMB_DISC_DIR)
     add_custom_target(tmb_packs ALL DEPENDS "${pack_dir}/tmb_textures.pack" "${pack_dir}/tmb_meshes.pack")
     add_dependencies(tmb_runtime tmb_packs)
 else()
-    message(WARNING "TMB_BOZO: no TMB_ISO, the packs are looked for in generated_us/ (draws untextured without them)")
-    set(pack_dir "${CMAKE_SOURCE_DIR}/generated_us")
+    message(FATAL_ERROR "Set TMB_ISO or TMB_DISC_DIR to build the native texture and mesh packs")
 endif()
 target_compile_definitions(tmb_runtime PRIVATE TMB_TEXTURE_PACK="${pack_dir}/tmb_textures.pack"
                                                TMB_MESH_PACK="${pack_dir}/tmb_meshes.pack")

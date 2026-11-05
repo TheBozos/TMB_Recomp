@@ -155,6 +155,8 @@ jobs:
           # The zip: no game file, the files a release needs; the hashes.
           python tools/make_release.py --verify-zip "$rel/$name.zip"
           (cd "$rel" && sha256sum -c "$name.zip.sha256")
+          (cd "$rel" && sha256sum -c "TMB_Recomp-$VERSION.zip.sha256")
+          python -c 'import sys; sys.path.insert(0, "tools"); from make_release import verify_zip; p = verify_zip(sys.argv[1], top="TMB_Recomp"); print(p); sys.exit(bool(p))' "$rel/TMB_Recomp-$VERSION.zip"
           if [ -z "$TEST_BUILD" ]; then (cd "$rel" && sha256sum -c "$name-sources.zip.sha256"); fi
           # Unzipped as a player would.
           t="$WORK/smoke"
@@ -185,6 +187,8 @@ jobs:
           path: |
             ${{ runner.temp }}/tmb/release/TMB_Recomp-${{ env.VERSION }}-bozo.zip
             ${{ runner.temp }}/tmb/release/TMB_Recomp-${{ env.VERSION }}-bozo.zip.sha256
+            ${{ runner.temp }}/tmb/release/TMB_Recomp-${{ env.VERSION }}.zip
+            ${{ runner.temp }}/tmb/release/TMB_Recomp-${{ env.VERSION }}.zip.sha256
             ${{ runner.temp }}/tmb/release/TMB_Recomp-${{ env.VERSION }}-bozo-sources.zip
             ${{ runner.temp }}/tmb/release/TMB_Recomp-${{ env.VERSION }}-bozo-sources.zip.sha256
             ${{ runner.temp }}/tmb/release/RELEASE_NOTES.md

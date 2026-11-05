@@ -23,9 +23,8 @@ SOFTWARE.
 ---
 
 This licence covers TMB_Recomp's own files. It does not cover:
-- PS2Recomp/ (the runtime and recompiler, a separate project): GPL-3.0, see PS2Recomp/LICENSE.
-  The game executable a player builds links that runtime, so that build is a GPL-3.0 combined work.
+- BozoEngine/ (the recompiler and runtime, a separate MIT project): see BozoEngine/LICENSE.
 - Anything from Twisted Metal: Black. No game data, code or art is in this repository or its releases;
   players build the port from their own disc.
-- Third-party components with their own licences (raylib, Dear ImGui, the Exo 2 font, and the build
+- Third-party components with their own licences (SDL3, Dear ImGui, the Exo 2 font, and the build
   kit's GCC, binutils, CMake, Ninja, FFmpeg, Python); a release lists them in LICENSES\.

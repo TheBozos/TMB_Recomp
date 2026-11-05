@@ -7,6 +7,28 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+### Changed
+
+- **BozoEngine is now the only recompiler and runtime.** The PS2Recomp submodule, legacy build targets and IOP
+  recompilation steps are removed. TMB and BozoEngine are MIT; release packages retain every third-party licence.
+- The launcher uses SDL3 and Dear ImGui; the game uses BozoEngine's native window, input, renderer, sound and movie
+  services. Existing memory-card files and settings remain usable.
+- Two installation ZIPs contain the same BozoEngine build: `-bozo.zip` installs beside the previous port, while the
+  ZIP without that suffix preserves the old launcher's in-place update path. Both use BozoEngine.
+
+### Fixed
+
+- **Original heat haze enabled by default** around fire and explosions. `BOZO_HEAT_HAZE=0` disables it for comparisons
+  with the previous PC build.
+- Menu and movie pacing always uses the native clock. An old `TMB_NATIVE_FRAMES=0` setting can no longer select an
+  unpaced path. Timing checks now measure menu ticks and movie picture cadence independently of the FPS counter.
+- Match-start sound and lens-flare presentation stalls are fixed in the pinned BozoEngine revision.
+
+### Developer changes
+
+- All build/run shortcuts use the disc-to-game BozoEngine pipeline. Release audits reject the retired runtime.
+- Added Windows/Linux CI and regression checks for timing, package contents and the migration ZIP layout.
+
 ## [0.3.2] - 2026-11-02
 
 ### Added

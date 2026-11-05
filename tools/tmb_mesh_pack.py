@@ -77,10 +77,9 @@ import struct
 import sys
 import zlib
 
-# native_pack: BozoEngine's tools/ (BOZO_ENGINE_TOOLS, or a BozoEngine checkout beside tools/), else the fork's.
+# native_pack: BozoEngine's tools/ (BOZO_ENGINE_TOOLS, or the BozoEngine submodule).
 _root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-for _tools in (os.environ.get('BOZO_ENGINE_TOOLS', ''), os.path.join(_root, 'BozoEngine', 'tools'),
-               os.path.join(_root, 'PS2Recomp', 'tools')):
+for _tools in (os.environ.get('BOZO_ENGINE_TOOLS', ''), os.path.join(_root, 'BozoEngine', 'tools')):
     if _tools and os.path.isdir(os.path.join(_tools, 'native_pack')):
         sys.path.insert(0, _tools)
         break

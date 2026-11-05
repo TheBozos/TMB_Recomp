@@ -112,6 +112,9 @@ Follow [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Do not publish a release ta
 
 ## Working rules
 
+- README follows the shared The Bozos project format: preserve its banner/badges, disc notice/hash, status screenshots,
+  milestone/native-layer tables, goal, architecture, requirements, build/run, controls/cheats, disc facts, layout and credits.
+  Updating stale facts is not permission to replace that presentation with a shorter standalone README.
 - Clean-room rules in `BozoEngine/docs/PLAN.md` still apply: do not read the old fork, its generated code or emulator source when writing engine code.
 - Push engine changes before the TMB pin; use reviewed branches/PRs and green CI. End commits with a `Co-Authored-By` line.
 - Do not modify game/disc files or commit derived content. Never modify the owner's real user folder during agent runs.

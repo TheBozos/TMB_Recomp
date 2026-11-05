@@ -1615,6 +1615,7 @@ struct Selftest
 {
     std::string iso, shots, wrong;
     bool errorDemo = false, cancel = false, screensOnly = false;
+    bool failed = false;
     double playSeconds = 40, crashSeconds = 0;
     std::FILE *log = nullptr;
 
@@ -1804,6 +1805,12 @@ struct Selftest
                              say("build ended after %s s: %s", std::to_string(plat::now() - buildStart),
                                  app.phase == Phase::Ready ? "ready" : "failed: " + app.model.errorMessage);
                              say("notice: %s (launcher.ini last_build_seconds %s)", app.notice, std::to_string(app.cfg.lastBuildSeconds));
+                             if (!errorDemo && (app.phase != Phase::Ready || !app.built()))
+                             {
+                                 say("FAIL build did not produce a playable game");
+                                 failed = true;
+                                 app.quit = true;
+                             }
                              return true;
                          }});
         steps.push_back(shot("09-built", 1.0));
@@ -1834,6 +1841,12 @@ struct Selftest
                                  captureInto("play");
                                  app.play();
                                  say("game started (pid %s)", std::to_string(app.game.pid()));
+                                 if (!errorDemo && !app.gameRunning)
+                                 {
+                                     say("FAIL game did not start");
+                                     failed = true;
+                                     app.quit = true;
+                                 }
                                  return false;
                              }
                              if (app.gameRunning && t >= playSeconds && t < playSeconds + 0.1)
@@ -1848,6 +1861,8 @@ struct Selftest
                              if (app.gameRunning)
                                  return false;
                              say("game exited, code %s, crash report: %s", std::to_string(app.gameExit), app.crashReport.empty() ? "none" : app.crashReport);
+                             if (!errorDemo && app.gameExit != 0)
+                                 failed = true;
                              return true;
                          }});
         steps.push_back(shot("15-after-play", 1.5));
@@ -2129,5 +2144,5 @@ int main(int argc, char **argv)
     win::close();
     if (test.log)
         std::fclose(test.log);
-    return 0;
+    return test.failed ? 1 : 0;
 }

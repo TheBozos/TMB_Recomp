@@ -23,6 +23,9 @@ under "Unreleased" as they land, then move them under the new version's heading 
 - Menu and movie pacing always uses the native clock. An old `TMB_NATIVE_FRAMES=0` setting can no longer select an
   unpaced path. Timing checks now measure menu ticks and movie picture cadence independently of the FPS counter.
 - Match-start sound and lens-flare presentation stalls are fixed in the pinned BozoEngine revision.
+- Building from folders with spaces and accents now keeps GCC's startup objects and static libraries on the
+  safe path and disables unused C++ module scanning. In-place updates remove the retired runtime's source folder
+  without following directory links. Launcher self-tests fail when preparing or starting the game fails.
 
 ### Developer changes
 

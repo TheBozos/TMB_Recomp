@@ -159,10 +159,12 @@ jobs:
           python -c 'import sys; sys.path.insert(0, "tools"); from make_release import verify_zip; p = verify_zip(sys.argv[1], top="TMB_Recomp"); print(p); sys.exit(bool(p))' "$rel/TMB_Recomp-$VERSION.zip"
           if [ -z "$TEST_BUILD" ]; then (cd "$rel" && sha256sum -c "$name-sources.zip.sha256"); fi
           # Unzipped as a player would.
-          t="$WORK/smoke"
+          t="$WORK/smoke/Jérôme Games"
           rm -rf "$t" && mkdir -p "$t/user"
           python -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$rel/$name.zip" "$t"
           app="$t/TMB_Recomp_Bozo"
+          # A real static C++ link through an accented kit path, without any game data or installed developer tools.
+          "$app/kit/python/python.exe" -I "$app/source/tools/check_toolchain.py" --toolchain "$app/kit/ucrt64" --out "$WORK/compiler-check"
           head -c 1048576 /dev/zero > "$t/not_a_disc.iso"
           # tmb_build with the kit's own Python refuses a file that is not a disc.
           if "$app/kit/python/python.exe" -I -X utf8 "$app/source/tools/tmb_build.py" --check \

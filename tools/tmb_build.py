@@ -52,6 +52,7 @@ Output for a launcher, one line each on stdout (everything else goes to <out>/lo
 Standard library only (Python 3.8+): runs on a bundled Windows embeddable Python.
 """
 import argparse
+import glob
 import hashlib
 import json
 import os
@@ -63,6 +64,22 @@ import sys
 import time
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
+
+def configure_gcc_paths(env, compiler_bin):
+    """Keep MinGW's linker paths on the ASCII alias, even if GCC resolves its executable's junction.
+
+    GCC_EXEC_PREFIX also selects startup objects; LIBRARY_PATH selects the native static libraries.
+    See https://gcc.gnu.org/onlinedocs/gcc/Environment-Variables.html .
+    """
+    prefix = os.path.dirname(os.path.abspath(compiler_bin))
+    gcc = os.path.join(prefix, 'lib', 'gcc')
+    versions = sorted(p for p in glob.glob(os.path.join(gcc, '*', '*')) if os.path.isdir(p))
+    if os.name != 'nt' or not versions:
+        return
+    env['GCC_EXEC_PREFIX'] = gcc.replace('\\', '/') + '/'
+    libraries = versions + [os.path.join(prefix, 'x86_64-w64-mingw32', 'lib'), os.path.join(prefix, 'lib')]
+    env['LIBRARY_PATH'] = os.pathsep.join(p.replace('\\', '/') for p in libraries if os.path.isdir(p))
 ENGINE = os.path.join(ROOT, 'BozoEngine')  # --engine replaces it
 ps2_disc = None  # BozoEngine's tools/native_pack/ps2_disc.py, imported by load_engine()
 
@@ -316,6 +333,7 @@ class Build:
                              'and ninja in its bin folder (an MSYS2 UCRT64 prefix: C:/msys64/ucrt64)'
                              % (', '.join(cands) or 'PATH'))
         self.env['PATH'] = self.toolchain_bin + os.pathsep + self.env.get('PATH', '')
+        configure_gcc_paths(self.env, self.toolchain_bin)
         return self.toolchain_bin
 
     def tool(self, name):
@@ -819,20 +837,39 @@ def remove_stale_sources():
     with open(listing, encoding='utf-8') as f:
         keep = set(l.strip() for l in f if l.strip())
     removed = 0
-    # Only the folders a release ships (never a kit, a work folder or anything else put inside the source folder).
-    tops = sorted(set(rel.split('/', 1)[0] for rel in keep if '/' in rel))
-    for dirpath, dirs, names in (w for t in tops for w in os.walk(os.path.join(ROOT, t), topdown=False)):
-        dirs[:] = [d for d in dirs if d != '__pycache__']
-        if '__pycache__' in dirpath.replace('\\', '/').split('/'):
+    # PS2Recomp was a managed source component in previous releases. It is absent from the new manifest, so deriving
+    # traversal roots solely from that manifest would leave the entire retired runtime behind after an update.
+    retired = {'PS2Recomp'}
+    tops = sorted(set(rel.split('/', 1)[0] for rel in keep if '/' in rel) | retired)
+    linked = lambda p: os.path.islink(p) or (hasattr(os.path, 'isjunction') and os.path.isjunction(p))
+    for top in tops:
+        if top in ('', '.', '..') or os.path.isabs(top) or '\\' in top or ':' in top:
+            raise BuildError('invalid source manifest directory: %r' % top)
+        base = os.path.abspath(os.path.join(ROOT, top))
+        if os.path.normcase(os.path.commonpath([os.path.abspath(ROOT), base])) != os.path.normcase(os.path.abspath(ROOT)):
+            raise BuildError('source cleanup escaped its root: %s' % base)
+        if linked(base):
+            if top in retired:
+                if os.path.islink(base):
+                    os.unlink(base)
+                else:
+                    os.rmdir(base) # the retired junction only, never its target
             continue
-        for n in names:
-            p = os.path.join(dirpath, n)
-            rel = os.path.relpath(p, ROOT).replace('\\', '/')
-            if rel not in keep and not os.path.islink(p) and os.path.isfile(p):
-                os.remove(p)
-                removed += 1
-        if dirpath != ROOT and not os.listdir(dirpath) and not os.path.islink(dirpath):
-            os.rmdir(dirpath)
+        visited = []
+        # Prune links before descending. A bottom-up walk cannot prevent traversal of a Windows junction.
+        for dirpath, dirs, names in os.walk(base, topdown=True, followlinks=False):
+            visited.append(dirpath)
+            dirs[:] = [d for d in dirs if (d != '__pycache__' or top in retired) and
+                       not linked(os.path.join(dirpath, d))]
+            for n in names:
+                p = os.path.join(dirpath, n)
+                rel = os.path.relpath(p, ROOT).replace('\\', '/')
+                if rel not in keep and not linked(p) and os.path.isfile(p):
+                    os.remove(p)
+                    removed += 1
+        for dirpath in reversed(visited):
+            if not os.listdir(dirpath):
+                os.rmdir(dirpath)
     if removed:
         emit('INFO', 'update', '%d files of an earlier release removed from %s' % (removed, ROOT))
 
@@ -862,7 +899,8 @@ def needs_ascii_aliases(args):
     if os.name != 'nt' or os.environ.get(ALIAS_ENV):
         return False
     kit = find_kit(args)
-    paths = [ROOT, ENGINE, os.path.abspath(args.out), os.path.abspath(args.game) if args.game else '', kit or '']
+    paths = [ROOT, ENGINE, os.path.abspath(args.out), os.path.abspath(args.game) if args.game else '', kit or '',
+             os.path.abspath(args.toolchain) if args.toolchain else '']
     return not all(is_ascii(p) for p in paths)
 
 
@@ -908,6 +946,10 @@ def run_through_aliases(args):
         rest = sys.argv[1:]
         # The same command line, the folders replaced by their aliases.
         replace = {'--out': out, '--game': game}
+        if args.toolchain:
+            t = make_alias(args.toolchain, 'toolchain')
+            links.append(t)
+            replace['--toolchain'] = t
         if kit:
             k = make_alias(kit, 'kit')
             links.append(k)

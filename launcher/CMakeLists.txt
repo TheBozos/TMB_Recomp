@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.21)
 project(TMB_Launcher LANGUAGES C CXX)
 
+# No C++ modules are used; keep GCC's module mapper out of relocatable kits with spaced/non-ASCII paths.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # TMB Launcher.exe: what a player double-clicks. It checks their disc image, runs tools/tmb_build.py with the build kit
 # (kit\python), shows its progress, and starts the game. Its own small project (the game's CMake needs the disc): SDL3
 # and Dear ImGui at the releases BozoEngine pins (its runtime/CMakeLists.txt: the same archives and SHA-256), ImGui's own

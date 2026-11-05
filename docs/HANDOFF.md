@@ -21,10 +21,12 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
   the continuation adds a regression guard and removes the unpaced legacy frame switch.
 - Native story run without a call log: **26,000 frames**, stage progression, card files written, no fault.
 - Boot pinned: **MATCH**, 3,000/3,000 state frames; draws 2,999/3,000 (the established last-record exception).
+- 1P pinned: **MATCH**, 16,000/16,000 state frames; draws 15,999/16,000 (the same last-record exception).
 - Stage 6 pinned: the old frame-7105 interrupt mismatch is resolved. **11,000/11,000 state and draw frames match with recorded IOP-time sound replies**.
   Two events retain an ancestor pc in the reference; the checker accepts these only with an active inner call, matching function/caller,
   and an **exact cycle and checkpoint count**, and reports them separately. It does not shift their timing.
-- Release-tool regressions: 7 tests pass, including accelerated menus/movies, migration layout, forbidden runtime and game-file audits.
+- Release-tool regressions: 12 tests pass, including accelerated menus/movies, migration layout, retired source cleanup,
+  junction boundaries, configure retry and archive-pipe completion. No game data is needed by those tests.
 - Engine Windows/Linux CI passes. Package and final run results are recorded below as they complete.
 
 ## Limits of the old reference comparisons
@@ -49,7 +51,7 @@ The older ZIP name does not retain the older engine. The existing updater can in
 the new launcher subsequently uses `-bozo.zip` updates regardless of its installation folder name.
 The corresponding-source ZIP and every SHA-256 accompany a published release.
 
-Requirements: Windows 10/11, **AVX2 + FMA**, OpenGL 3.3, about 10 GB free. Only the USA disc is supported.
+Requirements: Windows 10 version 1903 or newer / Windows 11, **AVX2 + FMA**, OpenGL 3.3, about 10 GB free. Only the USA disc is supported.
 Follow [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Do not publish a release tag merely because a test artifact builds.
 
 ## Working rules

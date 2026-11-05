@@ -193,23 +193,31 @@ def link_tree(src, dst, skip=(), copy=()):
 def extract_tar_stream(cmd, dst, cwd):
     """A `git archive` (tar on stdout) unpacked into dst; links and absolute or parent paths refused."""
     p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    with tarfile.open(fileobj=p.stdout, mode='r|') as tf:
-        for m in tf:
-            name = m.name
-            if name.startswith('/') or '..' in name.split('/') or m.issym() or m.islnk():
-                raise ReleaseError('unexpected entry in the archive: %s' % name)
-            target = os.path.join(dst, *name.split('/'))
-            if m.isdir():
-                os.makedirs(target, exist_ok=True)
-            elif m.isfile():
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                with tf.extractfile(m) as src, open(target, 'wb') as out:
-                    shutil.copyfileobj(src, out)
-                if m.mode & 0o111:
-                    os.chmod(target, 0o755)
-                os.utime(target, (m.mtime, m.mtime))
-    err = p.stderr.read().decode('utf-8', 'replace')
-    if p.wait() != 0:
+    try:
+        with tarfile.open(fileobj=p.stdout, mode='r|') as tf:
+            for m in tf:
+                name = m.name
+                if name.startswith('/') or '..' in name.split('/') or m.issym() or m.islnk():
+                    raise ReleaseError('unexpected entry in the archive: %s' % name)
+                target = os.path.join(dst, *name.split('/'))
+                if m.isdir():
+                    os.makedirs(target, exist_ok=True)
+                elif m.isfile():
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with tf.extractfile(m) as src, open(target, 'wb') as out:
+                        shutil.copyfileobj(src, out)
+                    if m.mode & 0o111:
+                        os.chmod(target, 0o755)
+                    os.utime(target, (m.mtime, m.mtime))
+    except BaseException:
+        p.kill()
+        p.communicate()
+        raise
+    # Tar readers stop at the end marker before all record padding has necessarily left stdout. Drain stdout and
+    # stderr together: waiting on stderr alone can deadlock git archive on Windows' small pipe buffer.
+    _padding, err = p.communicate()
+    err = err.decode('utf-8', 'replace')
+    if p.returncode != 0:
         raise ReleaseError('%s: %s' % (' '.join(cmd[1:4]), err.strip()))
 
 
@@ -830,7 +838,7 @@ class Release:
             '1. `%s.zip` below. Check its SHA-256 before running anything:' % self.name,
             '   `Get-FileHash .\\%s.zip` (PowerShell) must print' % self.name, '',
             '   ```', '   %s' % self.zip_sha256.upper(), '   ```', '',
-            'Requires Windows 10/11, an AVX2 and FMA capable CPU, and OpenGL 3.3.', '',
+            'Requires Windows 10 version 1903 or newer (or Windows 11), an AVX2 and FMA capable CPU, and OpenGL 3.3.', '',
             '2. Unzip it anywhere you like except Program Files, with about 10 GB free, and double-click '
             '**TMB Launcher.exe**. It is not signed: on *Windows protected your PC*, click **More info**, then '
             '**Run anyway**.',
@@ -1053,7 +1061,7 @@ by The Bozos (boubou666 & Arzaroth)
 What this is
   A native PC version of Twisted Metal: Black (PS2), built on your own PC from YOUR OWN disc.
   Nothing of the game is in this download: no game files, no code taken from the game.
-  Requires Windows 10/11, an AVX2 and FMA capable CPU, and OpenGL 3.3.
+  Requires Windows 10 version 1903 or newer (or Windows 11), an AVX2 and FMA capable CPU, and OpenGL 3.3.
   You need a disc image of the USA release (SCUS-97101): a .iso, or a .bin with its .cue.
   The European disc is not supported.
 
@@ -1098,7 +1106,7 @@ An unofficial fan project, not affiliated with or endorsed by them.
 De quoi s'agit-il
   Une version PC native de Twisted Metal: Black (PS2), construite sur votre PC à partir de VOTRE PROPRE disque.
   Rien du jeu n'est dans ce téléchargement : aucun fichier du jeu, aucun code issu du jeu.
-  Nécessite Windows 10/11, un processeur compatible AVX2 et FMA, et OpenGL 3.3.
+  Nécessite Windows 10 version 1903 ou ultérieure (ou Windows 11), un processeur compatible AVX2 et FMA, et OpenGL 3.3.
   Il vous faut une image disque de la version américaine (SCUS-97101) : un .iso, ou un .bin avec son .cue.
   Le disque européen n'est pas pris en charge.
 

@@ -2,6 +2,9 @@
 import configparser
 import sys
 import tempfile
+import io
+import subprocess
+import tarfile
 import unittest
 import zipfile
 from pathlib import Path
@@ -12,6 +15,7 @@ import check_timing
 import make_release
 import tmb_build
 from unittest.mock import patch
+from types import SimpleNamespace
 
 REQUIRED = (
     'TMB Launcher.exe', 'README.txt', 'CHANGELOG.md', 'LICENSES/TMB_Recomp/LICENSE',
@@ -22,6 +26,52 @@ REQUIRED = (
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_retry_drops_failed_feature_checks_after_toolchain_relocation_changes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cache = root / 'CMakeCache.txt'
+            cache.write_text('CMAKE_HOME_DIRECTORY:INTERNAL=' + tmb_build.ROOT +
+                             '\nBOZO_ENGINE_DIR:PATH=engine\nHAVE_XINPUT_H:INTERNAL=\n', encoding='utf-8')
+            (root / 'CMakeFiles').mkdir()
+            (root / 'CMakeFiles/old-check').write_bytes(b'failed check')
+            stamp = root / '.tmb-toolchain-key'
+            stamp.write_text('before relocation fix', encoding='utf-8')
+            build = tmb_build.Build.__new__(tmb_build.Build)
+            build.cmake_build = folder
+            build.disc_dir = folder
+            build.args = SimpleNamespace(build_type='Release', debug_info='no')
+            build.ffmpeg_root = folder
+            build.toolchain_key = lambda: 'relocated compiler'
+            build.tool = lambda name: name
+            build.elf = lambda: str(root / 'own-elf')
+            build.fetch_args = lambda: []
+            def configure(_command):
+                self.assertFalse(cache.exists())
+                self.assertFalse((root / 'CMakeFiles').exists())
+            build.run = configure
+            build.step_configure()
+            self.assertEqual(stamp.read_text(encoding='utf-8').strip(), 'relocated compiler')
+
+    def test_source_export_drains_archive_padding_before_waiting(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            archive = base / 'source.tar'
+            content = b'native source archive\n'
+            with tarfile.open(archive, 'w') as tar:
+                entry = tarfile.TarInfo('source.txt')
+                entry.size = len(content)
+                tar.addfile(entry, io.BytesIO(content))
+            producer = base / 'producer.py'
+            producer.write_text('import sys\nfrom pathlib import Path\n'
+                                'sys.stdout.buffer.write(Path(sys.argv[1]).read_bytes())\n'
+                                'sys.stdout.buffer.write(bytes(1048576))\n', encoding='utf-8')
+            command = [sys.executable, str(producer), str(archive)]
+            code = ('import sys; sys.path.insert(0, %r); import make_release; '
+                    'make_release.extract_tar_stream(%r, %r, %r)' %
+                    (str(ROOT / 'tools'), command, str(base / 'out'), folder))
+            subprocess.run([sys.executable, '-c', code], check=True, timeout=15)
+            self.assertEqual((base / 'out/source.txt').read_bytes(), content)
+
     def test_source_cleanup_cannot_escape_the_installation(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder) / 'source'

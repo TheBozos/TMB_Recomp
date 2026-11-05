@@ -26,6 +26,8 @@ under "Unreleased" as they land, then move them under the new version's heading 
 - Building from folders with spaces and accents now keeps GCC's startup objects and static libraries on the
   safe path and disables unused C++ module scanning. In-place updates remove the retired runtime's source folder
   without following directory links. Launcher self-tests fail when preparing or starting the game fails.
+- Native Windows executables use UTF-8 file paths. A changed toolchain invalidates stale configure checks before
+  retrying, and release source exports drain tar padding so they cannot hang waiting for `git archive`.
 
 ### Developer changes
 

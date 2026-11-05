@@ -339,6 +339,11 @@ class Build:
     def tool(self, name):
         return os.path.join(self.find_toolchain(), name + EXE)
 
+    def toolchain_key(self):
+        self.find_toolchain()
+        return fingerprint(file_stamp(self.tool('gcc')), self.env.get('GCC_EXEC_PREFIX', ''),
+                           self.env.get('LIBRARY_PATH', ''))
+
     def disc_input(self):
         src = os.path.abspath(self.args.disc)
         if not os.path.exists(src):
@@ -360,7 +365,7 @@ class Build:
             return fingerprint(prev('verify'), PACK_EXTS, self.game)
         if step == 'configure':
             return fingerprint(self.find_toolchain(), a.build_type, a.debug_info, a.fetch_cache, self.ffmpeg_root,
-                               cmake_rc_flags(), ROOT, ENGINE, sys.executable, prev('extract'),
+                               self.toolchain_key(), cmake_rc_flags(), ROOT, ENGINE, sys.executable, prev('extract'),
                                [file_stamp(os.path.join(ROOT, p)) for p in ('CMakeLists.txt', 'cmake/bozo.cmake')])
         if step == 'tools':
             return fingerprint(prev('configure'), tree_stamp(os.path.join(ENGINE, 'recompiler'), SOURCE_EXTS),
@@ -578,14 +583,21 @@ class Build:
         # A build folder configured from another path (the release folder moved or renamed, or reached once through
         # the non-ASCII aliases and once not), or a fork build's: CMake refuses its cache; start that folder afresh.
         cache = os.path.join(self.cmake_build, 'CMakeCache.txt')
+        stamp = os.path.join(self.cmake_build, '.tmb-toolchain-key')
+        toolchain_key = self.toolchain_key()
+        try:
+            with open(stamp, encoding='utf-8') as f:
+                previous_toolchain = f.read().strip()
+        except OSError:
+            previous_toolchain = ''
         if os.path.isfile(cache):
             with open(cache, encoding='utf-8', errors='replace') as f:
                 text = f.read()
             m = re.search(r'^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$', text, re.M)
             moved = m and os.path.normcase(os.path.normpath(m.group(1))) != os.path.normcase(os.path.normpath(ROOT))
-            if moved or not re.search(r'^BOZO_ENGINE_DIR:PATH=', text, re.M):
+            if moved or previous_toolchain != toolchain_key or not re.search(r'^BOZO_ENGINE_DIR:PATH=', text, re.M):
                 emit('INFO', 'configure', 'the build folder was configured %s: configured again'
-                     % ('from %s' % m.group(1) if moved else 'for the fork'))
+                     % ('from %s' % m.group(1) if moved else 'with another toolchain configuration'))
                 os.remove(cache)
                 shutil.rmtree(os.path.join(self.cmake_build, 'CMakeFiles'), ignore_errors=True)
         fwd = lambda p: p.replace('\\', '/')  # noqa: E731
@@ -608,6 +620,8 @@ class Build:
             if os.path.isfile(pkg):
                 cmd.append('-DPKG_CONFIG_EXECUTABLE=' + pkg)
         self.run(cmd + self.fetch_args())
+        with open(stamp, 'w', encoding='utf-8') as f:
+            f.write(toolchain_key + '\n')
 
     def step_tools(self):
         self.cmake_build_targets('bozo-recomp', 'bozo-externals', percent=ninja_percent)
@@ -975,7 +989,19 @@ def run_through_aliases(args):
         env = dict(os.environ)
         env[ALIAS_ENV] = '1'
         sys.stdout.flush()
-        return subprocess.call(argv + new, env=env)
+        # The links disappear at exit. Protocol paths shown to the launcher/CLI must point at the real folders.
+        display = [(root, ROOT), (out, os.path.abspath(args.out))]
+        if game:
+            display.append((game, os.path.abspath(args.game)))
+        if kit:
+            display.append((replace['--kit'], kit))
+        proc = subprocess.Popen(argv + new, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, encoding='utf-8', errors='replace')
+        for line in proc.stdout:
+            for alias, real in display:
+                line = line.replace(alias, real).replace(alias.replace('\\', '/'), real.replace('\\', '/'))
+            print(line, end='', flush=True)
+        return proc.wait()
     except OSError as e:
         emit('ERROR', 'verify', 'could not make plain-named links to the folders (%s): move the game\'s folder to a '
              'path with plain letters, such as C:\\Games\\TMB_Recomp' % e)

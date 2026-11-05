@@ -13,6 +13,11 @@ Windows · OpenGL 3.3 · keyboard, mouse and controllers · MIT
 > No game files are included. You must supply your own USA disc image. The European release is unsupported.
 > The executable `SCUS_971.01` must have SHA-1 `3ff17f4897552e355d0bb8c3abfa5125fe3ff2ef`.
 
+**Availability:** the current published Windows release is [v0.3.2](https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.3.2),
+which uses the previous runtime. This tree is the BozoEngine source build; candidate packages are available from the
+[Release workflow's test runs](https://github.com/TheBozos/TMB_Recomp/actions/workflows/release.yml).
+The instructions below describe those BozoEngine packages and the forthcoming native-only release.
+
 ## Playing on Windows
 
 1. Download `TMB_Recomp-<version>-bozo.zip` and its `.sha256` from [Releases](https://github.com/TheBozos/TMB_Recomp/releases).
@@ -23,17 +28,30 @@ Windows · OpenGL 3.3 · keyboard, mouse and controllers · MIT
 4. Click **Play**. **F2** opens Controls, Video and Cheats; **F3** toggles the FPS counter;
    **F11** or **Alt+Enter** switches fullscreen. Controls are rebindable for up to four players.
 
-The computer needs Windows 10/11, an **AVX2 and FMA capable CPU**, and OpenGL 3.3.
+The computer needs Windows 10 version 1903 or newer (or Windows 11), an **AVX2 and FMA capable CPU**, and OpenGL 3.3.
 The target game speed is 60 updates per second. Higher presentation rates interpolate between game updates.
 Heat haze around fire and explosions is enabled by default, matching the original game's effect.
 Set `BOZO_HEAT_HAZE=0` before launching to disable it for comparison with the older PC build.
+
+Keyboard defaults use physical US key positions; **F2 → Controls** shows and changes them:
+
+| PS2 input | Keyboard |
+|---|---|
+| Directions / left stick | Arrows or WASD |
+| Cross / Circle | X or Space / C or Escape |
+| Square / Triangle | Z or numpad 0 / V or numpad 1 |
+| L1 / R1 | Q / E |
+| L2 / R2 | Left Shift / Right Shift |
+| Start / Select | Enter / Tab |
+
+Controllers use the corresponding face buttons, shoulders, triggers and sticks. The launcher itself uses mouse and keyboard.
 
 The folder contains `TMB Launcher.exe`, `source/`, `kit/`, `README.txt`, `CHANGELOG.md` and `LICENSES/`.
 Keep them together. No game executable, disc content or generated game code is distributed.
 
 Saves, controls and video settings live in `%APPDATA%\TMB_Recomp`; existing native memory-card files remain usable.
-For isolated tests, set `PS2X_USER_DIR` to a scratch directory. The two builds share the user folder by default;
-give each its own scratch folder when comparing them.
+For isolated tests, set `PS2X_USER_DIR` to a scratch directory. Both installation layouts and the previous release
+share that user folder by default; give each its own scratch folder when comparing them.
 
 The launcher checks for newer releases unless disabled in Settings. Update checks the ZIP's SHA-256, installs
 the new source and tools, and offers a rebuild. Saves remain in the user folder. Manual updates work by extracting
@@ -62,13 +80,15 @@ sound banks through the mixer. Movies are decoded with FFmpeg. There is no PS2Re
 SPU2 emulator, GS renderer, VIF/GIF decoder or VU interpreter in the player build.
 
 BozoEngine is The Bozos' MIT recompiler and runtime. Its clean-room specifications and migration validation are in
-[`BozoEngine/docs`](BozoEngine/docs). TMB's own code is MIT too. Third-party libraries keep their own licences;
+[BozoEngine's documentation](https://github.com/TheBozos/BozoEngine/tree/main/docs). TMB's own code is MIT too. Third-party libraries keep their own licences;
 release ZIPs include the licences and corresponding source packages required by the bundled toolchain and FFmpeg.
 
 ## Building from source
 
 Windows is the validated target. The sources are portable, but this migration has not been validated on Linux.
 On Windows, use MSYS2 UCRT64 with GCC, CMake, Ninja and Python, or the pinned build kit.
+In the examples, replace the disc and kit paths with yours. A BozoEngine package contains its matching `kit/` folder;
+the old v0.3.2 kit is incompatible.
 
 ```sh
 git clone --recurse-submodules https://github.com/TheBozos/TMB_Recomp.git
@@ -101,6 +121,7 @@ export PATH=/c/msys64/ucrt64/bin:$PATH
 cmake -S . -B build/bozo -G Ninja \
   -DTMB_ELF="D:/TMB-build/disc/SCUS_971.01" \
   -DTMB_ISO="D:/Discs/Twisted Metal - Black (USA).iso" \
+  -DBOZO_BUILD_TOOLS=OFF \
   -DBOZO_FFMPEG_ROOT=D:/tmb_kit_bozo/kit/ffmpeg
 cmake --build build/bozo -j 8
 build/bozo/tmb.exe --iso "D:/Discs/Twisted Metal - Black (USA).iso"
@@ -131,7 +152,7 @@ Reference recordings, captures, generated code and game data are local-only and 
 In a UCRT64 shell, BozoEngine's instruction, runtime, library and mixer tests run with:
 
 ```sh
-cmake -S BozoEngine -B build/engine-tests -G Ninja
+cmake -S BozoEngine -B build/engine-tests -G Ninja -DBOZO_BUILD_TOOLS=OFF
 cmake --build build/engine-tests -j 8
 ctest --test-dir build/engine-tests --output-on-failure
 ```
@@ -150,7 +171,8 @@ python tools/make_release.py --verify-zip D:/TMB-release/TMB_Recomp-<version>-bo
 The player ZIP is `TMB_Recomp-<version>-bozo.zip`, rooted at `TMB_Recomp_Bozo/`.
 `TMB_Recomp-<version>-bozo-sources.zip` contains the toolchain/FFmpeg corresponding sources; the player ZIP already
 contains TMB and BozoEngine source. The migration ZIP `TMB_Recomp-<version>.zip` carries the same BozoEngine payload
-under `TMB_Recomp/` so the previous launcher can update in place. All ZIPs have `.sha256` files. The workflow builds from a version tag and creates
+under `TMB_Recomp/` so the previous launcher can update in place. All ZIPs have `.sha256` files.
+The workflow builds from a version tag and creates
 a draft; a manual workflow without a tag produces test artifacts. Follow
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) before publication. No release is published on an ordinary push.
 

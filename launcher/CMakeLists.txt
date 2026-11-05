@@ -106,10 +106,11 @@ endif()
 list(JOIN LAUNCHER_VERSION_NUMBERS "," LAUNCHER_FILEVERSION)
 
 set(LAUNCHER_ICON "${_icon}")
+set(LAUNCHER_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/launcher.manifest")
 set(LAUNCHER_EXO2 "${_font_dir}/exo2.ttf")
 set(LAUNCHER_OFL "${_font_dir}/OFL.txt")
 configure_file(launcher.rc.in "${CMAKE_BINARY_DIR}/launcher.rc" @ONLY)
-set_source_files_properties("${CMAKE_BINARY_DIR}/launcher.rc" PROPERTIES OBJECT_DEPENDS "${_icon};${LAUNCHER_EXO2}")
+set_source_files_properties("${CMAKE_BINARY_DIR}/launcher.rc" PROPERTIES OBJECT_DEPENDS "${_icon};${LAUNCHER_EXO2};${LAUNCHER_MANIFEST}")
 enable_language(RC)
 
 add_executable(tmb_launcher WIN32

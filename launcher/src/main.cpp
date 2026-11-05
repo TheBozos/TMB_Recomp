@@ -1879,6 +1879,12 @@ struct Selftest
                                      plat::setEnv("PS2X_TEST_CRASH", "");
                                      plat::setEnv("PS2X_NO_DIALOGS", "");
                                      say("game started to crash (pid %s)", std::to_string(app.game.pid()));
+                                     if (!errorDemo && !app.gameRunning)
+                                     {
+                                         failed = true;
+                                         app.quit = true;
+                                         say("FAIL crash-test game did not start");
+                                     }
                                      return false;
                                  }
                                  if (app.gameRunning && t > crashSeconds + 90)
@@ -1886,6 +1892,8 @@ struct Selftest
                                  if (app.gameRunning)
                                      return false;
                                  say("game exited, code %s, crash report: %s", std::to_string(app.gameExit), app.crashReport.empty() ? "none" : app.crashReport);
+                                 if (!errorDemo && (app.gameExit == 0 || app.crashReport.empty()))
+                                     failed = true;
                                  return true;
                              }});
             steps.push_back(shot("16-crash", 1.5));
@@ -2144,5 +2152,6 @@ int main(int argc, char **argv)
     win::close();
     if (test.log)
         std::fclose(test.log);
-    return test.failed ? 1 : 0;
+    const bool incomplete = !selftestIso.empty() && test.index < test.steps.size();
+    return test.failed || incomplete ? 1 : 0;
 }

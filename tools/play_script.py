@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""A PS2X_PAD_SCRIPT that plays: the menu presses into the first match (it starts about 150 s in), then accelerating,
+"""A frame-keyed BozoEngine pad script: menu presses into the first match (about 150 s in), then accelerating,
 steering both ways, firing (R1, L1, CIRCLE), switching weapons and braking until `end` seconds.
 
-  PS2X_PAD_SCRIPT="$(tools/play_script.py 600)" timeout 600 build/game_us/PS2Recomp/ps2xRuntime/ps2EntryRunner game_us/SCUS_971.01
+  python tools/play_script.py 600 --out controls.txt
+  bash scripts/run_native.sh --pad-script controls.txt
 
-A car standing still sends few sound commands; this one made the 989snd freeze (fixed in the fork, RECOMP_NOTES
-"Freeze while playing") happen within 5 minutes.
+Times are authored in seconds, then converted to the game's native 60 Hz frame clock.
 """
-import sys
+import argparse
+from pathlib import Path
 
-end = float(sys.argv[1]) if len(sys.argv) > 1 else 600
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('end', nargs='?', type=float, default=600)
+parser.add_argument('--out', type=Path)
+args = parser.parse_args()
+end = args.end
 entries = ['25:CROSS/300'] + [f'{t}:CROSS/250' for t in range(60, 141, 6)]
 t = 152.0
 while t < end:
@@ -26,4 +31,13 @@ for period, button, ms in ((0.6, 'R1', 150), (1.7, 'L1', 150), (2.9, 'CIRCLE', 1
     while t < end:
         entries.append(f'{t:.1f}:{button}/{ms}')
         t += period
-print(','.join(entries))
+frames = []
+for entry in entries:
+    seconds, press = entry.split(':')
+    button, milliseconds = press.split('/')
+    frames.append(f'{round(float(seconds) * 60)}:{button}/{max(1, round(float(milliseconds) * .06))}')
+text = ','.join(frames) + '\n'
+if args.out:
+    args.out.write_text(text, encoding='utf-8')
+else:
+    print(text, end='')

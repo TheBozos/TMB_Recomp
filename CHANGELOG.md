@@ -7,6 +7,8 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-06
+
 ### Changed
 
 - **BozoEngine is now the only recompiler and runtime.** The PS2Recomp submodule, legacy build targets and IOP
@@ -33,6 +35,14 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 - All build/run shortcuts use the disc-to-game BozoEngine pipeline. Release audits reject the retired runtime.
 - Added Windows/Linux CI and regression checks for timing, package contents and the migration ZIP layout.
+
+### Known limits
+
+- Only the USA disc is supported. Windows is the validated player target; the migrated Linux player build is not yet validated.
+- Full campaign endings, a fresh standard-user Windows installation and four physical controllers still need player/hardware acceptance.
+  Widescreen is not implemented; presentation above 60 Hz remains experimental for effects that update at game rate.
+- Exact native sound-model/sample equality and the old test-only save-cheat replay remain reference-test limitations.
+  Native story progression, card writes, restart/readback and actual four-player play pass; see `docs/HANDOFF.md` for the evidence.
 
 ## [0.3.2] - 2026-11-02
 
@@ -150,7 +160,8 @@ The first release. You build the game on your own PC from your own USA disc; not
 - Technical: built from TMB_Recomp's code and the PS2Recomp fork (`native/renderer`) with the build kit's GCC 16.2,
   FFmpeg 9.0.2 and Python 3.14; the default mode has no GS, VU or SPU2 emulation and no IOP hardware model.
 
-[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.2.0...v0.3.0

@@ -11,8 +11,8 @@
   "project": "TMB_Recomp",
   "status": "released",
   "targets": ["Windows"],
-  "toolchain": "Ps2recomp",
-  "approach": "Static recompilation with a PS2Recomp fork; native PC renderer, sound and timing, no GS, VU or SPU2 emulation in the default mode.",
+  "toolchain": "BozoEngine",
+  "approach": "Static recompilation with BozoEngine; native PC renderer, sound, input and timing, with no PS2Recomp dependency or IOP, GS, VIF or VU interpreter in the player build.",
   "started": "2026-10-22",
   "maintainers": [
     { "name": "boubou666", "link": "https://github.com/boubou666" },
@@ -27,5 +27,5 @@
     "Testing on high-refresh monitors (the experimental smoothed frame rate)",
     "Testing on Linux"
   ],
-  "notes": "Playable at 60 fps on Windows, built by the launcher from the player's own USA disc. Every Challenge arena played, split screen for 2 to 4 players, memory card saves, rebindable controls including keyboard and mouse, video settings and cheats. Next: story levels 2 to 8 checked to the end, widescreen."
+  "notes": "Playable at a 60 Hz target on Windows, built by the launcher from the player's own USA disc. BozoEngine replaces the previous runtime; native 1P with bots, four-player split screen, level 20, card writes and restart/readback are validated. Rebindable controls, video settings, cheats and default-on heat haze. Next: full campaign endings, every arena rechecked on BozoEngine, physical-controller/clean-OS acceptance and widescreen."
 }

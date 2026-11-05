@@ -4,8 +4,8 @@
 #   git tag v0.1.0 && git push origin v0.1.0          (or Actions > Release > Run workflow, with the tag)
 #
 # On a version tag it makes the build kit from the pinned MSYS2 packages (tools/build_kit_packages.json), the release
-# zip TMB_Recomp-<version>-bozo.zip (folder TMB_Recomp_Bozo: it sits beside the fork build's TMB_Recomp-<version>.zip),
-# its SHA-256 and the sources zip with tools/make_release.py, checks them without any game data, and creates a DRAFT
+# zips TMB_Recomp-<version>-bozo.zip (folder TMB_Recomp_Bozo) and TMB_Recomp-<version>.zip (folder TMB_Recomp for
+# the previous updater). Both carry BozoEngine. It adds hashes and corresponding sources, checks without game data, and creates a DRAFT
 # GitHub release with CHANGELOG.md's section for the version as its body. Nothing is ever published by this workflow:
 # the owner runs docs/RELEASE_CHECKLIST.md on a clean PC, then publishes the draft by hand.
 #

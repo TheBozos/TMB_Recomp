@@ -28,10 +28,9 @@ PC services. BozoEngine replaces the PS2Recomp fork completely; the player build
 
 You build the game yourself, on your PC, from **your own disc**: nothing of the game is in the download.
 
-**Download status:** [v0.3.2](https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.3.2) is still the published release
-and uses the previous runtime. This repository now builds on BozoEngine only. The native migration's candidate ZIPs
-are available as artifacts from the successful [Release workflow test run](https://github.com/TheBozos/TMB_Recomp/actions/runs/42121468079).
-The steps below describe those native packages and the forthcoming release.
+**Download:** [v0.4.0](https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.4.0) is the BozoEngine migration release.
+This repository now builds on BozoEngine only. The previous [v0.3.2](https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.3.2)
+remains available for comparison. The steps below describe the native packages.
 
 1. Download `TMB_Recomp-<version>-bozo.zip` and its `.sha256` for a new/separate installation. Check its SHA-256 before
    running anything (`Get-FileHash .\TMB_Recomp-<version>-bozo.zip` in PowerShell).

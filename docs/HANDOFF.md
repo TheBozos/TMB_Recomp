@@ -46,6 +46,45 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
   The new updater separately installed its `-bozo.zip` payload into an old-named `TMB_Recomp` folder and preserved its settings marker.
 - These are test candidates, not a published release. No new tag has been pushed.
 
+### Final gameplay and profiling checks (2026-11-06)
+
+All runs use isolated user folders, the USA disc, engine `9361960` and the packaged build's game code.
+These figures measure **game-thread work**, not the interval between displayed pictures:
+
+| Scene | Measured frames | Mean work | Mean p95 | Maximum work | Over 16.7 ms |
+|---|---:|---:|---:|---:|---:|
+| 1P, bots active, after 125 s | 4,458 | 3.77 ms | 4.57 ms | 8.2 ms | 0 |
+| Actual four-player split-screen, after 100 s | 3,136 | 4.51 ms | 5.40 ms | 12.5 ms | 0 |
+| Effects-heavy story level 20, after 125 s | 4,098 | 2.72 ms | 3.54 ms | 11.2 ms | 0 |
+
+- 1P and level 20 each completed 12,000 frames; four-player completed 9,000. Gameplay intervals hold about 60
+  updates/presents per second. Whole-run averages including loading are 59.7–59.9 updates/s. Occasional presentation
+  intervals over 20 ms still occur; do not describe this as zero hitches on all hardware.
+- Repeated the handoff's exact 7,500-frame four-pad command, including captures at 6,000 and 7,000. Its old script
+  actually stays on opponent selection in this real-time build. The previous 42-present/s dip did not recur on that
+  same screen: frames 7,000–7,300 remained at 60 presents/s.
+- For the real split-screen run, omitted player 1's initial `1292:CROSS/18` from the local `p1_frames.txt` input;
+  the native build has already reached the main menu there, so that old intro-skip press selects ONE PLAYER.
+  Kept all other four-pad events unchanged. Captures at 6,000 and 8,000 show all four views, driving and firing.
+  AI suppression was off; the four-human deathmatch itself has four human vehicles. Bot coverage comes from 1P.
+- One further historical 1P timing pair (125–195 s) measured 3.77 ms native versus 5.49 ms on the previous runtime,
+  with no game-work frames over budget in either. This is a limited local comparison, not a cross-hardware speedup claim.
+- Completed the previously unwritten raw-profile output and fixed `hitch.py`'s imported `__file__` namespace in the local
+  profiling tools. A 20-second sample contains 20,475 raw thread samples. Its game-thread pacer segmentation labels
+  100 of 1,129 segments over 16.7 ms, but work samples are similar in the two groups (2.1 versus 1.8 per segment).
+  The largest gaps line up with the profiler's 0.5-second thread enumeration; they cannot be counted as actual missed
+  game frames. The game's own statistics in that interval show 4.51 ms mean, 8.9 ms maximum, zero over budget.
+  Mesh submission and VU work remain the main CPU buckets. Mixer worker/COP2 inlining/GL batching remain optional
+  optimization opportunities; none was introduced without a demonstrated frame-budget problem.
+- Restarted for 6,000 headless frames with a copy of the card written by the native story run. It reached gameplay
+  without a fault; the four existing card files remain intact. This is restart/readback coverage, not a full-campaign-ending claim.
+- The new updater also passed in the accented `TMB_Recomp_Bozo` layout, **running from its own bundled Python**.
+  It safely set aside loaded Python DLLs, installed the payload, preserved the player-data marker, and the updated Python starts.
+
+The source migration and README review are merged through [PR #3](https://github.com/TheBozos/TMB_Recomp/pull/3).
+The retired fork checkout, Git metadata and both linked worktrees are preserved independently at
+`D:\TMB_Retired\2026-11-05`; they are no longer an active submodule or local submodule configuration.
+
 ## Limits of the old reference comparisons
 
 - Native 989SND uses its own timing. Default pinned story/4P/stage runs can differ on opaque play handles or the instant a sound ends.
@@ -84,3 +123,7 @@ Follow [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). Do not publish a release ta
 Continuation scratch: `D:\BozoScratch\finish`. Source worktrees: `D:\TMB_bozo` and `D:\BozoEngine`.
 Logs include `diag.log`, `ctest-final.log`, `replay/report.txt`, `pin-boot.log`, `pin-match1p.log`, `pin-stage6.log`,
 `save-free.log` and the deliberately retained failing `save-fixes.log` comparison.
+Final evidence: `final-launcher-shots/selftest.log`, `final-launcher-user/logs/TMB_Recomp.1.log`, `migration3.log`,
+`native-update3.log`, `future-update3.log`, `scene-1p.log`, `four-player.log`, `scene-stage.log`, `hitch-report.txt`,
+`scene-hitch.samples` (original), `scene-hitch-symbols.samples` (same samples with the Unicode module path resolved
+through a hard link to the same executable), and `save-readback.log`.

@@ -20,7 +20,9 @@ The instructions below describe those BozoEngine packages and the forthcoming na
 
 ## Playing on Windows
 
-1. Download `TMB_Recomp-<version>-bozo.zip` and its `.sha256` from [Releases](https://github.com/TheBozos/TMB_Recomp/releases).
+1. Download `TMB_Recomp-<version>-bozo.zip` and its `.sha256`. Until the native release is published, use the
+   artifacts from a successful [Release workflow test run](https://github.com/TheBozos/TMB_Recomp/actions/runs/42121468079);
+   published packages will appear under [Releases](https://github.com/TheBozos/TMB_Recomp/releases).
    Check the download with `Get-FileHash .\TMB_Recomp-<version>-bozo.zip` in PowerShell.
 2. Extract it into a writable folder, with about 10 GB free, outside `Program Files`.
 3. Open **TMB Launcher.exe**, select your USA `.iso` or `.bin`/`.cue`, then **Prepare the game**.

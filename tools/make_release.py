@@ -1080,6 +1080,10 @@ Install
   4. Click "Prepare the game". It takes a few minutes, once. You can stop it; it continues later.
   5. Click "Play". In the game, F2 opens the settings (controls, video, cheats).
 
+Game speed and effects
+  The game updates at 60 Hz; movies keep their original cadence. Heat haze around fire and explosions is on
+  by default. Set BOZO_HEAT_HAZE=0 before launching to disable it for comparisons with the older PC build.
+
 Your saves and settings
   %APPDATA%\\TMB_Recomp (the launcher's Maintenance tab opens it). They stay when you update.
 
@@ -1124,6 +1128,10 @@ Installation
   3. Cliquez sur « Choisir votre image disque... » et choisissez votre image du disque américain.
   4. Cliquez sur « Préparer le jeu ». Cela prend quelques minutes, une seule fois. Vous pouvez l'arrêter ; la suite reprendra.
   5. Cliquez sur « Jouer ». En jeu, F2 ouvre les réglages (commandes, vidéo, astuces).
+
+Vitesse et effets
+  Le jeu tourne à 60 Hz ; les vidéos conservent leur cadence d'origine. La distorsion de chaleur autour des
+  flammes et explosions est activée par défaut. Définissez BOZO_HEAT_HAZE=0 avant de lancer le jeu pour la désactiver.
 
 Vos sauvegardes et réglages
   %APPDATA%\\TMB_Recomp (l'onglet Maintenance du lanceur l'ouvre). Ils restent lors d'une mise à jour.

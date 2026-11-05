@@ -27,7 +27,24 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
   and an **exact cycle and checkpoint count**, and reports them separately. It does not shift their timing.
 - Release-tool regressions: 12 tests pass, including accelerated menus/movies, migration layout, retired source cleanup,
   junction boundaries, configure retry and archive-pipe completion. No game data is needed by those tests.
-- Engine Windows/Linux CI passes. Package and final run results are recorded below as they complete.
+- Engine and TMB Windows/Linux CI pass. The native package workflow's test run
+  [42121468079](https://github.com/TheBozos/TMB_Recomp/actions/runs/42121468079) also passed, including its bundled-toolchain smoke check.
+
+### Packaged Windows build and updates
+
+- Candidate `0.4.0-test.20261105.3`, code `b9c42cb`, engine `9361960`: both player ZIPs pass the archive audit and SHA-256 checks.
+  All **7,750 files** have identical contents between the two installation layouts. The corresponding-source ZIP's hash passes too.
+- Built and played from `D:\BozoScratch\finish\Jérôme Jeux\TMB_Recomp_Bozo`, using only the bundled kit.
+  The final packaged launcher stopped the build at 40%, resumed it, staged the native executable and launched it.
+  The complete preparation took 126 seconds on this development PC; this is not a clean-OS performance promise.
+- The launcher self-test completed normal Play/shutdown (exit 0), English/French settings screenshots,
+  and an intentional child crash with a usable report. Failure paths now fail the self-test instead of returning a false success.
+- Final packaged menu/movie log: **1.0000** EE/PC, **575,964 ticks/s**, **59.97 fields/s**, movies **29.94–30.00 pictures/s**.
+  `tools/check_timing.py` passes with `TMB_NATIVE_FRAMES=0`. The fresh 2,400-frame accent-path run also passes.
+- The **actual v0.3.2 updater** installed the unsuffixed migration ZIP. The subsequent new build removed the retired
+  `source/PS2Recomp` marker, preserved player-data sentinels, rebuilt, and started BozoEngine.
+  The new updater separately installed its `-bozo.zip` payload into an old-named `TMB_Recomp` folder and preserved its settings marker.
+- These are test candidates, not a published release. No new tag has been pushed.
 
 ## Limits of the old reference comparisons
 

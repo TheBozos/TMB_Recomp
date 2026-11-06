@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Test-only reference: TMB native shading at commit 9d7372f, before typed parameters.
 // The maths of TMB's hier strip microprograms (setups 0xcc8 unlit, 0xd08 scaled, 0xce8 directional, 0x1700 point
 // lights), shared by the adapter that follows the VIF1 stream (runtime/tmb_native.cpp) and the mesh pack path that
 // draws the objects from EE state at their hook (runtime/tmb_meshes.cpp). Both hand these functions a VU1 data
@@ -12,7 +14,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace tmb::vu1
+namespace tmb::shader_reference
 {
     // VU1 data memory: 1024 quadwords, read as words or floats.
     struct VuImage

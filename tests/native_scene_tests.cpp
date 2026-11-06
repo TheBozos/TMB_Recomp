@@ -4,7 +4,7 @@
 #include "tmb_scene.h"
 #include "bozo/libs/libraries.h"
 #include "bozo/libs/guest.h"
-#include "tmb_vu1_shading.h"
+#include "fixtures/shader_inputs.h"
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -115,26 +115,31 @@ int main()
         if(scene.lighting.enabled!=(context.vi[14]!=0))return 10;
         if(scene.lighting.enabled)
         {
-            tmb::vu1::VuImage oldImage,newImage;
-            for(unsigned q=0;q<11;++q)
+            tmb::shader_reference::VuImage oldImage;
+            for (unsigned q = 0; q < 11; ++q) oldImage.setQw(165+q,context.vu0_vf[registers[q]].u);
+            const auto expected = shader_fixture::decode(oldImage).point;
+            const auto same = [](float a, float b) { return tmb::hierarchy::collision::bits(a) == tmb::hierarchy::collision::bits(b); };
+            for (unsigned i = 0; i < 4; ++i)
             {
-                oldImage.setQw(165+q,context.vu0_vf[registers[q]].u);newImage.setQw(165+q,&scene.lighting.data[q]);
-                for(unsigned k=0;k<4;++k)
+                const auto &actual = scene.lighting.lights[i], &reference = expected.lights[i];
+                if (!same(actual.attenuation, reference.attenuation)) return 11;
+                for (unsigned k = 0; k < 3; ++k)
                 {
-                    if(q>=4&&q<=6&&(k==3||k>=scene.lighting.count))continue; // inactive positions/padding have no colour contribution
-                    if(scene.lighting.data[q].bits[k]!=context.vu0_vf[registers[q]].u[k]){
-                        std::fprintf(stderr,"FAIL lights n%u mode%u kept%u q%u lane%u %x/%x\n",n,mode,scene.lighting.count,q,k,scene.lighting.data[q].bits[k],context.vu0_vf[registers[q]].u[k]);return 11;
-                    }
+                    if (!same(actual.colour[k], reference.colour[k])) return 11;
+                    if (i < 3 && !same(actual.direction[k], reference.direction[k])) return 11;
+                    if (i < 3 && i < scene.lighting.count && !same(actual.position[k], reference.position[k])) return 11;
                 }
+                if (i < 3 && !same(actual.coneOffset, reference.coneOffset)) return 11;
             }
             const Vector tint{{0x3f800000,0x3f800000,0x3f800000,0x3f800000}};
-            oldImage.setQw(5,&tint);newImage.setQw(5,&tint);
+            oldImage.setQw(5,&tint);
+            auto parameters = shader_fixture::decode(oldImage); parameters.point = scene.lighting;
             _mm_setcsr(saved);
             for(unsigned j=0;j<4;++j)
             {
                 const float position[]={number(100),number(100),number(100)};
                 const uint32_t normal[]={randomBits()&255,randomBits()&255,randomBits()&255},rgba[]={128,128,128,128};
-                if(tmb::vu1::shade(tmb::vu1::Shading::Point,oldImage,normal,rgba,position)!=tmb::vu1::shade(tmb::vu1::Shading::Point,newImage,normal,rgba,position))return 12;
+                if(tmb::shader_reference::shade(tmb::shader_reference::Shading::Point,oldImage,normal,rgba,position)!=tmb::shading::shade(tmb::shading::Shading::Point,parameters,normal,rgba,position))return 12;
                 ++shades;
             }
         }
@@ -178,8 +183,8 @@ int main()
         rt->port=nullptr;
     }
     // Each bound scene belongs to one runtime; reusing a runtime address starts a fresh owner.
-    { Binding owner(rt.get());get(rt.get()).pointCount=7;auto other=std::make_unique<Runtime>();Binding second(other.get());if(get(other.get()).pointCount)return 8; }
-    { Binding owner(rt.get());if(get(rt.get()).pointCount)return 9; }
+    { Binding owner(rt.get());get(rt.get()).pointCount=7;get(rt.get()).renderer.morphWeight=3.f;auto other=std::make_unique<Runtime>();Binding second(other.get());if(get(other.get()).pointCount||get(other.get()).renderer.morphWeight!=0.f)return 8; }
+    { Binding owner(rt.get());if(get(rt.get()).pointCount||get(rt.get()).renderer.morphWeight!=0.f)return 9; }
     std::printf("native scene: %llu root/camera/three-child/FOV/object/LOD sequences; four FP modes, owner isolation pass\n",(unsigned long long)cases);
     std::printf("native lights: %llu original comparisons, %llu rendered shading cases; unused slots/padding excluded\n",(unsigned long long)lightCases,(unsigned long long)shades);
 }

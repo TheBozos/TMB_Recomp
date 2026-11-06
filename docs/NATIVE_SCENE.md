@@ -84,7 +84,8 @@ There are zero differences outside these intervals at that snapshot. `hierGetBig
 `564a80`. This evidence bounds that snapshot, not every intermediate frame or campaign path. No stale
 packet/vector restoration, shadow register bank or broader memory-hash mask is added.
 
-Other game math helpers and VU macro instructions remain. The native shading adapter still packs its
-parameters through `VuImage`, and scalar packet-building code still survives around several native
-hooks. The historical checker/original program implementation remains for comparison. This increment
-does not claim total VU/emulation removal, full campaign qualification or console visual parity.
+Other game math helpers and VU macro instructions remain. The subsequent
+[`NATIVE_SHADERS.md`](NATIVE_SHADERS.md) increment removes `VuImage` and the scene's light packing, using
+named native shader inputs instead. Scalar packet-building code still survives around several hooks.
+The historical checker/original program implementation remains for comparison. These increments do
+not claim total VU/emulation removal, full campaign qualification or console visual parity.

@@ -231,6 +231,13 @@ target_link_libraries(tmb-native-scene-tests PRIVATE tmb_runtime tmb_generated b
 if(MINGW)
     target_link_options(tmb-native-scene-tests PRIVATE -static -Wl,--stack,268435456)
 endif()
+add_executable(tmb-native-shader-tests EXCLUDE_FROM_ALL tests/native_shader_tests.cpp)
+
+target_include_directories(tmb-native-shader-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime")
+target_compile_options(tmb-native-shader-tests PRIVATE ${TMB_RUNTIME_ARCH} ${TMB_RUNTIME_OPT})
+if(MINGW)
+    target_link_options(tmb-native-shader-tests PRIVATE -static)
+endif()
 if(MINGW)
     target_link_options(tmb-headless PRIVATE -static -Wl,--stack,268435456)
 endif()

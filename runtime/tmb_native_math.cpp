@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
+#include <map>
 #include <stdexcept>
 #include <string>
 
@@ -18,12 +20,12 @@ namespace tmb::math
         constexpr uint32_t kTransposedProduct = 0x001dcc68u, kFullProduct = 0x001dcd50u;
         constexpr uint32_t kBasisProduct = 0x001dcc08u;
         constexpr uint32_t kDirectionProduct = 0x001da298u;
-        constexpr uint32_t kSkidDirectionReturn = 0x00168b30u;
         struct Statistics
         {
             uint64_t calls[3]{}, checked[3]{};
             uint64_t directions = 0, directionsChecked = 0;
             uint64_t mismatches = 0;
+            std::map<uint32_t, uint64_t> directionCallers;
             ~Statistics()
             {
                 if (calls[0] || calls[1] || calls[2])
@@ -36,6 +38,9 @@ namespace tmb::math
                 if (directions)
                     std::fprintf(stderr, "[native:math] direction %llu calls; original XYZ comparisons %llu\n",
                         static_cast<unsigned long long>(directions), static_cast<unsigned long long>(directionsChecked));
+                for (const auto &[caller, count] : directionCallers)
+                    std::fprintf(stderr, "[native:direction-trace] return %x calls %llu\n",
+                        caller, static_cast<unsigned long long>(count));
             }
         } statistics;
 
@@ -92,8 +97,12 @@ namespace tmb::math
 
         void direction(uint8_t *ram, R5900Context *ctx, Runtime *rt)
         {
-            // This caller consumes XYZ only. Other consumers still need their W/flag contract audited.
-            if (!bozo::port::nativeGraphics(rt) || getRegU32(ctx, 31) != kSkidDirectionReturn)
+            static const bool trace = [] { const char *v = std::getenv("TMB_NATIVE_DIRECTION_TRACE"); return v && *v == '1'; }();
+            const uint32_t caller = getRegU32(ctx, 31);
+            if (trace) ++statistics.directionCallers[caller];
+            // These callers consume XYZ only. Other consumers still need their W/flag contract audited.
+            if (!bozo::port::nativeGraphics(rt) ||
+                std::find(directionReturns.begin(), directionReturns.end(), caller) == directionReturns.end())
             {
                 mathfMulTransVec__FPA3_A3_fP8_fvectorT1_0x1da298(ram, ctx, rt);
                 return;

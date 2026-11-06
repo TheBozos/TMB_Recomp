@@ -35,6 +35,9 @@ direction, exact full-frame records, original-caller tests and the remaining mul
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 
+[`NATIVE_DIRECTIONS.md`](NATIVE_DIRECTIONS.md) adds three hot BSP collision direction callers to the
+native record path, with generated-continuation tests, complete gameplay comparisons and stack-W audit.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

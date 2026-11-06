@@ -29,6 +29,9 @@ records the original-block comparisons, destination-W contract and targeting-war
 [`NATIVE_IMAGES.md`](NATIVE_IMAGES.md) records the shared image-builder retirement contributed by DC,
 the TMB resident-binding audit, exact draw/sound comparisons and movie/loading/gameplay qualification.
 
+[`NATIVE_VEHICLE.md`](NATIVE_VEHICLE.md) covers native vehicle spatial calculations and the audited skid
+direction, exact full-frame records, original-caller tests and the remaining multi-step coverage limit.
+
 - One submodule: `BozoEngine`. No PS2Recomp gitlink, legacy CMake branch, import fallback, IOP recompilation or old runner scripts.
 - `tools/tmb_build.py`: verify → extract → configure → native tools → recompile → packs → compile → stage.
 - `scripts/build_runtime.sh` and the other retained shortcuts use that same pipeline.

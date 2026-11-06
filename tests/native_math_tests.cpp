@@ -28,10 +28,12 @@ namespace
         bool callLibrary(Runtime *, R5900Context *, uint32_t) override { throw "unexpected library operation"; }
         bool nativeGraphics() const override { return true; }
     };
-    struct Helper { uint32_t address; RecompiledFunction original; const char *name; };
+    struct Helper { uint32_t address; RecompiledFunction original; const char *name; bool direction = false; };
     constexpr Helper helpers[] = {
+        {0x1dcc08, vu0MulMatrix3x3__FPA3_fT0T0_0x1dcc08, "basis"},
         {0x1dcc68, vu0MulMatrixTP3x3__FPA3_fT0T0_0x1dcc68, "transposed basis"},
         {0x1dcd50, vu0MulMatrix4x4__FPA3_fT0T0_0x1dcd50, "full"},
+        {0x1da298, mathfMulTransVec__FPA3_A3_fP8_fvectorT1_0x1da298, "direction", true},
     };
     constexpr uint32_t special[] = {0, 0x80000000, 1, 0x80000001, 0x7fffff, 0x807fffff,
         0x800000, 0x80800000, 0x800001, 0x3f7fffff, 0x3f800000, 0x3f800001, 0xbf800000,
@@ -86,13 +88,20 @@ int main()
                 setRegU32(&initial, 4, (output | alias) + (n & 15u));
                 setRegU32(&initial, 5, (first | alias) + ((n >> 4u) & 15u));
                 setRegU32(&initial, 6, (second | alias) + ((n >> 8u) & 15u));
-                setRegU32(&initial, 31, 0x0bad0000u);
+                if (helper.direction)
+                {
+                    setRegU32(&initial, 4, (second | alias) + ((n >> 8u) & 15u));
+                    setRegU32(&initial, 6, (output | alias) + (n & 15u));
+                }
+                setRegU32(&initial, 31, helper.direction ? 0x168b30u : 0x0bad0000u);
                 initial.pc = helper.address;
                 R5900Context original = initial, native = initial;
                 // Deliberately vary caller rounding and denormal settings. Native code must restore the whole word.
                 const unsigned control = ((savedControl | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1u ? 0x8040u : 0u);
                 _mm_setcsr(control);
                 helper.original(rt->memory.flat(), &original, rt.get());
+                if (helper.direction) // direction outputs are XYZ; the native record contract retains destination W
+                    std::memcpy(arena + (output - physicalBase) + 12, input.data() + (output - physicalBase) + 12, 4);
                 std::memcpy(expected.data(), arena, expected.size());
                 if (n < 32)
                 {
@@ -124,7 +133,30 @@ int main()
                 }
                 ++cases;
             }
-    std::printf("native matrix tests: %llu original/native cases exact, %llu whole-memory cases; 4 host modes; VU state untouched\n",
+    // Only the audited skid-mark caller is lowered. Other helper callers keep their original complete ABI.
+    for (unsigned n = 0; n < 2048; ++n)
+    {
+        uint8_t *arena = rt->memory.ram() + arenaBase;
+        for (size_t i = 0; i < input.size(); i += 4)
+        {
+            const uint32_t bits = randomBits();
+            std::memcpy(input.data() + i, &bits, 4);
+        }
+        std::memcpy(arena, input.data(), input.size());
+        R5900Context initial;
+        for (auto &v : initial.vu0_vf) for (auto &bits : v.u) bits = randomBits();
+        initial.vu0_vf[0] = Vu0Vector{}; initial.vu0_vf[0].u[3] = 0x3f800000;
+        setRegU32(&initial, 4, arenaBase + 128); setRegU32(&initial, 5, arenaBase + 256);
+        setRegU32(&initial, 6, arenaBase + 64); setRegU32(&initial, 31, 0xbad0000);
+        R5900Context original = initial, native = initial;
+        mathfMulTransVec__FPA3_A3_fP8_fvectorT1_0x1da298(rt->memory.flat(), &original, rt.get());
+        std::memcpy(expected.data(), arena, expected.size());
+        std::memcpy(arena, input.data(), input.size());
+        registry.find(0x1da298)(rt->memory.flat(), &native, rt.get());
+        if (std::memcmp(arena, expected.data(), expected.size()) || std::memcmp(&original, &native, sizeof(native))) return 2;
+    }
+    _mm_setcsr(savedControl);
+    std::printf("native math tests: %llu original/native cases exact (direction XYZ/preserved-W contract), %llu whole-memory cases; 4 host modes; VU state untouched; 2048 other-caller ABI cases exact\n",
         static_cast<unsigned long long>(cases), static_cast<unsigned long long>(fullMemoryCases));
     return 0;
 }

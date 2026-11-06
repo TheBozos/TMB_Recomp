@@ -55,7 +55,8 @@ For 4P, RAM hashes start differing at frame 4703. The point-8500 dump has exactl
 the four HUD pointers at `0x23c548..0x23c554` point to those records, and `updateHUDPosition` loads
 that array at `0x13cd1c`. Thus the final 4P snapshot isolates the same inherited-W store for each view.
 
-The six inline HUD transforms are now lowered separately; [`NATIVE_HUD.md`](NATIVE_HUD.md) records that
-change's W-preservation contract, validation and limits. The vehicle 3x3 helper, vehicle calculations,
-hierarchy routines and other VU0 compatibility state still need wider caller/dataflow replacements.
+The six inline HUD transforms are lowered separately; [`NATIVE_HUD.md`](NATIVE_HUD.md) records their
+W-preservation contract, validation and limits. [`NATIVE_VEHICLE.md`](NATIVE_VEHICLE.md) covers the vehicle
+3x3 product, inline vehicle calculations and audited skid direction. Other helper callers, hierarchy
+routines and VU0 compatibility state still need wider caller/dataflow replacements.
 These increments do not claim that all VU0 work uses native records yet.

@@ -16,7 +16,8 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 ## Architecture and build
 
 Native graphics DMA/register removal: implementation and validation details are in
-[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). This work is on `codex/native-graphics-completion`, separate from v0.4.0.
+[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `5bb4efb`, including native graphics completion
+and the current shared native port services. The published v0.4.0 package remains the earlier release described above.
 
 - One submodule: `BozoEngine`. No PS2Recomp gitlink, legacy CMake branch, import fallback, IOP recompilation or old runner scripts.
 - `tools/tmb_build.py`: verify → extract → configure → native tools → recompile → packs → compile → stage.

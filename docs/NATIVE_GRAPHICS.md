@@ -72,3 +72,11 @@ Final-build checks (BozoEngine `f715d57`):
   are reported rather than checked. Both historical checkers and the final native run exit successfully.
 
 Full campaign/endings and additional physical controllers/hardware remain outside this smoke-test coverage.
+
+## Main integration
+
+BozoEngine's graphics change is merged through [engine PR #3](https://github.com/TheBozos/BozoEngine/pull/3),
+at `5bb4efb`. The combined tree includes the current shared native port services and passes all **8 local CTest
+checks**, plus Windows/Linux CI. Its 8,500-frame native run reproduces the previously tested native build exactly
+on RAM, scratchpad, draw hashes/counts, sound hashes and EE clocks. A further **6,501-frame** windowed run passes
+boot movies, loading and four-player play; inspected captures show the intro and the four snow-arena views.

@@ -32,6 +32,9 @@ the TMB resident-binding audit, exact draw/sound comparisons and movie/loading/g
 [`NATIVE_VEHICLE.md`](NATIVE_VEHICLE.md) covers native vehicle spatial calculations and the audited skid
 direction, exact full-frame records, original-caller tests and the remaining multi-step coverage limit.
 
+[`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
+inverse transforms and BSP plane distances, their original-caller tests, RAM boundary and remaining renderer stack.
+
 [`NATIVE_GRAPHICS_SERVICES.md`](NATIVE_GRAPHICS_SERVICES.md) records removal of the engine GS device/GIF
 reader state and TMB's old packet-based flare adapter, independent/combined tests and unsupported readback limits.
 

@@ -5,6 +5,7 @@
 #include "tmb_port.h"
 #include "bozo/libs/libraries.h"
 #include "tmb_scene.h"
+#include "tmb_object_packets.h"
 
 #include <algorithm>
 #include <array>
@@ -66,6 +67,7 @@ namespace tmb::graphics
         bool instruction(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t pc)
         {
             if (tmb::scene::instruction(ram, ctx, rt, pc)) return true;
+            if (tmb::packets::instruction(ram, ctx, rt, pc)) return true;
             if (tmb::math::hudInstruction(ram, ctx, rt, pc)) return true;
             if (tmb::math::vehicleInstruction(ram, ctx, rt, pc)) return true;
             if (!std::binary_search(kSortedGraphicsOutput.begin(), kSortedGraphicsOutput.end(), pc))

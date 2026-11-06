@@ -16,6 +16,7 @@ ARRAY = re.compile(r'\b(k[A-Z0-9]\w*)\[\]\s*=\s*\{([^}]*)\}')
 LOOP = re.compile(r'for\s*\(\s*uint32_t\s+(\w+)\s*:\s*(k\w+)\s*\)')
 REGISTER = re.compile(r'registerFunction\(\s*([^,]+?)\s*,')
 STORE = re.compile(r'//\s*bozo:store\s+(k\w+)')
+NATIVE = re.compile(r'//\s*bozo:native\s+(k\w+)')
 
 
 def main():
@@ -29,7 +30,7 @@ def main():
             local[name] = int(value, 16)
             constants.setdefault(name, int(value, 16))
         perFile[f] = local
-    overrides, stores, errors = {}, {}, []
+    overrides, stores, native, errors = {}, {}, {}, []
 
     def resolve(f, expr):
         expr = expr.strip()
@@ -58,15 +59,21 @@ def main():
             a = resolve(f, name)
             if a is not None:
                 stores[a] = f'{f.name}: {name}'
+        for name in NATIVE.findall(text):
+            if name not in arrays:
+                errors.append(f'{f.name}: native instruction array {name} was not found')
+            for a in arrays.get(name, []):
+                native[a] = f'{f.name}: {name}'
     if errors:
         sys.exit('\n'.join(errors))
     lines = ['# TMB\'s overrides and patched stores (tools/tmb_overrides_list.py from runtime/*.cpp). Do not edit.']
     lines += [f'override 0x{a:x}  # {where}' for a, where in sorted(overrides.items())]
     lines += [f'store 0x{a:x}  # {where}' for a, where in sorted(stores.items())]
+    lines += [f'native 0x{a:x}  # {where}' for a, where in sorted(native.items())]
     text = '\n'.join(lines) + '\n'
     if not out.exists() or out.read_text(encoding='utf-8') != text:
         out.write_text(text, encoding='utf-8', newline='\n')
-    print(f'tmb_overrides_list: {len(overrides)} overrides, {len(stores)} patched stores -> {out}')
+    print(f'tmb_overrides_list: {len(overrides)} overrides, {len(stores)} patched stores, {len(native)} native instructions -> {out}')
 
 
 if __name__ == '__main__':

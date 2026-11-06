@@ -12,8 +12,8 @@ namespace
 {
     struct Vertex { float x{},y{},z{},u{},v{}; uint32_t rgba{}; float fog{}; };
     uint32_t seed = 0x179ebc63;
-    uint32_t random() { seed ^= seed<<13; seed ^= seed>>17; seed ^= seed<<5; return seed; }
-    float number() { return float(int(random()%20001)-10000)/2048.f; }
+    uint32_t nextBits() { seed ^= seed<<13; seed ^= seed>>17; seed ^= seed<<5; return seed; }
+    float number() { return float(int(nextBits()%20001)-10000)/2048.f; }
     bool same(float a, float b) { return std::bit_cast<uint32_t>(a) == std::bit_cast<uint32_t>(b); }
     void require(bool okay, const char *what)
     { if (!okay) throw std::runtime_error(what); }
@@ -46,8 +46,8 @@ int main()
             if (!depth) std::memcpy(unscaled,b,sizeof(b));
         }
         const float position[4] = {number(),number(),number(),number()};
-        const uint32_t normal[3] = {random()&255,random()&255,random()&255};
-        const uint32_t rgba[4] = {random()&255,random()&255,random()&255,random()&255};
+        const uint32_t normal[3] = {nextBits()&255,nextBits()&255,nextBits()&255};
+        const uint32_t rgba[4] = {nextBits()&255,nextBits()&255,nextBits()&255,nextBits()&255};
         for (unsigned mode=0;mode<3;++mode)
             require(old::shade(static_cast<old::Shading>(mode),image,normal,rgba,position)==
                     native::shade(static_cast<native::Shading>(mode),p,normal,rgba,position), "strip colour differs");

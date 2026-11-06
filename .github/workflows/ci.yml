@@ -22,6 +22,7 @@ jobs:
         run: for file in scripts/*.sh; do bash -n "$file" || exit; done
   native-shader:
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}

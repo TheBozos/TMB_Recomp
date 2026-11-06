@@ -12,6 +12,7 @@
 
 namespace tmb::math
 {
+    void installProjection(Registry &);
     namespace
     {
         constexpr uint32_t kTransposedProduct = 0x001dcc68u, kFullProduct = 0x001dcd50u;
@@ -125,6 +126,7 @@ namespace tmb::math
 
     void install(Registry &runtime)
     {
+        installProjection(runtime);
         runtime.registerFunction(kTransposedProduct, &invoke<Product::TransposedBasis, vu0MulMatrixTP3x3__FPA3_fT0T0_0x1dcc68>);
         runtime.registerFunction(kFullProduct, &invoke<Product::Full, vu0MulMatrix4x4__FPA3_fT0T0_0x1dcd50>);
         runtime.registerFunction(kBasisProduct, &invoke<Product::Basis, vu0MulMatrix3x3__FPA3_fT0T0_0x1dcc08>);

@@ -57,6 +57,7 @@ add_subdirectory("${BOZO_ENGINE_DIR}" bozo)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(gen_dir "${CMAKE_BINARY_DIR}/tmb_gen")
+set(native_original_dir "${CMAKE_BINARY_DIR}/native_original")
 set(overrides_list "${gen_dir}/tmb_overrides.txt")
 set(externals "${gen_dir}/tmb_externals.txt")
 file(GLOB TMB_RUNTIME_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/runtime/*.cpp")
@@ -95,18 +96,24 @@ add_custom_command(
 add_custom_target(tmb_recompile DEPENDS ${gen_files})
 add_library(tmb_generated OBJECT ${gen_files})
 add_custom_command(
-    OUTPUT ${gen_dir}/tmb_hud_original.cpp ${gen_dir}/tmb_hud_original.h
-    COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/tmb_hud_fixture.py" ${gen_dir}
+    OUTPUT ${native_original_dir}/tmb_hud_original.cpp ${native_original_dir}/tmb_hud_original.h
+    COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/tmb_hud_fixture.py" ${gen_dir} hud ${native_original_dir}
     DEPENDS ${gen_files} "${CMAKE_SOURCE_DIR}/tools/tmb_hud_fixture.py"
     COMMENT "Extracting original HUD blocks for optional comparisons")
-target_sources(tmb_generated PRIVATE ${gen_dir}/tmb_hud_original.cpp ${gen_dir}/tmb_hud_original.h)
+target_sources(tmb_generated PRIVATE ${native_original_dir}/tmb_hud_original.cpp ${native_original_dir}/tmb_hud_original.h)
+add_custom_command(
+    OUTPUT ${native_original_dir}/tmb_vehicle_original.cpp ${native_original_dir}/tmb_vehicle_original.h
+    COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/tmb_hud_fixture.py" ${gen_dir} vehicle ${native_original_dir}
+    DEPENDS ${gen_files} "${CMAKE_SOURCE_DIR}/tools/tmb_hud_fixture.py"
+    COMMENT "Extracting original vehicle blocks for optional comparisons")
+target_sources(tmb_generated PRIVATE ${native_original_dir}/tmb_vehicle_original.cpp ${native_original_dir}/tmb_vehicle_original.h)
 target_link_libraries(tmb_generated PUBLIC bozo_runtime_headers)
-target_include_directories(tmb_generated PUBLIC ${gen_dir})
+target_include_directories(tmb_generated PUBLIC ${gen_dir} ${native_original_dir})
 target_compile_options(tmb_generated PRIVATE ${TMB_GEN_OPT} -w)
 
 # TMB's runtime: an object library (its port registration, BOZO_PORT, must be linked whatever references it).
 add_library(tmb_runtime OBJECT ${TMB_RUNTIME_SOURCES})
-target_include_directories(tmb_runtime PUBLIC "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})
+target_include_directories(tmb_runtime PUBLIC "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir} ${native_original_dir})
 target_link_libraries(tmb_runtime PUBLIC bozo_port bozo_render bozo_libs bozo_runtime_core)
 # The Cheats tab of the settings window (F2): ImGui's core and the tab list (bozo_ui, no SDL3; BOZO_SETTINGS_UI), with
 # the window. The headless programs link it too and never draw it.
@@ -114,7 +121,7 @@ if(TMB_WINDOW)
     target_link_libraries(tmb_runtime PUBLIC bozo_ui)
 endif()
 add_dependencies(tmb_runtime tmb_generated)
-set_source_files_properties("${CMAKE_SOURCE_DIR}/runtime/tmb_native_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_hud_math.cpp" PROPERTIES
+set_source_files_properties("${CMAKE_SOURCE_DIR}/runtime/tmb_native_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_hud_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_vehicle_math.cpp" PROPERTIES
     COMPILE_OPTIONS "-ffp-contract=off;-frounding-math")
 target_compile_options(tmb_runtime PRIVATE -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable)
 # The draw lists as the reference build (the fork) computed them (the PS2XREF1 `draws` field): it compiled TMB's runtime
@@ -202,6 +209,13 @@ target_compile_options(tmb-native-hud-tests PRIVATE -ffp-contract=off -frounding
 target_link_libraries(tmb-native-hud-tests PRIVATE tmb_runtime tmb_generated bozo_host)
 if(MINGW)
     target_link_options(tmb-native-hud-tests PRIVATE -static -Wl,--stack,268435456)
+endif()
+add_executable(tmb-native-vehicle-tests EXCLUDE_FROM_ALL tests/native_vehicle_tests.cpp)
+target_include_directories(tmb-native-vehicle-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})
+target_compile_options(tmb-native-vehicle-tests PRIVATE -ffp-contract=off -frounding-math)
+target_link_libraries(tmb-native-vehicle-tests PRIVATE tmb_runtime tmb_generated bozo_host)
+if(MINGW)
+    target_link_options(tmb-native-vehicle-tests PRIVATE -static -Wl,--stack,268435456)
 endif()
 if(MINGW)
     target_link_options(tmb-headless PRIVATE -static -Wl,--stack,268435456)

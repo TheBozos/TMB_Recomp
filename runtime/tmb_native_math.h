@@ -11,7 +11,7 @@ namespace tmb::math
 {
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };
-    enum class Product { TransposedBasis, Full };
+    enum class Product { TransposedBasis, Full, Basis };
 
     // Macro-mode products/sums round separately to nearest. Preserve the caller's complete host FP control state.
     class ArithmeticScope
@@ -55,6 +55,25 @@ namespace tmb::math
                 out.bits[i] = bozo::ps2f::addNearest(a.bits[i], b.bits[i], ignored);
             }
         return out;
+    }
+
+    inline Vector subtract(const Vector &a, const Vector &b)
+    {
+        Vector out = record(_mm_sub_ps(lanes(a), lanes(b)));
+        for (unsigned i = 0; i < 4; ++i)
+            if (extended(a.bits[i]) || extended(b.bits[i]) || extended(out.bits[i]))
+            {
+                uint32_t ignored = 0;
+                out.bits[i] = bozo::ps2f::subNearest(a.bits[i], b.bits[i], ignored);
+            }
+        return out;
+    }
+
+    inline Vector combineXYZ(Vector a, Vector b, bool difference)
+    {
+        ArithmeticScope arithmetic;
+        a.bits[3] = b.bits[3] = 0;
+        return difference ? subtract(a, b) : add(a, b);
     }
 
     inline Matrix product(const Matrix &first, const Matrix &second, Product kind)

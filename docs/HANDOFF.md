@@ -53,6 +53,10 @@ output and RGB packet readbacks. [`NATIVE_TEXTURE_INPUTS.md`](NATIVE_TEXTURE_INP
 removal of its last three texture copies and the consumer's packet reads/patches. Game allocation/usage
 bookkeeping and the separate upload-link builder still execute; no packet shadow or binding is added.
 
+[`NATIVE_TEXTURE_UPLOADS.md`](NATIVE_TEXTURE_UPLOADS.md) covers the subsequent native upload-link leaf,
+preserved CPU/cursor ABI, original fallback contracts and bounded gameplay/movie validation. It emits
+no upload tag at the audited calls; game texture-manager bookkeeping and other packet helpers remain.
+
 [`NATIVE_GRAPHICS_SERVICES.md`](NATIVE_GRAPHICS_SERVICES.md) records removal of the engine GS device/GIF
 reader state and TMB's old packet-based flare adapter, independent/combined tests and unsupported readback limits.
 

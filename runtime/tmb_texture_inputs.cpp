@@ -16,6 +16,7 @@ namespace tmb::textureInputs
             0x1f90cc, 0x1f9130, 0x1f9158, 0x1f91b4,
             0x1f93bc, 0x1f93c4, 0x1f93d4, 0x1f9494, 0x1f94a0, 0x1f988c,
         };
+        constexpr uint32_t kTextureUpload = 0x1ea5c8;
         static_assert(std::is_sorted(std::begin(kTextureInputs), std::end(kTextureInputs)));
         template <typename T> T read(Runtime *rt, uint32_t address)
         {
@@ -28,13 +29,52 @@ namespace tmb::textureInputs
         }
         struct Statistics
         {
-            uint64_t reads{}, patches{};
+            uint64_t reads{}, patches{}, uploads{};
             ~Statistics()
             {
                 std::fprintf(stderr, "[native:texture-inputs] direct reads %llu retired patches %llu\n",
                              (unsigned long long)reads, (unsigned long long)patches);
+                std::fprintf(stderr, "[native:texture-uploads] native completions %llu retired tag stores %llu\n",
+                             (unsigned long long)uploads, (unsigned long long)(3 * uploads));
             }
         } statistics;
+
+        void submitTexture(uint8_t *ram, R5900Context *ctx, Runtime *rt)
+        {
+            const uint32_t caller = getRegU32(ctx, 31);
+            if (!bozo::port::nativeGraphics(rt) || (caller != 0x1f947c && caller != 0x1f977c))
+            {
+                pktAddVu1Tex__FP9Vu1DmaPktPUi_0x1ea5c8(ram, ctx, rt);
+                return;
+            }
+            const uint32_t control = getRegU32(ctx, 4), cursor = read<uint32_t>(rt, control + 8);
+            const auto controlAt = bozo::GuestMemory::flatOffset(control, 0x14);
+            // The original writes can feed back into a deliberately overlapping control record.
+            // Keep that ABI outside the native disjoint-record contract, including aliased RAM views.
+            const auto overlaps = [&](uint32_t address, uint32_t size)
+            {
+                const auto at = bozo::GuestMemory::flatOffset(address, size);
+                return controlAt >= 0 && at >= 0 && at < controlAt + 0x14 && controlAt < at + size;
+            };
+            if (overlaps(cursor & ~15u, 16) || overlaps(cursor + 4, 4) || overlaps(cursor + 8, 4))
+            {
+                pktAddVu1Tex__FP9Vu1DmaPktPUi_0x1ea5c8(ram, ctx, rt);
+                return;
+            }
+            // Texture data is already available to the native renderer. Preserve only the game's legacy
+            // extent and scalar caller ABI; no upload descriptor/tag is read, written or dispatched.
+            const uint32_t next = cursor + 16;
+            const auto at = bozo::GuestMemory::flatOffset(control + 8, 4);
+            std::memcpy(rt->memory.flat() + at, &next, 4);
+            setRegU32(ctx, 2, next);
+            ctx->r[3] = {};
+            setRegU32(ctx, 3, cursor);
+            setRegU32(ctx, 5, cursor);
+            setRegU32(ctx, 6, cursor);
+            setRegU64(ctx, 7, 0x11000000);
+            ctx->pc = caller;
+            ++statistics.uploads;
+        }
 
         // Both assembly traversals enqueue {object, texture-copy cursor, ...}. The helper preserves the
         // texture index at frame+0. Read the caller from its actual saved frame, so a deferred return/resume
@@ -91,5 +131,9 @@ namespace tmb::textureInputs
         }
         else ++statistics.patches; // Scalar results and game texture-manager writes still execute normally.
         return true;
+    }
+    void install(tmb::Registry &runtime)
+    {
+        runtime.registerFunction(kTextureUpload, &submitTexture);
     }
 }

@@ -121,7 +121,7 @@ if(TMB_WINDOW)
     target_link_libraries(tmb_runtime PUBLIC bozo_ui)
 endif()
 add_dependencies(tmb_runtime tmb_generated)
-set_source_files_properties("${CMAKE_SOURCE_DIR}/runtime/tmb_native_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_hud_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_vehicle_math.cpp" PROPERTIES
+set_source_files_properties("${CMAKE_SOURCE_DIR}/runtime/tmb_native_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_hud_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_vehicle_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_hierarchy_math.cpp" PROPERTIES
     COMPILE_OPTIONS "-ffp-contract=off;-frounding-math")
 target_compile_options(tmb_runtime PRIVATE -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable)
 # The draw lists as the reference build (the fork) computed them (the PS2XREF1 `draws` field): it compiled TMB's runtime
@@ -216,6 +216,13 @@ target_compile_options(tmb-native-vehicle-tests PRIVATE -ffp-contract=off -froun
 target_link_libraries(tmb-native-vehicle-tests PRIVATE tmb_runtime tmb_generated bozo_host)
 if(MINGW)
     target_link_options(tmb-native-vehicle-tests PRIVATE -static -Wl,--stack,268435456)
+endif()
+add_executable(tmb-native-hierarchy-tests EXCLUDE_FROM_ALL tests/native_hierarchy_tests.cpp)
+target_include_directories(tmb-native-hierarchy-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})
+target_compile_options(tmb-native-hierarchy-tests PRIVATE -ffp-contract=off -frounding-math)
+target_link_libraries(tmb-native-hierarchy-tests PRIVATE tmb_runtime tmb_generated bozo_host)
+if(MINGW)
+    target_link_options(tmb-native-hierarchy-tests PRIVATE -static -Wl,--stack,268435456)
 endif()
 if(MINGW)
     target_link_options(tmb-headless PRIVATE -static -Wl,--stack,268435456)

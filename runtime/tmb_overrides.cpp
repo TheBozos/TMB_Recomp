@@ -12,6 +12,7 @@
 
 namespace tmb::graphics { void install(Registry &); }
 namespace tmb::math { void install(Registry &); }
+namespace tmb::hierarchy { void install(Registry &); }
 
 #include <algorithm>
 #include <atomic>
@@ -1107,6 +1108,7 @@ namespace
         tmb::particles::install(runtime); // particles drawn from their structs (runtime/tmb_particles.cpp)
         tmb::graphics::install(runtime); // direct submission/completion; retired graphics MMIO is rejected
         tmb::math::install(runtime); // matrix records computed natively, with no VU context dependency
+        tmb::hierarchy::install(runtime); // collision hierarchy calculations over game records
         if (const char *trace = std::getenv("TMB_TRACE_HIER"); trace && *trace == '1')
             runtime.registerFunction(kHierDmaHandler, &hierDmaHandlerTrace);
         if (const char *trace = std::getenv("TMB_TRACE_SND"); trace && *trace == '1')

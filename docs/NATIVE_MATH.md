@@ -60,3 +60,7 @@ W-preservation contract, validation and limits. [`NATIVE_VEHICLE.md`](NATIVE_VEH
 3x3 product, inline vehicle calculations and audited skid direction. Other helper callers, hierarchy
 routines and VU0 compatibility state still need wider caller/dataflow replacements.
 These increments do not claim that all VU0 work uses native records yet.
+
+[`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) now covers the collision/height hierarchy's native sphere test,
+audited inverse directions and BSP plane-distance pairs. The renderer hierarchy's coupled matrix/FOV/light
+stack and the other direction/helper callers remain separate work.

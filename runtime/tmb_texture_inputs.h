@@ -6,4 +6,5 @@ namespace tmb::textureInputs
 {
     bool owns(uint32_t pc);
     bool instruction(uint8_t *, R5900Context *, Runtime *, uint32_t pc);
+    void install(tmb::Registry &);
 }

@@ -1,5 +1,8 @@
 # Native texture consumer inputs
 
+The subsequent [native upload-link increment](NATIVE_TEXTURE_UPLOADS.md) replaces the separate upload
+leaf at its audited callers. The evidence below records the earlier texture-input increment.
+
 The traversal's texture activation path now reads its parameters directly from the source object.
 This removes the last three `pktAddVu1ObjAsm` payload stores (`1eabd0`, `1eabd4`, `1eabd8`) that the
 [previous increment](NATIVE_OBJECT_PACKETS.md) retained. The complete per-object builder now emits no

@@ -118,6 +118,7 @@ namespace tmb::graphics
 
     void install(Registry &runtime)
     {
+        tmb::textureInputs::install(runtime);
         runtime.nativeGraphics(&instruction);
         runtime.registerFunction(kFlushObjects, &flushObjects);
         runtime.registerFunction(kWaitView, &waitView);

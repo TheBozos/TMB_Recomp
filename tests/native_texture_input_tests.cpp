@@ -19,7 +19,8 @@ namespace
     {
         bozo::libs::Libraries libs;
         bozo::port::InstructionHandler handler{};
-        bool batch=false,graphics=true;
+        bozo::port::Function upload{};
+        bool batch=false,graphics=true,uploadNative=false;
         std::set<uint32_t> reached;
         bozo::libs::Libraries &libraries() override { return libs; }
         bool nativeGraphics() const override { return graphics; }
@@ -42,14 +43,100 @@ namespace
     uint32_t nextBits(){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;return seed;}
     template<typename T>void put(uint8_t *ram,uint32_t at,T value){std::memcpy(ram+at,&value,sizeof(value));}
     uint32_t word(const uint8_t *ram,uint32_t at){uint32_t value;std::memcpy(&value,ram+at,4);return value;}
+    void uploadCall(uint8_t *ram,R5900Context *ctx,Runtime *rt)
+    {
+        auto &host=*static_cast<Host *>(rt->port);
+        if(host.uploadNative)host.upload(ram,ctx,rt);
+        else pktAddVu1Tex__FP9Vu1DmaPktPUi_0x1ea5c8(ram,ctx,rt);
+    }
     constexpr uint32_t packet=0x30000,control=0x31000,stack=0x40000,gp=0x500000;
     constexpr size_t bytes=0x510000;
     constexpr uint32_t callers[]={0x1d330c,0x1d3340,0x1d2d84,0x1d2db8};
+    void testUploads(Runtime &rt,Host &host)
+    {
+        auto *ram=rt.memory.flat();const auto spr=bozo::GuestMemory::flatOffset(0x70000000,0x4000);
+        constexpr size_t arenaBytes=0x10000;
+        std::array<uint8_t,arenaBytes> input{},expected{};
+        std::array<uint8_t,0x4000> inputScratch{},expectedScratch{};
+        auto full=std::make_unique<uint8_t[]>(bozo::kFlatBytes),before=std::make_unique<uint8_t[]>(bozo::kFlatBytes);
+        const unsigned saved=_mm_getcsr();unsigned cases=0,memoryCases=0,poisonCases=0,fallbackCases=0;
+        constexpr uint32_t aliases[]={0,0x80000000,0xa0000000,0x20000000,0x30000000};
+        for(unsigned mode=0;mode<4;++mode)for(unsigned n=0;n<1024;++n)
+        {
+            for(unsigned i=0;i<arenaBytes;i+=4)put(ram,0x10000+i,nextBits());
+            for(unsigned i=0;i<0x4000;i+=4)put(ram,uint32_t(spr)+i,nextBits());
+            const uint32_t ctrl=n%7==0?0x70000100+4*(n%4):(0x11000+4*(n%4))|aliases[n%5];
+            const uint32_t cursor=n%11==0?0x70000400+4*((n/3)%4):(0x18000+4*((n/3)%4))|aliases[(n/5)%5];
+            const auto ctrlAt=bozo::GuestMemory::flatOffset(ctrl+8,4),outAt=bozo::GuestMemory::flatOffset(cursor&~15u,32);
+            require(ctrlAt>=0&&outAt>=0,"upload fixture address");
+            std::memcpy(ram+ctrlAt,&cursor,4);
+            R5900Context initial;
+            for(unsigned r=1;r<32;++r)for(auto &v:initial.r[r].uw)v=nextBits();
+            for(auto &v:initial.fu)v=nextBits();
+            for(auto &v:initial.vu0_vf)for(auto &b:v.u)b=nextBits();
+            initial.vu0_vf[0]={};initial.vu0_vf[0].u[3]=0x3f800000;
+            initial.hi=nextBits();initial.lo=nextBits();initial.vu0_mac=nextBits();initial.vu0_status=nextBits();
+            initial.cycles=nextBits();initial.checkpoints=nextBits();
+            setRegU32(&initial,4,ctrl);setRegU32(&initial,31,n&64?0x1f947c:0x1f977c);
+            std::memcpy(input.data(),ram+0x10000,arenaBytes);std::memcpy(inputScratch.data(),ram+spr,0x4000);
+            std::array<uint8_t,32> oldOutput;std::memcpy(oldOutput.data(),ram+outAt,32);
+            const unsigned csr=((saved|0x1f80u)&~0xe040u)|(mode<<13)|(n&1?0x8040u:0);
+            auto baseline=initial,native=initial;_mm_setcsr(csr);
+            pktAddVu1Tex__FP9Vu1DmaPktPUi_0x1ea5c8(ram,&baseline,&rt);
+            require(_mm_getcsr()==csr,"original upload changed host FP");
+            std::memcpy(ram+outAt,oldOutput.data(),32);
+            std::memcpy(expected.data(),ram+0x10000,arenaBytes);std::memcpy(expectedScratch.data(),ram+spr,0x4000);
+            if(n%128==0){std::memcpy(full.get(),ram,bozo::kFlatBytes);++memoryCases;}
+            std::memcpy(ram+0x10000,input.data(),arenaBytes);std::memcpy(ram+spr,inputScratch.data(),0x4000);
+            host.upload(ram,&native,&rt);const unsigned after=_mm_getcsr();_mm_setcsr(saved);
+            require(!std::memcmp(&baseline,&native,sizeof(native))&&!std::memcmp(expected.data(),ram+0x10000,arenaBytes)&&
+                    !std::memcmp(expectedScratch.data(),ram+spr,0x4000)&&after==csr&&
+                    (n%128!=0||!std::memcmp(full.get(),ram,bozo::kFlatBytes)),"native upload ABI/memory changed");
+            ++cases;
+            if(n%32==0)
+            {
+                std::memcpy(ram+0x10000,input.data(),arenaBytes);std::memcpy(ram+spr,inputScratch.data(),0x4000);
+                const uint32_t poison=0x10000000+4*(n%4);std::memcpy(ram+ctrlAt,&poison,4);auto c=initial,wanted=baseline;
+                setRegU32(&wanted,2,poison+16);setRegU32(&wanted,3,poison);setRegU32(&wanted,5,poison);setRegU32(&wanted,6,poison);
+                _mm_setcsr(csr);host.upload(ram,&c,&rt);const unsigned actualCsr=_mm_getcsr();_mm_setcsr(saved);
+                require(!std::memcmp(&wanted,&c,sizeof(c))&&word(ram,uint32_t(ctrlAt))==poison+16&&actualCsr==csr&&
+                        !std::memcmp(ram+outAt,oldOutput.data(),32),"inaccessible upload output/ABI changed");
+                ++poisonCases;
+            }
+            if(n%64==0)for(bool historical:{false,true})
+            {
+                host.graphics=!historical;auto c=initial,reference=initial;
+                if(!historical){setRegU32(&c,31,0x123450);setRegU32(&reference,31,0x123450);}
+                std::memcpy(ram+0x10000,input.data(),arenaBytes);std::memcpy(ram+spr,inputScratch.data(),0x4000);
+                pktAddVu1Tex__FP9Vu1DmaPktPUi_0x1ea5c8(ram,&reference,&rt);
+                std::memcpy(expected.data(),ram+0x10000,arenaBytes);std::memcpy(expectedScratch.data(),ram+spr,0x4000);
+                std::memcpy(ram+0x10000,input.data(),arenaBytes);std::memcpy(ram+spr,inputScratch.data(),0x4000);
+                host.upload(ram,&c,&rt);
+                require(!std::memcmp(&c,&reference,sizeof(c))&&!std::memcmp(expected.data(),ram+0x10000,arenaBytes)&&
+                        !std::memcmp(expectedScratch.data(),ram+spr,0x4000),"upload fallback ABI changed");
+                ++fallbackCases;host.graphics=true;
+            }
+        }
+        for(unsigned n=0;n<16;++n)
+        {
+            const uint32_t ctrl=0x11000,cursor=(ctrl+4*(n%5))|aliases[n%5];
+            put(ram,ctrl+8,cursor);R5900Context c;setRegU32(&c,4,ctrl);setRegU32(&c,5,0x1450);
+            setRegU32(&c,31,n&1?0x1f947c:0x1f977c);auto reference=c;
+            std::memcpy(before.get(),ram,bozo::kFlatBytes);
+            pktAddVu1Tex__FP9Vu1DmaPktPUi_0x1ea5c8(ram,&reference,&rt);std::memcpy(full.get(),ram,bozo::kFlatBytes);
+            std::memcpy(ram,before.get(),bozo::kFlatBytes);host.upload(ram,&c,&rt);
+            require(!std::memcmp(&c,&reference,sizeof(c))&&!std::memcmp(full.get(),ram,bozo::kFlatBytes),"overlapping upload fallback changed");
+        }
+        std::printf("native texture uploads: %u leaf cases, %u full-memory checks, %u inaccessible-output cases, %u unknown/historical "
+                    "fallbacks, 16 full-memory overlap fallbacks; CPU/FPU/VU/clock/cursor exact and native output untouched\n",
+                    cases,memoryCases,poisonCases,fallbackCases);
+    }
 }
 int main()
 {
     Host host;bozo::ee::Dispatcher d(host);auto &rt=d.runtime();rt.port=&host;auto *ram=rt.memory.flat();
     tmb::Registry registry;tmb::graphics::install(registry);host.handler=registry.instructionHandler();
+    host.upload=registry.find(0x1ea5c8);rt.functions.setOverride(0x1ea5c8,&uploadCall);
     auto input=std::make_unique<uint8_t[]>(bytes),expected=std::make_unique<uint8_t[]>(bytes);
     auto full=std::make_unique<uint8_t[]>(bozo::kFlatBytes);
     unsigned cases=0,memoryCases=0,poisonCases=0,fallbackCases=0;
@@ -104,13 +191,17 @@ int main()
         setRegU32(&initial,28,gp);setRegU32(&initial,29,stack);setRegU32(&initial,31,caller);
         d.updateLimit(&initial);std::memcpy(input.get(),ram,bytes);
         std::memcpy(ram+packet,ram+source,48); // Published producer, before retirement.
-        auto baseline=initial,native=initial;host.batch=false;
+        auto baseline=initial,native=initial;host.batch=false;host.uploadNative=false;
         const unsigned csr=((saved|0x1f80u)&~0xe040u)|(mode<<13)|(n&1?0x8040u:0);
         _mm_setcsr(csr);texmGetTextureAddrs__FiP6QwDataP9Vu1DmaPkt_0x1f90b0(ram,&baseline,&rt);
         require(_mm_getcsr()==csr,"original changed host FP control");
         std::memcpy(expected.get(),ram,bytes);std::memcpy(expected.get()+packet,input.get()+packet,48);
-        if(n%257==0){std::memcpy(full.get(),ram,bozo::kFlatBytes);std::memcpy(full.get()+packet,input.get()+packet,48);++memoryCases;}
-        std::memcpy(ram,input.get(),bytes);host.batch=true;
+        const uint32_t uploadBytes=word(ram,control+8)-0x32000;
+        require(uploadBytes<=128&&uploadBytes%16==0,"upload extent outside fixture");
+        std::memcpy(expected.get()+0x32000,input.get()+0x32000,uploadBytes);
+        if(n%257==0){std::memcpy(full.get(),ram,bozo::kFlatBytes);std::memcpy(full.get()+packet,input.get()+packet,48);
+            std::memcpy(full.get()+0x32000,input.get()+0x32000,uploadBytes);++memoryCases;}
+        std::memcpy(ram,input.get(),bytes);host.batch=true;host.uploadNative=true;
         texmGetTextureAddrs__FiP6QwDataP9Vu1DmaPkt_0x1f90b0(ram,&native,&rt);
         const unsigned after=_mm_getcsr();_mm_setcsr(saved);
         if(std::memcmp(&baseline,&native,sizeof(native))||std::memcmp(expected.get(),ram,bytes)||after!=csr||
@@ -139,6 +230,7 @@ int main()
             for(bool historical:{false,true})
             {
                 host.graphics=!historical;
+                host.uploadNative=false; // Isolate the original texture-input fallback contract here.
                 std::memcpy(ram,input.get(),bytes);std::memcpy(ram+packet,ram+source,48);
                 auto original=initial;setRegU32(&original,31,0x1d3afc);auto unchanged=original;
                 host.batch=false;texmGetTextureAddrs__FiP6QwDataP9Vu1DmaPkt_0x1f90b0(ram,&original,&rt);
@@ -189,6 +281,7 @@ int main()
         }
     }
     std::printf("native texture inputs: %u full-consumer cases, %u full-memory checks, %u inaccessible-output cases, %u fallback cases; "
-                "%u reconstructed-context/owner cases; all ten sites reached, CPU/context/manager/source/cursors exact outside retired texture output\n",
+                "%u reconstructed-context/owner cases; all ten sites reached, CPU/context/manager/source/cursors exact outside retired texture/upload output\n",
                 cases,memoryCases,poisonCases,fallbackCases,resumedCases);
+    testUploads(rt,host);
 }

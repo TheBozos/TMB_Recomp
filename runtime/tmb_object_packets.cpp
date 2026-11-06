@@ -12,12 +12,12 @@ namespace tmb::packets
 {
     namespace
     {
-        // Shader/header output only. Keep texture payload copies for texmGetTextureAddrs, cursor control+8
-        // and scratchpad cache+94 bookkeeping until that texture consumer is replaced too.
+        // Output only. The traversal's texture consumer now reads the source object directly.
+        // Keep cursor control+8 and scratchpad cache+94 bookkeeping.
         // bozo:native kObjectPacketOutput
         constexpr uint32_t kObjectPacketOutput[] = {
-            0x1eaafc, 0x1eab08, 0x1eab44, 0x1eab48, 0x1eab74, 0x1eabb8,
-            0x1eabf4, 0x1eac2c, 0x1eac30, 0x1eac40, 0x1eac48, 0x1eac54, 0x1eac80,
+            0x1eaafc, 0x1eab08, 0x1eab44, 0x1eab48, 0x1eab74, 0x1eabb8, 0x1eabd0, 0x1eabd4,
+            0x1eabd8, 0x1eabf4, 0x1eac2c, 0x1eac30, 0x1eac40, 0x1eac48, 0x1eac54, 0x1eac80,
             0x1eaca4, 0x1eacb4, 0x1eace4, 0x1eacec, 0x1ead0c, 0x1ead24, 0x1ead3c, 0x1ead54,
             0x1ead94, 0x1ead98, 0x1ead9c, 0x1eadc4, 0x1eae14, 0x1eae18, 0x1eae1c, 0x1eae20,
             0x1eae24, 0x1eae28, 0x1eae54, 0x1eaea0, 0x1eaea8, 0x1eaed0, 0x1eaf00, 0x1eaf68, 0x1eaf78,

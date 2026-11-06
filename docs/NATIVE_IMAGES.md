@@ -4,8 +4,9 @@ BozoEngine's native graphics mode returns zero from `sceGsSetDefLoadImage` and
 `sceGsSetDefStoreImage` without constructing unused image packets or reading the output pointer.
 Generic SDK callers keep their existing output ABI. The shared implementation is
 [`64f6b22`, engine PR #4](https://github.com/TheBozos/BozoEngine/pull/4), contributed by the DC port
-after discussion with TMB and VP2S. TMB pins the merged engine main at `149bf90`, whose source tree
-exactly matches that tested implementation. This does not add image readback support.
+after discussion with TMB and VP2S. The first adoption pinned engine main `149bf90`, whose source tree
+exactly matches that tested implementation. The later graphics-services pin and packet-reader retirement
+are recorded in [`NATIVE_GRAPHICS_SERVICES.md`](NATIVE_GRAPHICS_SERVICES.md). Neither adds image readback support.
 
 TMB's `tmb_textures.cpp::sceGsSetDefLoadImageOverride` still binds resident RTX records and advances
 the ordinal before calling the SDK builder. The shared guard runs after those game-owned updates.

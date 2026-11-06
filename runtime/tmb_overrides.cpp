@@ -36,8 +36,6 @@ namespace tmb::native
     void install();
     void onFrameEnd();
     void onMenuFrameEnd();
-    void patchFlareDepth(uint8_t *rdram, uint32_t image, uint32_t dest);
-    bool flareDepthNative();
     void setGuestMemory(const uint8_t *rdram);
     bool enabled();
 }
@@ -483,59 +481,6 @@ namespace
     // up at the 80-100 ms frames of a slow host. Capped at 40 ms (TMB_MAX_FRAME_MS), they move in slow motion
     // instead when the host cannot keep up. (The cars use the vblank fields: theGameUpdateOverride below.)
     constexpr uint32_t kTimerEndOfRealTimeProcessing = 0x001F67F0u;
-    constexpr uint32_t kSceGsExecStoreImage = 0x002043D8u;
-    constexpr uint32_t kLensFlareTestZbuffer = 0x001DFE00u, kLensFlareTestZbufferEnd = 0x001E01C8u;
-
-    // GS readbacks: the lens flares' Z samples get the native frame's depth (TMB_NATIVE, tmb_native.cpp).
-    void sceGsExecStoreImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
-    {
-        const uint32_t image = getRegU32(ctx, 4), dest = getRegU32(ctx, 5), ra = getRegU32(ctx, 31);
-        // The lens flares' Z samples (particleLensFlareTestZbuffer) from the native renderer's depth, not read back from
-        // the GS: each GS readback made the EE wait for the GS thread and the GS pull its targets' pages off the GPU
-        // (about 11 fps in a match). Samples start far (the flare shows), then take the native depth around the light,
-        // read after the frame before (Renderer::depthAt). TMB_NATIVE_FLARE_DEPTH=0: the GS readback, as before.
-        if (ra >= kLensFlareTestZbuffer && ra < kLensFlareTestZbufferEnd && tmb::native::flareDepthNative())
-        {
-            uint64_t trxreg = 0;
-            for (uint32_t q = 0; q < 7u; ++q)
-                if (rdram[(image + q * 16u + 8u) & 0x1FFFFFFu] == 0x52u)
-                    std::memcpy(&trxreg, rdram + ((image + q * 16u) & 0x1FFFFFFu), 8);
-            const uint32_t bytes = static_cast<uint32_t>((trxreg & 0xFFFu) * ((trxreg >> 32) & 0xFFFu) * 4u);
-            std::memset(rdram + (dest & 0x1FFFFFFu), 0, std::min<uint32_t>(bytes, 0x10000u));
-            tmb::native::patchFlareDepth(rdram, image, dest);
-            setReturnS32(ctx, 0);
-            ctx->pc = ra;
-            return;
-        }
-        bozo::port::callLibrary(runtime, ctx, kSceGsExecStoreImage); // the library (BozoEngine's), not the game's copy
-        // TMB_LOG_STOREIMAGE=1: each GS readback's caller (ra) and first words, every 100th per caller.
-        static const bool s_log = std::getenv("TMB_LOG_STOREIMAGE") != nullptr;
-        if (s_log)
-        {
-            static std::unordered_map<uint32_t, uint32_t> s_calls;
-            if (++s_calls[ra] % 100u == 1u)
-            {
-                uint64_t bitbltbuf = 0, trxreg = 0;
-                for (uint32_t q = 0; q < 7u; ++q)
-                {
-                    uint64_t value;
-                    std::memcpy(&value, rdram + ((image + q * 16u) & 0x1FFFFFFu), 8);
-                    const uint8_t address = rdram[(image + q * 16u + 8u) & 0x1FFFFFFu];
-                    if (address == 0x50u)
-                        bitbltbuf = value;
-                    else if (address == 0x52u)
-                        trxreg = value;
-                }
-                uint32_t first[2];
-                std::memcpy(first, rdram + (dest & 0x1FFFFFFu), sizeof(first));
-                std::fprintf(stderr, "[tmb:storeimage] ra %#x (call %u) sbp %#llx psm %#llx %llux%llu: %08x %08x\n", ra, s_calls[ra],
-                             static_cast<unsigned long long>(bitbltbuf & 0x3FFFu), static_cast<unsigned long long>((bitbltbuf >> 24) & 0x3Fu),
-                             static_cast<unsigned long long>(trxreg & 0xFFFu), static_cast<unsigned long long>((trxreg >> 32) & 0xFFFu), first[0], first[1]);
-            }
-        }
-        if (ra >= kLensFlareTestZbuffer && ra < kLensFlareTestZbufferEnd)
-            tmb::native::patchFlareDepth(rdram, image, dest);
-    }
     constexpr int32_t kFrameTicksGpOffset = -0x2EE4; // timerGetFrameTime's tick count (gp-relative)
     int32_t g_maxFrameTicks = 40 * 576;
 
@@ -1170,8 +1115,6 @@ namespace
         if (const char *maxMs = std::getenv("TMB_MAX_FRAME_MS"); maxMs && *maxMs)
             g_maxFrameTicks = std::max(1, std::atoi(maxMs)) * 576;
         runtime.registerFunction(kTimerEndOfRealTimeProcessing, &timerEndOfRealTimeProcessingOverride);
-        if (tmb::native::enabled())
-            runtime.registerFunction(kSceGsExecStoreImage, &sceGsExecStoreImageOverride);
         g_traceFrames = std::getenv("TMB_TRACE_FRAMES") != nullptr;
         if (const char *substeps = std::getenv("TMB_SUBSTEPS"); substeps && *substeps)
             g_maxSubsteps = std::max(1, std::atoi(substeps));

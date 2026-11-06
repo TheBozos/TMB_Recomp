@@ -44,6 +44,10 @@ parameter packing remained at that step; the published release has not been upda
 named native parameters and retained state, exact complete 1P/4P recordings, and a disc-free numerical suite
 added to Windows/Linux CI. Other macro math, scalar packet builders and legacy extents remain.
 
+[`NATIVE_PROJECTION.md`](NATIVE_PROJECTION.md) covers the next audited screen/weather projection and
+identity boundaries, original helper/generated-caller checks, live comparison counts, and the remaining
+peeling-out W-padding chain behind the raw-RAM differences.
+
 [`NATIVE_GRAPHICS_SERVICES.md`](NATIVE_GRAPHICS_SERVICES.md) records removal of the engine GS device/GIF
 reader state and TMB's old packet-based flare adapter, independent/combined tests and unsupported readback limits.
 

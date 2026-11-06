@@ -100,11 +100,8 @@ int main()
         const uint32_t cursor=word(ram,control+8),cache=word(ram,scratch+0x94);
         std::memcpy(expected.get(),ram+0x10000,arenaBytes);std::memcpy(expectedScratch.data(),ram+spr,0x1000);
         require(std::memcmp(ram+packet,input.get()+packet-0x10000,packetBytes)!=0,"reference did not emit a packet");
-        // Retain the three texture payload copies: the later texture activation helper still consumes them.
-        // Every other packet byte stays untouched; cursor/cache metadata, CPU/FPU state and all other bytes match.
-        const uint32_t textureStart=textures?cache-packet:0,textureBytes=48*textures;
-        for(unsigned i=0;i<packetBytes;++i)if(i<textureStart||i>=textureStart+textureBytes)
-            expected[packet-0x10000+i]=input[packet-0x10000+i];
+        // The texture consumer reads the source object directly: no output packet byte needs to be emitted.
+        std::memcpy(expected.get()+packet-0x10000,input.get()+packet-0x10000,packetBytes);
         if(n%257==0){std::memcpy(full.get(),ram,bozo::kFlatBytes);std::memcpy(full.get()+packet,expected.get()+packet-0x10000,packetBytes);++memoryCases;}
         std::memcpy(ram+0x10000,input.get(),arenaBytes);std::memcpy(ram+spr,inputScratch.data(),0x1000);host.batch=true;
         pktAddVu1ObjAsm_0x1eaae8(ram,&native,&rt);
@@ -119,7 +116,7 @@ int main()
             return 1;
         }
         ++cases;
-        if(!textures&&(n%8==0 || (hasCar&&colour&&!(flags&0x10)&&n%7==0)))
+        if(n%8==0 || (hasCar&&colour&&!(flags&0x10)&&n%7==0))
         {
             // An inaccessible output pointer proves neither a retired store nor tint readback can reach a device.
             constexpr uint32_t poison=0x10000000;
@@ -127,19 +124,18 @@ int main()
             put(ram,control+8,poison);auto poisoned=initial;_mm_setcsr(csr);
             pktAddVu1ObjAsm_0x1eaae8(ram,&poisoned,&rt);const unsigned poisonCsr=_mm_getcsr();_mm_setcsr(saved);
             require(word(ram,control+8)-poison==cursor-packet,"poison cursor extent changed");
-            require(word(ram,scratch+0x94)==cache,"poison cache changed without textures");
+            if(textures)require(word(ram,scratch+0x94)-poison==cache-packet,"poison cache extent changed");
+            else require(word(ram,scratch+0x94)==cache,"poison cache changed without textures");
             require(!std::memcmp(poisoned.fu,baseline.fu,sizeof(baseline.fu))&&poisoned.fcr31==baseline.fcr31&&poisonCsr==csr,
                     "poison pointer changed tint/FPU results");
             require(!std::memcmp(ram+packet,input.get()+packet-0x10000,packetBytes),"poison fixture changed packet storage");
             ++poisonCases;
         }
     }
-    require(host.reached.size()==41,"not all 38 stores and three tint reads were exercised");
-    require(!tmb::packets::owns(0x1eabd0)&&!tmb::packets::owns(0x1eabd4)&&!tmb::packets::owns(0x1eabd8),
-            "texture producer retired before its consumer");
+    require(host.reached.size()==44,"not all 41 stores and three tint reads were exercised");
     host.graphics=false;R5900Context c;
     require(!tmb::packets::instruction(ram,&c,&rt,0x1eaafc),"historical graphics guard");
     require(!tmb::packets::instruction(ram,&c,&rt,0x1ead74),"historical tint guard");
     std::printf("native object packets: %u full-builder comparisons, %u full-memory checks outside retired output, %u inaccessible-output cases; "
-                "all 41 sites reached, CPU/FPU/cursor/cache exact; shader output untouched, texture copies retained\n",cases,memoryCases,poisonCases);
+                "all 44 sites reached, CPU/FPU/cursor/cache exact and output packet untouched\n",cases,memoryCases,poisonCases);
 }

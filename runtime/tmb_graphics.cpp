@@ -6,6 +6,7 @@
 #include "bozo/libs/libraries.h"
 #include "tmb_scene.h"
 #include "tmb_object_packets.h"
+#include "tmb_texture_inputs.h"
 
 #include <algorithm>
 #include <array>
@@ -68,6 +69,7 @@ namespace tmb::graphics
         {
             if (tmb::scene::instruction(ram, ctx, rt, pc)) return true;
             if (tmb::packets::instruction(ram, ctx, rt, pc)) return true;
+            if (tmb::textureInputs::instruction(ram, ctx, rt, pc)) return true;
             if (tmb::math::hudInstruction(ram, ctx, rt, pc)) return true;
             if (tmb::math::vehicleInstruction(ram, ctx, rt, pc)) return true;
             if (!std::binary_search(kSortedGraphicsOutput.begin(), kSortedGraphicsOutput.end(), pc))

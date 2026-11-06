@@ -1,5 +1,9 @@
 # Native object shader output
 
+The subsequent [native texture-input increment](NATIVE_TEXTURE_INPUTS.md) removes the three texture
+copies retained at this step, together with their consumer's packet reads and patches. The evidence
+below records this earlier shader/header increment.
+
 The native mesh path already submits named shader inputs from game/scene records. This increment
 retires 38 scalar/header output stores in `pktAddVu1ObjAsm` (`1eaae8`), alongside the 18 VU payload
 stores retired by the Scene increment. It replaces the three RGB packet readbacks at `1ead74`,
@@ -14,7 +18,7 @@ loops, checkpoints, program choice, cursor at control `+8`, and texture cache po
 
 ## Texture boundary
 
-The three texture payload stores at `1eabd0`, `1eabd4` and `1eabd8` intentionally remain. After traversal,
+At this step the three texture payload stores at `1eabd0`, `1eabd4` and `1eabd8` intentionally remain. After traversal,
 `hier` calls `texmGetTextureAddrs` (`1f90b0`) on those copied records. That helper reads their format
 and may activate a texture, update game texture-manager state and patch the copied texture record.
 Removing that producer alone changes the helper's branches and subsequent draw/sound hashes.
@@ -64,7 +68,8 @@ audio or subjective listening acceptance.
 
 ## Remaining scope
 
-The next dependency is the texture activation/patching consumer above. Alpha link records, scalar
+The texture activation/patching dependency above is addressed by the subsequent native texture-input
+increment linked at the top. Alpha link records, scalar
 builder bookkeeping, source copy loops, legacy packet extents, other mixed graphics builders and
 unconverted VU macro helper callers remain. This is shader-output retirement, not removal of the
 complete builder or all packet code. The earlier player release is unchanged. Full campaign coverage,

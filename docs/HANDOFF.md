@@ -49,8 +49,9 @@ identity boundaries, original helper/generated-caller checks, live comparison co
 peeling-out W-padding chain behind the raw-RAM differences.
 
 [`NATIVE_OBJECT_PACKETS.md`](NATIVE_OBJECT_PACKETS.md) covers retirement of the per-object shader/header
-output and RGB packet readbacks. The three texture copies remain paired with their downstream texture
-activation consumer; that dependency is the next packet-removal boundary.
+output and RGB packet readbacks. [`NATIVE_TEXTURE_INPUTS.md`](NATIVE_TEXTURE_INPUTS.md) covers the subsequent
+removal of its last three texture copies and the consumer's packet reads/patches. Game allocation/usage
+bookkeeping and the separate upload-link builder still execute; no packet shadow or binding is added.
 
 [`NATIVE_GRAPHICS_SERVICES.md`](NATIVE_GRAPHICS_SERVICES.md) records removal of the engine GS device/GIF
 reader state and TMB's old packet-based flare adapter, independent/combined tests and unsupported readback limits.

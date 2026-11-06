@@ -62,5 +62,6 @@ routines and VU0 compatibility state still need wider caller/dataflow replacemen
 These increments do not claim that all VU0 work uses native records yet.
 
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) now covers the collision/height hierarchy's native sphere test,
-audited inverse directions and BSP plane-distance pairs. The renderer hierarchy's coupled matrix/FOV/light
-stack and the other direction/helper callers remain separate work.
+audited inverse directions and BSP plane-distance pairs. [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the
+subsequent coordinated replacement of the renderer hierarchy's coupled matrix/FOV/light stack. Other
+direction/helper callers and VU macro blocks remain.

@@ -18,11 +18,12 @@
 //   against the image as loaded. An object is keyed (file, obj - the file's address).
 // - The object: pktAddVu1ObjAsm (hierTraverseAsm's per-object call; s5 the hierobject, s7 the instance, s0 the
 //   scratchpad cache, a3 "matrix changed", fp the flags' upper half). What the header it builds would put in VU1
-//   memory comes from where the header takes it, the EE's own state: the object-to-camera matrix from VU0 vf1, vf2,
-//   vf3, vf6 (VU 0-3, when a3 says it changed, else the last one), the car's light directions vf7-9 (VU 6-8), the
+//   memory now comes from native scene records: the object-to-camera matrix (when a3 says it changed, else the
+//   last one), the car's light directions, and selected point lights. Historical checker hosts retain the original
+//   VU0 context reads. Remaining per-object parameters come from game records: the
 //   texture offset (obj+0x20 / +0x24 or the instance's float table), depth factor and fog offset (obj+0x2c, +0x28:
 //   VU 4), the colour (obj+0x40 or the float table, times the fade in f20 / f22 and the car's colour: VU 5), the
-//   point lights (VU0 vf10.. after hierTraverseAsm's 0x808: VU 165-175), the fog terms (the scratchpad cache
+//   fog terms (the scratchpad cache
 //   pktCacheForAsm fills: VU 20-21), and the frame's camera, light colours and colour offset (VU 9-21: the constants
 //   block hier__Fi sends at each view, which the game keeps up to date in EE memory). The setup program is chosen
 //   from the flags as pktAddVu1ObjAsm chooses it; the strips' maths are the adapter's (runtime/tmb_vu1_shading.h).
@@ -59,6 +60,7 @@
 #include "tmb_port.h"
 #include "tmb_host.h"
 #include "tmb_meshes.h"
+#include "tmb_scene.h"
 #include "tmb_vu1_shading.h"
 #include "bozo/render/mesh_draw.h"
 #include "bozo/render/mesh_pack.h"
@@ -1113,10 +1115,13 @@ namespace tmb::meshes
             float matrix[4][4];
             if (a3 != 0u)
             {
-                vf(ctx, 1, matrix[0]);
-                vf(ctx, 2, matrix[1]);
-                vf(ctx, 3, matrix[2]);
-                vf(ctx, 6, matrix[3]);
+                if (bozo::port::nativeGraphics(runtime))
+                    std::memcpy(matrix, &tmb::scene::get(runtime).object, sizeof(matrix));
+                else
+                {
+                    vf(ctx, 1, matrix[0]); vf(ctx, 2, matrix[1]);
+                    vf(ctx, 3, matrix[2]); vf(ctx, 6, matrix[3]);
+                }
                 if (opaque)
                     std::memcpy(g_lastMatrix, matrix, sizeof(matrix));
             }
@@ -1128,9 +1133,9 @@ namespace tmb::meshes
             float lights[3][4];
             if (ee.u32(spr + 0x38u) != 0u)
             {
-                vf(ctx, 7, lights[0]);
-                vf(ctx, 8, lights[1]);
-                vf(ctx, 9, lights[2]);
+                if (bozo::port::nativeGraphics(runtime))
+                    std::memcpy(lights, &tmb::scene::get(runtime).objectDirections, sizeof(lights));
+                else { vf(ctx, 7, lights[0]); vf(ctx, 8, lights[1]); vf(ctx, 9, lights[2]); }
                 if (opaque)
                     std::memcpy(g_lastLights, lights, sizeof(lights));
             }
@@ -1192,15 +1197,18 @@ namespace tmb::meshes
                 g_vu.setQw(20, ee.at(spr + (first ? 0x120u : 0x150u)));
                 g_vu.setQw(21, ee.at(spr + (first ? 0x130u : 0x160u)));
             }
-            // VU 165-175: the point lights hierTraverseAsm's 0x808 left in VU0 (vi14 set: some reach the object).
-            const bool pointLights = ee.u32(spr + 0x9cu) != 0u && ctx->vi[14] != 0u;
+            // Selected native point-light records, packed for the existing shading adapter (original context in checker).
+            const bool pointLights = ee.u32(spr + 0x9cu) != 0u && (bozo::port::nativeGraphics(runtime)
+                ? tmb::scene::get(runtime).lighting.enabled : ctx->vi[14] != 0u);
             if (pointLights)
             {
                 const int regs[11] = {10, 18, 12, 13, 14, 15, 16, 20, 21, 22, 28};
                 for (uint32_t q = 0; q < 11u; ++q)
                 {
                     float v[4];
-                    vf(ctx, regs[q], v);
+                    if (bozo::port::nativeGraphics(runtime))
+                        std::memcpy(v, &tmb::scene::get(runtime).lighting.data[q], sizeof(v));
+                    else vf(ctx, regs[q], v);
                     g_vu.setQw(165u + q, v);
                 }
             }
@@ -1505,7 +1513,9 @@ namespace tmb::meshes
                 if (list.pending)
                 {
                     float depth[4];
-                    vf(ctx, 30, depth);
+                    if (bozo::port::nativeGraphics(runtime))
+                        std::memcpy(depth, &tmb::scene::get(runtime).nearRange, sizeof(depth));
+                    else vf(ctx, 30, depth);
                     int32_t bucket = 1;
                     if (depth[0] > 8.0f)
                         bucket = tmb::cvtWS((depth[0] > 1024.0f ? 1016.0f : depth[0]) * 0.125f) + 1;

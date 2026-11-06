@@ -37,6 +37,7 @@
 #include "bozo/app/window.h"
 #include "bozo/ee/dispatcher.h"
 #include "bozo/host/free_host.h"
+#include "tmb_scene.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -223,6 +224,7 @@ int main(int argc, char **argv)
     bozo::app::Game game;
     game.run = [&]
     {
+        tmb::scene::Binding scene(&d.runtime());
         const uint64_t frames = host.run();
         if (device.isOpen())
         {

@@ -19,6 +19,7 @@
 #include "bozo/audio/wav.h"
 #include "bozo/ee/dispatcher.h"
 #include "bozo/host/free_host.h"
+#include "tmb_scene.h"
 #include "bozo/render/renderer.h"
 
 #include <chrono>
@@ -121,6 +122,7 @@ int main(int argc, char **argv)
 
     bozo::host::FreeHost host(opt);
     bozo::ee::Dispatcher d(host);
+    tmb::scene::Binding scene(&d.runtime());
     d.setFunctions(tmb_function_table, tmb_function_count, tmb_resume_table, tmb_resume_count);
     std::string error;
     if (!host.setUp(d, tmb_external_table, tmb_external_count, &registry, error))

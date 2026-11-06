@@ -870,6 +870,20 @@ namespace tmb::twod
             bozo::render::setDisplayPicture(std::move(frame), kFrameWidth, kFrameHeight);
         }
 
+        void completeMoviePicture(uint8_t *rdram, R5900Context *ctx)
+        {
+            g_imageReplaced.store(true, std::memory_order_relaxed);
+            const uint32_t held = getRegU32(ctx, 28) + static_cast<uint32_t>(kImageHeld);
+            if (word(rdram, held) != 0u)
+            {
+                setWord(rdram, held, 0u);
+                SET_GPR_U32(ctx, 4, kVoBuf);
+                ctx->pc = kVoBufDecCount; // tail call: returns to loadImage's caller
+                return;
+            }
+            ctx->pc = getRegU32(ctx, 31);
+        }
+
         void loadImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             std::shared_ptr<const bozo::render::Texture> picture;
@@ -884,7 +898,11 @@ namespace tmb::twod
             }
             if (!on() || !picture)
             {
-                loadImage__FPUi_0x1df838(rdram, ctx, runtime);
+                // Even an empty native presentation completes: there is no GIF interrupt to release its buffer.
+                if (bozo::port::nativeGraphics(runtime))
+                    completeMoviePicture(rdram, ctx);
+                else
+                    loadImage__FPUi_0x1df838(rdram, ctx, runtime);
                 return;
             }
             constexpr float kFrameHeight = 448.0f;
@@ -897,16 +915,7 @@ namespace tmb::twod
             if (!tmb::native::menusDrawn())
                 bozo::render::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
                                                            screen.originY + (kFrameHeight - height) * 0.5f, width, height);
-            g_imageReplaced.store(true, std::memory_order_relaxed);
-            const uint32_t held = getRegU32(ctx, 28) + static_cast<uint32_t>(kImageHeld);
-            if (word(rdram, held) != 0u)
-            {
-                setWord(rdram, held, 0u);
-                SET_GPR_U32(ctx, 4, kVoBuf);
-                ctx->pc = kVoBufDecCount; // tail call: returns to loadImage's caller
-                return;
-            }
-            ctx->pc = getRegU32(ctx, 31); // jr $ra
+            completeMoviePicture(rdram, ctx);
         }
 
         // vblankHandler: the game's, then what handler_endimage did when the transfer it started ended (the GIF DMA end

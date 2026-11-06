@@ -1559,7 +1559,14 @@ namespace tmb::meshes
         {
             if (active() && hookOrder() && getRegU32(ctx, 31) == kHierKickReturn)
                 submitList(g_lists[0]);
-            hierCheckVifComplete__Fv_0x1d47c8(rdram, ctx, runtime);
+            if (bozo::port::nativeGraphics(runtime))
+            {
+                // submitList copied the view into the native renderer. Its game-side queue is immediately reusable.
+                setReturnS32(ctx, 0);
+                ctx->pc = getRegU32(ctx, 31);
+            }
+            else
+                hierCheckVifComplete__Fv_0x1d47c8(rdram, ctx, runtime);
         }
 
         void hier2pFlushDmaOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1568,7 +1575,16 @@ namespace tmb::meshes
             if (active() && hookOrder())
                 submitList(g_lists[0]); // what hier2p built, at its view's turn (nothing is built in between)
             g_inHier2pFlush = false;
-            hier2pFlushDma__Fv_0x1d28f0(rdram, ctx, runtime);
+            if (bozo::port::nativeGraphics(runtime))
+            {
+                const uint32_t gp = getRegU32(ctx, 28);
+                const uint32_t zero = 0;
+                std::memcpy(rdram + gp - 0x35c8u, &zero, 4);
+                std::memcpy(rdram + gp - 0x35c4u, &zero, 4);
+                ctx->pc = getRegU32(ctx, 31);
+            }
+            else
+                hier2pFlushDma__Fv_0x1d28f0(rdram, ctx, runtime);
         }
 
         // At each view hier__Fi sends the constants block (VU 5-8 among it: the light directions until a car sends

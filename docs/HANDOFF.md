@@ -16,7 +16,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 ## Architecture and build
 
 Native graphics DMA/register removal: implementation and validation details are in
-[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `149bf90`, including native graphics completion
+[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `4a8f70a`, including native graphics completion
 and the current shared native port services. The published v0.4.0 package remains the earlier release described above.
 
 The player runtime's two camera matrix products now use typed native records without VU context state.
@@ -31,6 +31,9 @@ the TMB resident-binding audit, exact draw/sound comparisons and movie/loading/g
 
 [`NATIVE_VEHICLE.md`](NATIVE_VEHICLE.md) covers native vehicle spatial calculations and the audited skid
 direction, exact full-frame records, original-caller tests and the remaining multi-step coverage limit.
+
+[`NATIVE_GRAPHICS_SERVICES.md`](NATIVE_GRAPHICS_SERVICES.md) records removal of the engine GS device/GIF
+reader state and TMB's old packet-based flare adapter, independent/combined tests and unsupported readback limits.
 
 - One submodule: `BozoEngine`. No PS2Recomp gitlink, legacy CMake branch, import fallback, IOP recompilation or old runner scripts.
 - `tools/tmb_build.py`: verify → extract → configure → native tools → recompile → packs → compile → stage.

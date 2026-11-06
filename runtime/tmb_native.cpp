@@ -167,9 +167,8 @@ namespace tmb::native
         renderer.setPresentsAlone(true); // the native frame is the whole picture
     }
 
-    // TMB's lens flares (particleLensFlareTestZbuffer) read the GS Z buffer back around each light (a StoreImage of a
-    // few pixels) to see whether something hides it; the native frame's depth stands in for it in a match (from the
-    // frame presented last). TMB_NATIVE_FLARE_DEPTH=0: the samples stay as the caller cleared them (far).
+    // Lens-flare occlusion samples the previous native frame in a match. Disabling this selects the legacy
+    // particle diagnostic, whose unowned SDK readback is explicitly unsupported by the native engine.
     bool flareDepthNative()
     {
         static const bool s_on = []
@@ -180,57 +179,8 @@ namespace tmb::native
         return s_on && enabled() && inMatch();
     }
 
-    void patchFlareDepth(uint8_t *rdram, uint32_t image, uint32_t dest)
-    {
-        if (!flareDepthNative())
-            return;
-        // Deterministic mode: every sample far (as the caller cleared them): the GPU's depth is host timing.
-        if (bozo::det::enabled())
-            return;
-        bozo::render::Renderer &renderer = bozo::render::Renderer::instance();
-        renderer.wantDepth();
-        uint64_t bitbltbuf = 0, trxpos = 0, trxreg = 0;
-        for (uint32_t q = 0; q < 7u; ++q) // the sceGsStoreImage packet: its A+D writes
-        {
-            uint64_t value;
-            std::memcpy(&value, rdram + ((image + q * 16u) & 0x1ffffffu), 8);
-            const uint8_t address = rdram[(image + q * 16u + 8u) & 0x1ffffffu];
-            if (address == 0x50u)
-                bitbltbuf = value;
-            else if (address == 0x51u)
-                trxpos = value;
-            else if (address == 0x52u)
-                trxreg = value;
-        }
-        const uint32_t psm = (bitbltbuf >> 24) & 0x3fu, x0 = trxpos & 0x7ffu, y0 = (trxpos >> 16) & 0x7ffu;
-        const uint32_t width = trxreg & 0xfffu, height = (trxreg >> 32) & 0xfffu;
-        const bool sixteen = psm == 0x32u || psm == 0x3au;
-        if (width == 0u || height == 0u || width * height > 256u || (!sixteen && psm != 0x30u && psm != 0x31u))
-            return;
-        const bozo::render::Screen view = screen();
-        for (uint32_t y = 0; y < height; ++y)
-            for (uint32_t x = 0; x < width; ++x)
-            {
-                uint32_t z = 0;
-                if (!renderer.depthAt(view.originX + static_cast<float>(x0 + x) + 0.5f, view.originY + static_cast<float>(y0 + y) + 0.5f, z))
-                    continue; // not read yet: far
-                const uint32_t at = (dest + (y * width + x) * (sixteen ? 2u : 4u)) & 0x1ffffffu;
-                if (sixteen)
-                {
-                    const uint16_t z16 = static_cast<uint16_t>(std::min<uint32_t>(z >> 8, 0xffffu));
-                    std::memcpy(rdram + at, &z16, 2);
-                }
-                else
-                {
-                    const uint32_t z32 = psm == 0x31u ? std::min<uint32_t>(z, 0xffffffu) : z;
-                    std::memcpy(rdram + at, &z32, 4);
-                }
-            }
-    }
-
-    // The lens flares drawn natively (runtime/tmb_particles.cpp lensFlareTest): the 4 x 4 GS Z samples at a field
-    // pixel (x0, y0 as the game's StoreImage would take them), from the native frame's depth as patchFlareDepth gives
-    // them; a sample not read yet stays 0 (far: the flare shows). False when the native depth is off.
+    // Native lens flares sample a 4 x 4 block at game screen coordinates from the last presented frame.
+    // Missing samples stay far (zero); no image definition or transfer packet is read.
     bool flareDepthBlock(uint32_t x0, uint32_t y0, uint32_t z[16])
     {
         std::fill(z, z + 16, 0u);

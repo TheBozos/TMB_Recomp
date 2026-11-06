@@ -29,6 +29,16 @@ Artifacts are local under `D:/BozoScratch/native-math`; no game data is committe
   per-frame records to the strict run.
 - Against the native graphics main baseline, all 8,500 comparable frame records have identical draw
   hashes, batches, vertices, sound hashes/sample counts, calls, scratchpad, threads and EE cycles.
+- The separate 4P route checks 70,136 transposed and 105,204 full products with zero mismatches.
+  Every one of its 8,500 frames matches the baseline's draw/sound/call/clock/scratchpad/thread fields.
+  A separate default run reproduces all 8,500 strict-run records exactly.
+- With original comparisons disabled, the windowed no-input movie route completes 4,201 frames and
+  the scripted 1P and 4P routes each complete 9,001. Direct captures show the opening movie, menus,
+  vehicle selection and active gameplay, including all four split-screen views after loading. These
+  are bounded smoke checks, not full campaign or console visual-parity acceptance. WAVs contain active
+  output; window logs report 21.8/33.2/34.6 ms of silence respectively, so this is not a flawless
+  device-audio or subjective listening claim. Deterministic sound hashes above are exact.
+- All 12 release-tool tests and eight engine CTest checks pass. Windows and Linux PR CI pass.
 
 ## Known state difference and remaining work
 
@@ -39,6 +49,11 @@ then stores the full vector with W inherited from unrelated earlier VU work. Rem
 register clobbers changes that inherited value. The traced reader is `hierCsUpdateAsm` (`0x201e98`),
 whose camera-position calculation uses XYZ. No shadow VU writes or artificial W restoration are added.
 The tested render/sound/state observations above remain exact; they do not prove every campaign path.
+
+For 4P, RAM hashes start differing at frame 4703. The point-8500 dump has exactly four differing words:
+`0x4a1afc`, `0x4a1b9c`, `0x4a1c3c` and `0x4a1cdc`. These are position.W in four coordinate records;
+the four HUD pointers at `0x23c548..0x23c554` point to those records, and `updateHUDPosition` loads
+that array at `0x13cd1c`. Thus the final 4P snapshot isolates the same inherited-W store for each view.
 
 The vehicle 3x3 helper remains generated. Vehicle calculations, inline HUD transforms, hierarchy routines
 and other VU0 compatibility state still need wider caller/dataflow replacements. This increment removes

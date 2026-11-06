@@ -19,6 +19,10 @@ Native graphics DMA/register removal: implementation and validation details are 
 [`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `5bb4efb`, including native graphics completion
 and the current shared native port services. The published v0.4.0 package remains the earlier release described above.
 
+The player runtime's two camera matrix products now use typed native records without VU context state.
+[`NATIVE_MATH.md`](NATIVE_MATH.md) records exact helper/default-run comparisons, the traced HUD position.W
+RAM difference, and the vehicle/hierarchy/inline VU work that remains.
+
 - One submodule: `BozoEngine`. No PS2Recomp gitlink, legacy CMake branch, import fallback, IOP recompilation or old runner scripts.
 - `tools/tmb_build.py`: verify → extract → configure → native tools → recompile → packs → compile → stage.
 - `scripts/build_runtime.sh` and the other retained shortcuts use that same pipeline.

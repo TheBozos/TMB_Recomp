@@ -11,6 +11,7 @@
 #include "tmb_host.h"
 
 namespace tmb::graphics { void install(Registry &); }
+namespace tmb::math { void install(Registry &); }
 
 #include <algorithm>
 #include <atomic>
@@ -1160,6 +1161,7 @@ namespace
         tmb::meshes::install(runtime);   // rigid objects from the offline mesh pack (runtime/tmb_meshes.cpp)
         tmb::particles::install(runtime); // particles drawn from their structs (runtime/tmb_particles.cpp)
         tmb::graphics::install(runtime); // direct submission/completion; retired graphics MMIO is rejected
+        tmb::math::install(runtime); // matrix records computed natively, with no VU context dependency
         if (const char *trace = std::getenv("TMB_TRACE_HIER"); trace && *trace == '1')
             runtime.registerFunction(kHierDmaHandler, &hierDmaHandlerTrace);
         if (const char *trace = std::getenv("TMB_TRACE_SND"); trace && *trace == '1')

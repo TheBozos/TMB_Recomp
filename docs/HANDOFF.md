@@ -1,5 +1,15 @@
 # TMB on BozoEngine — 2026-11-05
 
+**Release update, 2026-11-06:** [v0.4.0 is published](https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.4.0),
+tagged at `eea175219b1e46a9c1699f640744279650c65a14`, with BozoEngine `9361960`.
+The [tagged release workflow](https://github.com/TheBozos/TMB_Recomp/actions/runs/42133821321) passed and produced
+both player ZIPs, their SHA-256 files, and the corresponding-source ZIP/hash. The publication notification workflow passed too.
+Both downloaded player ZIPs pass the local audit/hash checks and contain the same 7,750 files; all three ZIP hashes
+also match GitHub's asset digests. The published package updated the isolated accented-path portable installation,
+preserved its player-data marker, reported launcher version 0.4.0 and rebuilt/played successfully.
+Final release timing: EE/PC **1.0000**, **575,965 ticks/s**, **59.95 fields/s**, movies **30.00 pictures/s**.
+The approved shared README format is restored. Campaign/hardware/reference-test limits below remain open.
+
 The goal is to remove the PS2Recomp fork from the project. This source tree now builds **only on BozoEngine**.
 The earlier v0.3.2 release remains in Git history and on GitHub for comparison; it is not a runtime dependency.
 
@@ -44,7 +54,8 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 - The **actual v0.3.2 updater** installed the unsuffixed migration ZIP. The subsequent new build removed the retired
   `source/PS2Recomp` marker, preserved player-data sentinels, rebuilt, and started BozoEngine.
   The new updater separately installed its `-bozo.zip` payload into an old-named `TMB_Recomp` folder and preserved its settings marker.
-- These are test candidates, not a published release. No new tag has been pushed.
+- This candidate-validation stage preceded publication; those test candidates were not published releases.
+  The final v0.4.0 delivery is recorded at the top of this document.
 
 ### Final gameplay and profiling checks (2026-11-06)
 

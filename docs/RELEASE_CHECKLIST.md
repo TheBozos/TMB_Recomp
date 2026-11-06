@@ -3,6 +3,10 @@
 Use a scratch `PS2X_USER_DIR` for every automated run. Keep game data and generated code out of Git and release ZIPs.
 Publication is separate from a successful build; this checklist records what was actually verified.
 
+v0.4.0 was published on 2026-11-06 after tagged CI, asset/hash audits and the owner's release request.
+The released portable package was updated, rebuilt and played locally with a scratch user folder. Unchecked items
+remain documented limitations; publication does not turn them into passing checks. See [HANDOFF.md](HANDOFF.md).
+
 ## Source and CI
 
 - [x] TMB's only runtime submodule is `BozoEngine`, pinned to a public, reviewed commit.
@@ -29,7 +33,7 @@ Publication is separate from a successful build; this checklist records what was
 - [x] `TMB_Recomp-<version>-bozo.zip` contains one `TMB_Recomp_Bozo/` folder.
 - [x] `TMB_Recomp-<version>.zip` contains the identical BozoEngine payload under `TMB_Recomp/` for the old launcher's Update path.
 - [x] Both player ZIPs pass the package audit and their SHA-256 checks. Neither contains PS2Recomp or game-derived files.
-- [ ] The corresponding-source ZIP and licences accompany a published release.
+- [x] The corresponding-source ZIP and licences accompany a published release.
 - [x] README and release notes state Windows 10/11, AVX2 + FMA, OpenGL 3.3 and approximately 10 GB free.
 - [x] Extract the player ZIP, then build from the player's USA disc with only its bundled kit, offline.
 - [x] Test a path with spaces/non-ASCII, cancellation/resume, Play, and restart.
@@ -42,6 +46,6 @@ Publication is separate from a successful build; this checklist records what was
 - [ ] On a fresh standard-user Windows installation: SmartScreen/Mark of the Web, Defender, no MSYS2/Python/git/VC++ redist installed.
 - [ ] 150%/200% display scaling and controller interaction checked on real hardware.
 - [ ] Existing saves read correctly; movies, menus and matches feel right to the owner.
-- [ ] Record any remaining limitations explicitly in release notes before publication.
+- [x] Record any remaining limitations explicitly in release notes before publication.
 
 The development PC can verify an isolated source/build-kit flow, but cannot prove the fresh-OS, SmartScreen or real high-DPI checks by itself.

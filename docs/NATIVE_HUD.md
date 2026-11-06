@@ -61,3 +61,9 @@ blocks. RAM hashes differ because the native stores preserve destination W. At p
 `4a19bc`, `4a1a5c`, `4a1c3c`). All are position.W in coordinate records reached through the two HUD
 pointer arrays at `23c548` and `23c558`; the native value is the preserved zero in each. No other RAM
 word differs at those snapshots, and no VU shadow restoration is used.
+
+Windowed default runs complete 4,201 movie/menu frames and 9,001 frames each for 1P and 4P. Captures
+directly show the opening movie and active gameplay after loading, including all split-screen views.
+The window audio logs report 13.6/50.0/6.5 ms of silence respectively; deterministic sound records are
+exact, but this is not a flawless device-audio or subjective listening claim. These are bounded smoke
+checks, not full campaign or console visual-parity acceptance. Windows/Linux CI passes.

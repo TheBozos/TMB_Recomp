@@ -90,4 +90,21 @@ namespace tmb::math
             out.column[3].bits[3] = 0x3f800000u;
         return out;
     }
+
+    inline Vector transformXYZ(Matrix basis, const Vector &input, const Vector *translation)
+    {
+        ArithmeticScope arithmetic;
+        // Fourth components are opaque record payloads here, not numerical inputs or outputs.
+        for (unsigned i = 0; i < 3; ++i) basis.column[i].bits[3] = 0;
+        Vector out = multiply(basis.column[0], broadcast(input.bits[0]));
+        out = add(out, multiply(basis.column[1], broadcast(input.bits[1])));
+        out = add(out, multiply(basis.column[2], broadcast(input.bits[2])));
+        if (translation)
+        {
+            Vector position = *translation;
+            position.bits[3] = 0;
+            out = add(out, multiply(position, broadcast(0x3f800000u)));
+        }
+        return out;
+    }
 }

@@ -9,6 +9,8 @@
 #include <array>
 #include <cstring>
 
+namespace tmb::math { bool hudInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
+
 namespace tmb::graphics
 {
     namespace
@@ -59,8 +61,9 @@ namespace tmb::graphics
             return sites;
         }();
 
-        bool instruction(uint8_t *, R5900Context *ctx, Runtime *rt, uint32_t pc)
+        bool instruction(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t pc)
         {
+            if (tmb::math::hudInstruction(ram, ctx, rt, pc)) return true;
             if (!std::binary_search(kSortedGraphicsOutput.begin(), kSortedGraphicsOutput.end(), pc))
                 return false;
             if (pc == 0x001c18b0u || pc == 0x001c1a78u)

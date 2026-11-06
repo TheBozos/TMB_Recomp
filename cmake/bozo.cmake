@@ -108,6 +108,8 @@ if(TMB_WINDOW)
     target_link_libraries(tmb_runtime PUBLIC bozo_ui)
 endif()
 add_dependencies(tmb_runtime tmb_generated)
+set_source_files_properties("${CMAKE_SOURCE_DIR}/runtime/tmb_native_math.cpp" PROPERTIES
+    COMPILE_OPTIONS "-ffp-contract=off;-frounding-math")
 target_compile_options(tmb_runtime PRIVATE -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable)
 # The draw lists as the reference build (the fork) computed them (the PS2XREF1 `draws` field): it compiled TMB's runtime
 # at -O2 (its RelWithDebInfo flags) and its native renderer library at -O3 (Release), both for AVX2 with FMA, and GCC
@@ -179,6 +181,15 @@ add_executable(tmb-headless bozo/tmb_headless.cpp)
 tmb_native_manifest(tmb-headless)
 target_link_libraries(tmb-headless PRIVATE tmb_runtime tmb_generated bozo_host)
 target_compile_definitions(tmb-headless PRIVATE BOZO_RUN_DEFAULT_ELF="${TMB_ELF}")
+
+# Explicit target: exact native matrix/ABI checks against the owner's generated leaf functions. No disc or game run.
+add_executable(tmb-native-math-tests EXCLUDE_FROM_ALL tests/native_math_tests.cpp)
+target_include_directories(tmb-native-math-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})
+target_compile_options(tmb-native-math-tests PRIVATE -ffp-contract=off -frounding-math)
+target_link_libraries(tmb-native-math-tests PRIVATE tmb_runtime tmb_generated bozo_host)
+if(MINGW)
+    target_link_options(tmb-native-math-tests PRIVATE -static -Wl,--stack,268435456)
+endif()
 if(MINGW)
     target_link_options(tmb-headless PRIVATE -static -Wl,--stack,268435456)
 endif()

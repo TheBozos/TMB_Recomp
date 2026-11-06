@@ -68,3 +68,6 @@ direction/helper callers and VU macro blocks remain.
 
 [`NATIVE_PROJECTION.md`](NATIVE_PROJECTION.md) covers the subsequent native row-wise projection and
 weather identity boundaries, including their original reduction order and caller-specific scope.
+
+[`NATIVE_DIRECTIONS.md`](NATIVE_DIRECTIONS.md) extends native direction math to the three hot BSP
+collision setup callers, with generated-consumer checks and an explicit stack-W boundary.

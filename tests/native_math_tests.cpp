@@ -10,6 +10,7 @@
 #include <memory>
 
 namespace tmb::math { void install(Registry &); }
+void testDirectionCallers();
 namespace
 {
     uint32_t randomState = 0x1928d3a7u;
@@ -93,7 +94,7 @@ int main()
                     setRegU32(&initial, 4, (second | alias) + ((n >> 8u) & 15u));
                     setRegU32(&initial, 6, (output | alias) + (n & 15u));
                 }
-                setRegU32(&initial, 31, helper.direction ? 0x168b30u : 0x0bad0000u);
+                setRegU32(&initial, 31, helper.direction ? tmb::math::directionReturns[n % tmb::math::directionReturns.size()] : 0x0bad0000u);
                 initial.pc = helper.address;
                 R5900Context original = initial, native = initial;
                 // Deliberately vary caller rounding and denormal settings. Native code must restore the whole word.
@@ -133,7 +134,7 @@ int main()
                 }
                 ++cases;
             }
-    // Only the audited skid-mark caller is lowered. Other helper callers keep their original complete ABI.
+    // Other helper callers keep their original complete ABI.
     for (unsigned n = 0; n < 2048; ++n)
     {
         uint8_t *arena = rt->memory.ram() + arenaBase;
@@ -156,6 +157,7 @@ int main()
         if (std::memcmp(arena, expected.data(), expected.size()) || std::memcmp(&original, &native, sizeof(native))) return 2;
     }
     _mm_setcsr(savedControl);
+    testDirectionCallers();
     std::printf("native math tests: %llu original/native cases exact (direction XYZ/preserved-W contract), %llu whole-memory cases; 4 host modes; VU state untouched; 2048 other-caller ABI cases exact\n",
         static_cast<unsigned long long>(cases), static_cast<unsigned long long>(fullMemoryCases));
     return 0;

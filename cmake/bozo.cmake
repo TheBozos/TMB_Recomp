@@ -196,7 +196,7 @@ target_link_libraries(tmb-headless PRIVATE tmb_runtime tmb_generated bozo_host)
 target_compile_definitions(tmb-headless PRIVATE BOZO_RUN_DEFAULT_ELF="${TMB_ELF}")
 
 # Explicit target: exact native matrix/ABI checks against the owner's generated leaf functions. No disc or game run.
-add_executable(tmb-native-math-tests EXCLUDE_FROM_ALL tests/native_math_tests.cpp)
+add_executable(tmb-native-math-tests EXCLUDE_FROM_ALL tests/native_math_tests.cpp tests/native_direction_callers.cpp)
 target_include_directories(tmb-native-math-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})
 target_compile_options(tmb-native-math-tests PRIVATE -ffp-contract=off -frounding-math)
 target_link_libraries(tmb-native-math-tests PRIVATE tmb_runtime tmb_generated bozo_host)

@@ -9,6 +9,9 @@
 
 namespace tmb::math
 {
+    // Audited XYZ-only consumers: skid direction and hdBspNode's collision point/segment setup.
+    inline constexpr std::array<uint32_t, 4> directionReturns{0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc};
+
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };
     enum class Product { TransposedBasis, Full, Basis };

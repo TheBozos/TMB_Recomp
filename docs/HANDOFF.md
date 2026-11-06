@@ -48,6 +48,10 @@ added to Windows/Linux CI. Other macro math, scalar packet builders and legacy e
 identity boundaries, original helper/generated-caller checks, live comparison counts, and the remaining
 peeling-out W-padding chain behind the raw-RAM differences.
 
+[`NATIVE_OBJECT_PACKETS.md`](NATIVE_OBJECT_PACKETS.md) covers retirement of the per-object shader/header
+output and RGB packet readbacks. The three texture copies remain paired with their downstream texture
+activation consumer; that dependency is the next packet-removal boundary.
+
 [`NATIVE_GRAPHICS_SERVICES.md`](NATIVE_GRAPHICS_SERVICES.md) records removal of the engine GS device/GIF
 reader state and TMB's old packet-based flare adapter, independent/combined tests and unsupported readback limits.
 

@@ -23,6 +23,9 @@ The player runtime's two camera matrix products now use typed native records wit
 [`NATIVE_MATH.md`](NATIVE_MATH.md) records exact helper/default-run comparisons, the traced HUD position.W
 RAM difference, and the vehicle/hierarchy/inline VU work that remains.
 
+The six inline HUD point/direction blocks also use native records; [`NATIVE_HUD.md`](NATIVE_HUD.md)
+records the original-block comparisons, destination-W contract and targeting-warning coverage limit.
+
 - One submodule: `BozoEngine`. No PS2Recomp gitlink, legacy CMake branch, import fallback, IOP recompilation or old runner scripts.
 - `tools/tmb_build.py`: verify → extract → configure → native tools → recompile → packs → compile → stage.
 - `scripts/build_runtime.sh` and the other retained shortcuts use that same pipeline.

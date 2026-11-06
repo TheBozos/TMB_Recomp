@@ -40,7 +40,7 @@ Artifacts are local under `D:/BozoScratch/native-math`; no game data is committe
   device-audio or subjective listening claim. Deterministic sound hashes above are exact.
 - All 12 release-tool tests and eight engine CTest checks pass. Windows and Linux PR CI pass.
 
-## Known state difference and remaining work
+## Matrix-only state difference (before native HUD transforms)
 
 This is not a whole-RAM equivalence claim. RAM hashes differ from frame 5594 onward. Full 32 MB dumps
 at gameplay points 5600 and 8500 each differ in exactly one word: `0x4a1f5c`, a HUD coordinate-system
@@ -55,6 +55,7 @@ For 4P, RAM hashes start differing at frame 4703. The point-8500 dump has exactl
 the four HUD pointers at `0x23c548..0x23c554` point to those records, and `updateHUDPosition` loads
 that array at `0x13cd1c`. Thus the final 4P snapshot isolates the same inherited-W store for each view.
 
-The vehicle 3x3 helper remains generated. Vehicle calculations, inline HUD transforms, hierarchy routines
-and other VU0 compatibility state still need wider caller/dataflow replacements. This increment removes
-only the two camera matrix helpers; it does not claim that all VU0 work is native records yet.
+The six inline HUD transforms are now lowered separately; [`NATIVE_HUD.md`](NATIVE_HUD.md) records that
+change's W-preservation contract, validation and limits. The vehicle 3x3 helper, vehicle calculations,
+hierarchy routines and other VU0 compatibility state still need wider caller/dataflow replacements.
+These increments do not claim that all VU0 work uses native records yet.

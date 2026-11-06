@@ -4,6 +4,7 @@
 // The checker host deliberately executes the original instructions for historical call-log comparisons.
 #include "tmb_port.h"
 #include "bozo/libs/libraries.h"
+#include "tmb_scene.h"
 
 #include <algorithm>
 #include <array>
@@ -24,7 +25,7 @@ namespace tmb::graphics
             0x00163a28u, 0x00163a30u, 0x00163a40u, 0x00163a50u,
             0x0018f35cu, 0x0018f368u, 0x0018f374u, 0x0018f384u,
             0x0019f88cu, 0x0019f894u, 0x0019f8a4u, 0x0019f8bcu,
-            // Select the native VU0 calculations directly; there is no microcode upload.
+            // Retired microcode uploads; native scene/overlay hooks own their calculations.
             0x0015e820u, 0x0015e834u, 0x0015e838u, 0x0015e840u,
             0x001c1b58u, 0x001c1b64u, 0x001c1b74u, 0x001c1b88u,
             // Native presentation owns the display buffers and compositing.
@@ -64,20 +65,14 @@ namespace tmb::graphics
 
         bool instruction(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t pc)
         {
+            if (tmb::scene::instruction(ram, ctx, rt, pc)) return true;
             if (tmb::math::hudInstruction(ram, ctx, rt, pc)) return true;
             if (tmb::math::vehicleInstruction(ram, ctx, rt, pc)) return true;
             if (!std::binary_search(kSortedGraphicsOutput.begin(), kSortedGraphicsOutput.end(), pc))
                 return false;
             if (pc == 0x001c18b0u || pc == 0x001c1a78u)
                 setRegU64(ctx, pc == 0x001c18b0u ? 3 : 2, (bozo::port::vblankCount(rt) & 1u) << 13);
-            else if (pc == 0x0015e840u || pc == 0x001d3034u)
-            {
-                auto &vu = bozo::port::libraries(rt).vu0;
-                vu.image = bozo::libs::Vu0Image::Hierarchy;
-                vu.hierarchyHigh = true;
-            }
-            else if (pc == 0x001c1b88u)
-                bozo::port::libraries(rt).vu0.image = bozo::libs::Vu0Image::TwoD;
+            // Native scene calculations have no uploaded image or compatibility VU-program selector.
             return true;
         }
 

@@ -67,8 +67,7 @@ from the regenerated production output and the engine checkout remains clean.
 
 ## Remaining work
 
-The renderer hierarchy's root/child matrix stack, FOV calculations, distance/LOD calculation and point-light
-selection still pass through compatibility VU registers/data memory. Their producers, traversal branches,
-matrix getters/setters and native mesh consumers need a coordinated record-level replacement. Other game
-math helpers and VU macro blocks also remain. This increment does not claim complete VU removal or full
-campaign/console visual parity.
+The subsequent [`NATIVE_SCENE.md`](NATIVE_SCENE.md) increment replaces the renderer hierarchy's root/child
+matrix stack, FOV, distance/LOD and point-light selection together with their producers, accessors and mesh
+consumers. Other game math helpers and VU macro blocks remain. Neither increment claims complete VU
+removal or full campaign/console visual parity.

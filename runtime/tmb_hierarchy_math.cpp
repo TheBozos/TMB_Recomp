@@ -46,7 +46,16 @@ namespace tmb::hierarchy
             if (!bozo::port::nativeGraphics(rt))
             { hdHatSphereTestAsm__FP8_fvectorfT0T0_0x1cf7c0(ram, ctx, rt); return; }
             R5900Context expected;
-            if (check()) { expected = *ctx; hdHatSphereTestAsm__FP8_fvectorfT0T0_0x1cf7c0(ram, &expected, rt); }
+            if (check())
+            {
+                expected = *ctx;
+                auto &vu = bozo::port::libraries(rt).vu0;
+                const auto saved = vu;
+                vu.image = bozo::libs::Vu0Image::Hierarchy; // diagnostic oracle only; no player image selection
+                try { hdHatSphereTestAsm__FP8_fvectorfT0T0_0x1cf7c0(ram, &expected, rt); }
+                catch (...) { vu=saved; throw; }
+                vu=saved;
+            }
             // Preserve the scalar prefix's observable CPU contract, including the shortcut's no-vector-read rule.
             ctx->fu[0] = bozo::load<uint32_t>(ram, ctx, rt, getRegU32(ctx, 28) - 0x4854u);
             bozo::fcompare(ctx, bozo::ps2f::lt(ctx->fu[0], ctx->fu[12]));

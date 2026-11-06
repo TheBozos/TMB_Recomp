@@ -2,6 +2,7 @@
 // Renderer hierarchy records. No processor registers, addressable VU memory or microprogram state.
 #pragma once
 #include "tmb_hierarchy_math.h"
+#include "tmb_shader_parameters.h"
 #include "bozo/runtime.h"
 #include <memory>
 
@@ -11,7 +12,7 @@ namespace tmb::scene
     using Basis = std::array<Vector, 3>;
     struct Frame { Basis rotation{}, outer{}, inner{}, directions{}; bool valid = false; unsigned groups = 0; };
     struct PointLight { Vector sphere{}, direction{}, colour{}; };
-    struct Lighting { std::array<Vector, 11> data{}; bool enabled = false; unsigned count = 0; };
+    using Lighting = shading::PointLighting;
     struct Scene
     {
         Vector viewPosition{}, position{}, sphere{}, nearRange{};
@@ -20,6 +21,7 @@ namespace tmb::scene
         math::Matrix object{};
         Basis objectDirections{};
         Lighting lighting{};
+        shading::RetainedParameters renderer{};
         std::array<PointLight, 8> points{};
         unsigned pointCount = 0, pointWrites = 0, ambientMask = 0, selectedFrame = 0;
         uint32_t nearMargin = 0, outside = 0, inside = 0, distance = 0;

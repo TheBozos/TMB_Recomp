@@ -20,3 +20,27 @@ jobs:
       - name: Shell syntax
         shell: bash
         run: for file in scripts/*.sh; do bash -n "$file" || exit; done
+  native-shader:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-gcc
+      - name: Shader comparisons without game data (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          g++ -std=c++20 -O2 -mavx2 -mfma -Iruntime tests/native_shader_tests.cpp -o shader-tests.exe
+          ./shader-tests.exe
+      - name: Shader comparisons without game data (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          g++ -std=c++20 -O2 -mavx2 -mfma -Iruntime tests/native_shader_tests.cpp -o shader-tests
+          ./shader-tests

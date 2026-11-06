@@ -151,17 +151,18 @@ namespace tmb::scene
             positions[kept]=fromEye;colours[kept]=i==7?colours[0]:light.colour;++kept;
         }
         lighting={};lighting.enabled=kept!=0;lighting.count=kept;
-        for(unsigned row=0;row<3;++row)for(unsigned column=0;column<3;++column)
+        for (unsigned i = 0; i < 4; ++i)
         {
-            lane(lighting.data[row],column,row==column?lane(directions[column],row):moved(lane(directions[column],row)));
-            lane(lighting.data[4+row],column,row==column?lane(positions[column],row):moved(lane(positions[column],row)));
+            auto &light = lighting.lights[i];
+            for (unsigned axis = 0; axis < 3; ++axis)
+            {
+                // Retain the shipped off-diagonal move's rounding, without its transposed storage.
+                light.direction[axis] = axis == i ? lane(directions[i], axis) : moved(lane(directions[i], axis));
+                light.position[axis] = axis == i ? lane(positions[i], axis) : moved(lane(positions[i], axis));
+                light.colour[axis] = lane(colours[i], axis);
+            }
+            light.coneOffset = moved(lane(directions[i], 3));
+            light.attenuation = lane(colours[i], 3);
         }
-        for(unsigned i=0;i<3;++i)lane(lighting.data[3],i,moved(lane(directions[i],3)));
-        for(unsigned i=0;i<3;++i)
-        {
-            lighting.data[7+i]=colours[i];lighting.data[7+i].bits[3]=colours[3].bits[i];
-            lighting.data[10].bits[i]=colours[i].bits[3];
-        }
-        lighting.data[10].bits[3]=colours[3].bits[3];
     }
 }

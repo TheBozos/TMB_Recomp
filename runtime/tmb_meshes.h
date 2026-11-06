@@ -25,7 +25,6 @@ namespace tmb::meshes
     {
         uint32_t setupPc = 0;
         uint32_t resumes = 0; // a resume (setupPc 0xc78): the setup it goes on with, which the stream's must be
-        uint32_t check[24][4] = {}; // VU 0-21, then VU 31, as the hook built them (TMB_NATIVE_MESHES_CHECK: the adapter compares)
         uint32_t frame = 0;
         uint32_t mark = 0;      // TMB_NATIVE_VIF=1: the mark the header carries
         bool alphaList = false; // sent through the depth-sorted alpha list (pktLinkAlphaObjAsm), after the view's opaque ones

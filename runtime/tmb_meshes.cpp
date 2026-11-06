@@ -26,7 +26,7 @@
 //   fog terms (the scratchpad cache
 //   pktCacheForAsm fills: VU 20-21), and the frame's camera, light colours and colour offset (VU 9-21: the constants
 //   block hier__Fi sends at each view, which the game keeps up to date in EE memory). The setup program is chosen
-//   from the flags as pktAddVu1ObjAsm chooses it; the strips' maths are the adapter's (runtime/tmb_vu1_shading.h).
+//   from the flags as pktAddVu1ObjAsm chooses it; the strips' maths are the adapter's (runtime/tmb_shading.h).
 // - Vertex positions from the pack, each pool then read where the game keeps it in the loaded file (the pack gives
 //   its offset: a few meshes, a car's headlight beams among them, have their vertices moved by the game).
 // - Textures by the object's texture numbers (obj+0x50[slot], tmb::textures::lookupId), with the TEX0 the game wrote
@@ -61,7 +61,7 @@
 #include "tmb_host.h"
 #include "tmb_meshes.h"
 #include "tmb_scene.h"
-#include "tmb_vu1_shading.h"
+#include "tmb_shading.h"
 #include "bozo/render/mesh_draw.h"
 #include "bozo/render/mesh_pack.h"
 #include "bozo/render/renderer.h"
@@ -118,11 +118,11 @@ namespace tmb::meshes
         // from here, then VU 9-12, 13-16, 17-20, 21, each block after its STCYCL / UNPACK pair. An EE buffer the game
         // keeps (the camera, plightUpdateParaLights' colours, fogUpdate's terms); no symbol holds it.
         constexpr uint32_t kConstants = 0x002335F0u;
-        constexpr uint32_t kConstVu5 = kConstants + 0x10u;  // VU 5-8
-        constexpr uint32_t kConstVu9 = kConstants + 0x58u;  // VU 9-12
-        constexpr uint32_t kConstVu13 = kConstants + 0xa0u; // VU 13-16
-        constexpr uint32_t kConstVu17 = kConstants + 0xe8u; // VU 17-20
-        constexpr uint32_t kConstVu21 = kConstants + 0x130u; // VU 21
+        constexpr uint32_t kDefaultLightRecords = kConstants + 0x10u;  // VU 5-8
+        constexpr uint32_t kCameraRecord = kConstants + 0x58u;  // VU 9-12
+        constexpr uint32_t kClipCameraRecord = kConstants + 0xa0u; // VU 13-16
+        constexpr uint32_t kLightColourRecords = kConstants + 0xe8u; // VU 17-20
+        constexpr uint32_t kFogRecord = kConstants + 0x130u; // VU 21
 
         bool active()
         {
@@ -252,11 +252,9 @@ namespace tmb::meshes
 
         // ---- per object ----
 
-        // VU1 data memory as the headers leave it, built from the EE state they come from (only what the strip
-        // programs read): the matrix and light directions stay from the last opaque object that sent them.
-        tmb::vu1::VuImage g_vu;
-        float g_lastMatrix[4][4] = {};
-        float g_lastLights[3][4] = {};
+        tmb::shading::RetainedParameters g_checkerRetained;
+        tmb::shading::RetainedParameters &retained(Runtime *runtime)
+        { return bozo::port::nativeGraphics(runtime) ? tmb::scene::get(runtime).renderer : g_checkerRetained; }
 
         // The opaque object sent last (the chain's order), when this path drew it: what the resume (MSCAL 0xc78, the
         // pool-less objects after it) goes on with, its setup, its object-to-screen matrix (vf1-4, before the depth
@@ -267,7 +265,7 @@ namespace tmb::meshes
             uint32_t file = 0, offset = 0, poolFrom = 0, pc = 0;
             float screen[16] = {}, clip[16] = {};
             float object[16] = {}; // its object-to-camera matrix (VU 0-3), for interpolation's parts
-            uint32_t pointLights[11][4] = {};
+            tmb::shading::PointLighting pointLights{};
         } g_previous;
 
         std::unordered_map<uint32_t, Drawn> g_drawn; // mark -> the object's draws
@@ -525,10 +523,11 @@ namespace tmb::meshes
             return true;
         }
 
-        void readConstants(const Ee &ee, uint32_t from, uint32_t firstQw, uint32_t count)
+        template <typename T> T record(const Ee &ee, uint32_t address)
         {
-            for (uint32_t q = 0; q < count; ++q)
-                g_vu.setQw(firstQw + q, ee.at(from + q * 16u));
+            T out;
+            std::memcpy(&out, ee.at(address), sizeof(out));
+            return out;
         }
 
         // The setup pktAddVu1ObjAsm picks for these flags (its upper half, fp), clip state (s6), point lights and
@@ -558,12 +557,12 @@ namespace tmb::meshes
         // The object's strips from the pack, shaded as the setup's strip program shades them.
         // screen: the setup's matrix before the depth factor when it is not this object's (a resume), else null.
         // bones: a skinned object's bone matrices in EE memory (16 floats each), else 0.
-        void buildStrips(const Ee &ee, uint32_t obj, uint32_t fileBase, const MeshObject &object, uint32_t pc, Drawn &out,
+        void buildStrips(const tmb::shading::Parameters &parameters, const Ee &ee, uint32_t obj, uint32_t fileBase, const MeshObject &object, uint32_t pc, Drawn &out,
                          const float *screen = nullptr, uint32_t bones = 0u)
         {
-            const tmb::vu1::Shading mode = pc == 0x0ce8u || pc == 0x0d48u ? tmb::vu1::Shading::Directional
-                                         : pc == 0x1700u ? tmb::vu1::Shading::Point
-                                                         : tmb::vu1::Shading::Unlit;
+            const tmb::shading::Shading mode = pc == 0x0ce8u || pc == 0x0d48u ? tmb::shading::Shading::Directional
+                                         : pc == 0x1700u ? tmb::shading::Shading::Point
+                                                         : tmb::shading::Shading::Unlit;
             // Sprites and ribbons: screen-space vertices, from the setup's matrix without the depth factor (their
             // programs scale z themselves).
             // The lit skinned strips (0x640) do not scale z either; the unlit ones (0x878, 0x9e8) do.
@@ -575,10 +574,10 @@ namespace tmb::meshes
                 std::memcpy(out.matrix, screen, sizeof(out.matrix));
                 if (depthScaled)
                     for (int j = 0; j < 4; ++j)
-                        out.matrix[j * 4 + 2] *= g_vu.f(4, 2);
+                        out.matrix[j * 4 + 2] *= parameters.depthScale;
             }
             else
-                tmb::vu1::objectToScreen(g_vu, out.matrix, depthScaled);
+                tmb::shading::objectToScreen(parameters, out.matrix, depthScaled);
             const float *m = out.matrix;
             const uint32_t positionCount = object.positionCount;
             // x, y, z, w: the pack's, then each pool's from where the game keeps it in the loaded file (the V3-32 data of
@@ -617,7 +616,7 @@ namespace tmb::meshes
                             std::memcpy(delta, deltas + static_cast<size_t>(first + v) * 4u, 12);
                         float *pos = &s_positions[static_cast<size_t>(first + v) * 4u];
                         for (int k = 0; k < 3; ++k)
-                            pos[k] += delta[k] * g_vu.f(31, k);
+                            pos[k] += delta[k] * parameters.morphWeight;
                     }
                     ++g_stats.morphed;
                 }
@@ -628,7 +627,7 @@ namespace tmb::meshes
             const uint32_t params = paramList ? paramList->size / 20u : 0u;
             const uint8_t *paramAt = paramList ? paramList->data : nullptr;
             const bool reflective = pc == 0x1db8u;
-            tmb::vu1::Reflection reflection;
+            tmb::shading::Reflection reflection;
             // A skinned object's vertex pass: each position and its normal blended by its bones' matrices, as they are
             // in EE memory now (the chain sends them from there).
             const MeshSection *skinList = object.section(kSkin);
@@ -643,7 +642,7 @@ namespace tmb::meshes
                     const int count = std::min<int>(v[0], 3);
                     int32_t raw[3];
                     std::memcpy(raw, v + 8, 12);
-                    const float weight[3] = {count == 1 ? 1.0f : tmb::vu1::skinWeight(raw[0]), tmb::vu1::skinWeight(raw[1]), tmb::vu1::skinWeight(raw[2])};
+                    const float weight[3] = {count == 1 ? 1.0f : tmb::shading::skinWeight(raw[0]), tmb::shading::skinWeight(raw[1]), tmb::shading::skinWeight(raw[2])};
                     float matrix[3][16];
                     const float *matrices[3] = {matrix[0], matrix[1], matrix[2]};
                     for (int b = 0; b < 3; ++b)
@@ -651,14 +650,14 @@ namespace tmb::meshes
                     const float n[3] = {1.0f - static_cast<float>(v[1]) / 128.0f, 1.0f - static_cast<float>(v[2]) / 128.0f, 1.0f - static_cast<float>(v[3]) / 128.0f};
                     float *pos = &s_positions[static_cast<size_t>(i) * 4u];
                     const float bind[3] = {pos[0], pos[1], pos[2]};
-                    tmb::vu1::skinVertex(count, matrices, weight, bind, n, pos, &s_skinNormals[static_cast<size_t>(i) * 3u]);
+                    tmb::shading::skinVertex(count, matrices, weight, bind, n, pos, &s_skinNormals[static_cast<size_t>(i) * 3u]);
                 }
             }
             const bool skin = bones != 0u && skinCount == positionCount;
             // The strips (the fork's StripHeader and StripVertex, 16 bytes each).
             p = object.strips;
             const uint32_t strips = object.stripCount;
-            const float uOffset = g_vu.f(4, 0), vOffset = g_vu.f(4, 1);
+            const float uOffset = parameters.textureOffset[0], vOffset = parameters.textureOffset[1];
             // The material as the strip program and the GS keep it: a strip's header brings a texture (its slot's
             // register block) or keeps the last; the setup starts untextured (as the adapter's useMaterial).
             uint64_t tex0 = 0;
@@ -679,7 +678,7 @@ namespace tmb::meshes
                     {
                         float terms[4];
                         std::memcpy(terms, paramAt + 20u * i + 4u, 16);
-                        reflection = tmb::vu1::reflection(terms + 1);
+                        reflection = tmb::shading::reflection(terms + 1);
                     }
                 }
                 const uint16_t prim = rd<uint16_t>(p);
@@ -770,7 +769,7 @@ namespace tmb::meshes
                         }
                         bozo::render::Vertex quad[4];
                         static const int kOrder[6] = {0, 1, 2, 1, 2, 3};
-                        if (tmb::vu1::spriteQuad(g_vu, m, point, rgba, st, quad))
+                        if (tmb::shading::spriteQuad(parameters, m, point, rgba, st, quad))
                             for (int i : kOrder)
                                 triangles.push_back(quad[i]);
                     }
@@ -804,7 +803,7 @@ namespace tmb::meshes
                                 words[2] = words[3] = 0x1000u;
                             }
                         };
-                        tmb::vu1::ribbonStrip<bozo::render::Vertex>(g_vu, m, read, triangles);
+                        tmb::shading::ribbonStrip<bozo::render::Vertex>(parameters, m, read, triangles);
                     }
                     if (s_check)
                         out.checkStrips.emplace_back(triangles.begin() + static_cast<std::ptrdiff_t>(from), triangles.end());
@@ -829,7 +828,7 @@ namespace tmb::meshes
                         }
                         const int32_t normal[3] = {vx[2], vx[3], vx[4]};
                         const int32_t rgba[4] = {vx[6], vx[7], vx[8], vx[9]};
-                        tmb::vu1::reflectVertex(g_vu, m, reflection, positions + static_cast<size_t>(index) * 4u, normal, rgba, outV);
+                        tmb::shading::reflectVertex(parameters, m, reflection, positions + static_cast<size_t>(index) * 4u, normal, rgba, outV);
                         strip.push_back(outV);
                     }
                     const size_t from = batch->vertices.size();
@@ -867,13 +866,13 @@ namespace tmb::meshes
                         outV.y = pos[1];
                         outV.z = pos[2];
                         const uint32_t rgba[4] = {vx[6], vx[7], vx[8], vx[9]};
-                        outV.rgba = tmb::vu1::skinShade(g_vu, pc == 0x0070u, &s_skinNormals[static_cast<size_t>(index) * 3u], rgba);
+                        outV.rgba = tmb::shading::skinShade(parameters, pc == 0x0070u, &s_skinNormals[static_cast<size_t>(index) * 3u], rgba);
                         int16_t st[2];
                         std::memcpy(st, vx + 10, 4);
                         outV.u = static_cast<float>(st[0]) / 4096.0f + uOffset;
                         outV.v = static_cast<float>(st[1]) / 4096.0f + vOffset;
                         const float w = m[3] * pos[0] + m[7] * pos[1] + m[11] * pos[2] + m[15];
-                        outV.fog = tmb::vu1::fogAt(g_vu, w);
+                        outV.fog = tmb::shading::fogAt(parameters, w);
                         strip.push_back(outV);
                     }
                     const size_t from = batch->vertices.size();
@@ -908,13 +907,13 @@ namespace tmb::meshes
                     outV.z = pos[2];
                     const uint32_t normal[3] = {vx[2], vx[3], vx[4]};
                     const uint32_t rgba[4] = {vx[6], vx[7], vx[8], vx[9]};
-                    outV.rgba = tmb::vu1::shade(mode, g_vu, normal, rgba, pos);
+                    outV.rgba = tmb::shading::shade(mode, parameters, normal, rgba, pos);
                     int16_t st[2];
                     std::memcpy(st, vx + 10, 4);
                     outV.u = static_cast<float>(st[0]) / 4096.0f + uOffset;
                     outV.v = static_cast<float>(st[1]) / 4096.0f + vOffset;
                     const float w = m[3] * pos[0] + m[7] * pos[1] + m[11] * pos[2] + m[15];
-                    outV.fog = tmb::vu1::fogAt(g_vu, w);
+                    outV.fog = tmb::shading::fogAt(parameters, w);
                     strip.push_back(outV);
                 }
                 if (s_check)
@@ -1110,6 +1109,8 @@ namespace tmb::meshes
             if (!opaque)
                 g_lists[g_building].pending = false; // until this one is drawn here
 
+            tmb::shading::Parameters parameters;
+            auto &cache = retained(runtime);
             // VU 0-3: the object-to-camera matrix (hierMulEoForObjAsm: vf1-3 the rotation, vf6 the translation),
             // sent when it changed; VU1 keeps the last opaque object's otherwise.
             float matrix[4][4];
@@ -1123,12 +1124,11 @@ namespace tmb::meshes
                     vf(ctx, 3, matrix[2]); vf(ctx, 6, matrix[3]);
                 }
                 if (opaque)
-                    std::memcpy(g_lastMatrix, matrix, sizeof(matrix));
+                    std::memcpy(&cache.opaqueObject, matrix, sizeof(matrix));
             }
             else
-                std::memcpy(matrix, g_lastMatrix, sizeof(matrix));
-            for (uint32_t q = 0; q < 4u; ++q)
-                g_vu.setQw(q, matrix[q]);
+                std::memcpy(matrix, &cache.opaqueObject, sizeof(matrix));
+            std::memcpy(&parameters.object, matrix, sizeof(matrix));
             // VU 6-8: a car's light directions in its own frame (vf7-9), sent when scratchpad 0x38 holds a car.
             float lights[3][4];
             if (ee.u32(spr + 0x38u) != 0u)
@@ -1137,12 +1137,14 @@ namespace tmb::meshes
                     std::memcpy(lights, &tmb::scene::get(runtime).objectDirections, sizeof(lights));
                 else { vf(ctx, 7, lights[0]); vf(ctx, 8, lights[1]); vf(ctx, 9, lights[2]); }
                 if (opaque)
-                    std::memcpy(g_lastLights, lights, sizeof(lights));
+                    for (unsigned i = 0; i < 3; ++i)
+                        for (unsigned axis = 0; axis < 3; ++axis) cache.opaqueDirections[i][axis] = lights[axis][i];
             }
             else
-                std::memcpy(lights, g_lastLights, sizeof(lights));
-            for (uint32_t q = 0; q < 3u; ++q)
-                g_vu.setQw(6u + q, lights[q]);
+                for (unsigned i = 0; i < 3; ++i)
+                    for (unsigned axis = 0; axis < 3; ++axis) lights[axis][i] = cache.opaqueDirections[i][axis];
+            for (unsigned i = 0; i < 3; ++i)
+                for (unsigned axis = 0; axis < 3; ++axis) parameters.directional[i].direction[axis] = lights[axis][i];
 
             // VU 4: texture offset (obj+0x20, +0x24, or the float table's scroll with flag 43), depth factor
             // (obj+0x2c) and fog offset (obj+0x28).
@@ -1153,63 +1155,71 @@ namespace tmb::meshes
                 const int16_t index = ee.s16(obj + field);
                 return index >= 0 ? ee.f32(table + 4u * static_cast<uint32_t>(index)) : otherwise;
             };
-            float vu4[4] = {ee.f32(obj + 0x20u), ee.f32(obj + 0x24u), ee.f32(obj + 0x2cu), ee.f32(obj + 0x28u)};
+            float objectTerms[4] = {ee.f32(obj + 0x20u), ee.f32(obj + 0x24u), ee.f32(obj + 0x2cu), ee.f32(obj + 0x28u)};
             if (haveTable && ((fp >> 11) & 1u))
             {
-                vu4[0] = entry(0x30u, 0.0f);
-                vu4[1] = entry(0x32u, 0.0f);
+                objectTerms[0] = entry(0x30u, 0.0f);
+                objectTerms[1] = entry(0x32u, 0.0f);
             }
-            g_vu.setQw(4, vu4);
+            parameters.textureOffset = {objectTerms[0], objectTerms[1]};
+            parameters.depthScale = objectTerms[2]; parameters.fogOffset = objectTerms[3];
             // VU 5: the colour, times the fade (f20 or f22, by f21 < f20) and the car's colour (CsColor, unless flag 36).
             const float fade = ctx->f[21] < ctx->f[20] ? ctx->f[20] : ctx->f[22];
-            float vu5[4] = {ee.f32(obj + 0x40u), ee.f32(obj + 0x44u), ee.f32(obj + 0x48u), ee.f32(obj + 0x4cu) * fade};
+            float tint[4] = {ee.f32(obj + 0x40u), ee.f32(obj + 0x44u), ee.f32(obj + 0x48u), ee.f32(obj + 0x4cu) * fade};
             if (haveTable)
             {
-                vu5[0] = entry(0x34u, vu5[0]);
-                vu5[1] = entry(0x36u, vu5[1]);
-                vu5[2] = entry(0x38u, vu5[2]);
+                tint[0] = entry(0x34u, tint[0]);
+                tint[1] = entry(0x36u, tint[1]);
+                tint[2] = entry(0x38u, tint[2]);
                 if (ee.s16(obj + 0x3au) >= 0)
-                    vu5[3] = entry(0x3au, 0.0f) * fade;
+                    tint[3] = entry(0x3au, 0.0f) * fade;
             }
             const uint32_t car = ee.u32(spr + 0x38u);
             if (car != 0u && ee.u32(spr + 0x8cu) != 0u && !(fp & 0x10u))
                 for (int k = 0; k < 3; ++k)
-                    vu5[k] *= ee.f32(car + 0x80u + 4u * static_cast<uint32_t>(k));
-            g_vu.setQw(5, vu5);
+                    tint[k] *= ee.f32(car + 0x80u + 4u * static_cast<uint32_t>(k));
+            std::memcpy(&parameters.tint, tint, sizeof(tint));
             // VU 31: a morphing object's weight (flag 42: UNPACK S-32 @31 of the float table's entry obj+0x3c, in every
             // lane), sent only with an instance; VU1 keeps the last one otherwise.
             if (((fp >> 10) & 1u) && haveTable)
             {
                 const int32_t index = ee.s16(obj + 0x3cu);
                 const float weight = ee.f32(table + 4u * static_cast<uint32_t>(index));
-                const float vu31[4] = {weight, weight, weight, weight};
-                g_vu.setQw(31, vu31);
+                cache.morphWeight = weight;
             }
             // VU 9-21: the frame's constants as the game keeps them; VU 20-21 the fog's (pktCacheForAsm's scratchpad
             // cache: flag 41 picks the first set) while the fog is on.
-            readConstants(ee, kConstVu9, 9, 4);
-            readConstants(ee, kConstVu13, 13, 4);
-            readConstants(ee, kConstVu17, 17, 4);
-            readConstants(ee, kConstVu21, 21, 1);
+            parameters.morphWeight = cache.morphWeight;
+            parameters.camera = record<tmb::shading::Matrix>(ee, kCameraRecord);
+            parameters.clipCamera = record<tmb::shading::Matrix>(ee, kClipCameraRecord);
+            for (unsigned i = 0; i < 3; ++i)
+                parameters.directional[i].colour = record<tmb::shading::Vector3>(ee, kLightColourRecords + 16u * i);
+            parameters.colourOffset = record<tmb::shading::Colour>(ee, kLightColourRecords + 48u);
+            parameters.fog = record<tmb::shading::Fog>(ee, kFogRecord);
             if (ee.u32(spr + 0x90u) != 0u)
             {
                 const bool first = (fp >> 9) & 1u;
-                g_vu.setQw(20, ee.at(spr + (first ? 0x120u : 0x150u)));
-                g_vu.setQw(21, ee.at(spr + (first ? 0x130u : 0x160u)));
+                parameters.colourOffset = record<tmb::shading::Colour>(ee, spr + (first ? 0x120u : 0x150u));
+                parameters.fog = record<tmb::shading::Fog>(ee, spr + (first ? 0x130u : 0x160u));
             }
             // Selected native point-light records, packed for the existing shading adapter (original context in checker).
             const bool pointLights = ee.u32(spr + 0x9cu) != 0u && (bozo::port::nativeGraphics(runtime)
                 ? tmb::scene::get(runtime).lighting.enabled : ctx->vi[14] != 0u);
             if (pointLights)
             {
-                const int regs[11] = {10, 18, 12, 13, 14, 15, 16, 20, 21, 22, 28};
-                for (uint32_t q = 0; q < 11u; ++q)
+                if (bozo::port::nativeGraphics(runtime)) parameters.point = tmb::scene::get(runtime).lighting;
+                else // Historical checker ABI only; the native player never reads these registers.
                 {
-                    float v[4];
-                    if (bozo::port::nativeGraphics(runtime))
-                        std::memcpy(v, &tmb::scene::get(runtime).lighting.data[q], sizeof(v));
-                    else vf(ctx, regs[q], v);
-                    g_vu.setQw(165u + q, v);
+                    const auto lane = [&](unsigned reg, unsigned component) { return ctx->vu0_vf[reg].f[component]; };
+                    for (unsigned i = 0; i < 3; ++i)
+                    {
+                        auto &light = parameters.point.lights[i];
+                        light.direction = {lane(10,i), lane(18,i), lane(12,i)};
+                        light.position = {lane(14,i), lane(15,i), lane(16,i)};
+                        light.coneOffset = lane(13,i); light.attenuation = lane(28,i);
+                        for (unsigned k = 0; k < 3; ++k) light.colour[k] = lane(20+i,k);
+                    }
+                    parameters.point.enabled = true; parameters.point.count = 3;
                 }
             }
 
@@ -1322,8 +1332,7 @@ namespace tmb::meshes
             }
             const uint32_t drawPc = resume ? previous.pc : pc;
             if (resume && drawPc == 0x1700u && !pointLights)
-                for (uint32_t q = 0; q < 11u; ++q)
-                    g_vu.setQw(165u + q, previous.pointLights[q]);
+                parameters.point = previous.pointLights;
 
             // TMB_NATIVE_VIF=1 (the adapter follows the stream): the header's last qword, NOP, BASE, OFFSET, MSCAL
             // (pktAddVu1ObjAsm leaves the END tag after it, at the packet's write pointer), gets the mark in the NOP's
@@ -1375,14 +1384,14 @@ namespace tmb::meshes
             {
                 for (int j = 0; j < 4; ++j)
                     for (int i = 0; i < 4; ++i)
-                        object[j * 4 + i] = g_vu.f(j, i);
-                tmb::vu1::objectToScreen(g_vu, screen, false);
+                        object[j * 4 + i] = parameters.object[j][i];
+                tmb::shading::objectToScreen(parameters, screen, false);
                 for (int j = 0; j < 4; ++j)
                     for (int k = 0; k < 4; ++k)
-                        clip[j * 4 + k] = g_vu.f(13, k) * g_vu.f(j, 0) + g_vu.f(14, k) * g_vu.f(j, 1) + g_vu.f(15, k) * g_vu.f(j, 2) +
-                                          g_vu.f(16, k) * g_vu.f(j, 3);
+                        clip[j * 4 + k] = parameters.clipCamera[0][k] * parameters.object[j][0] + parameters.clipCamera[1][k] * parameters.object[j][1] + parameters.clipCamera[2][k] * parameters.object[j][2] +
+                                          parameters.clipCamera[3][k] * parameters.object[j][3];
             }
-            buildStrips(ee, obj, fileBase, *it, drawPc, drawn, screen, it->kind == 4u ? bones : 0u);
+            buildStrips(parameters, ee, obj, fileBase, *it, drawPc, drawn, screen, it->kind == 4u ? bones : 0u);
             std::memcpy(drawn.clip, clip, sizeof(clip));
             drawn.hasClip = !drawn.screenSpace && it->kind != 4u; // (the skinned programs: not modelled)
             // For interpolation (Renderer::setParts): the matrix as camera (VU 9-12, the view's projection, its z row
@@ -1393,7 +1402,7 @@ namespace tmb::meshes
                 const bool depthScaled = drawPc != 0x0070u;
                 for (int i = 0; i < 4; ++i)
                     for (int k = 0; k < 4; ++k)
-                        drawn.partCamera[i * 4 + k] = g_vu.f(9 + i, k) * (k == 2 && depthScaled ? g_vu.f(4, 2) : 1.0f);
+                        drawn.partCamera[i * 4 + k] = parameters.camera[i][k] * (k == 2 && depthScaled ? parameters.depthScale : 1.0f);
                 std::memcpy(drawn.partObject, object, sizeof(object));
                 drawn.hasParts = true;
             }
@@ -1408,7 +1417,7 @@ namespace tmb::meshes
                 std::memcpy(g_previous.screen, screen, sizeof(screen));
                 std::memcpy(g_previous.clip, clip, sizeof(clip));
                 std::memcpy(g_previous.object, object, sizeof(object));
-                std::memcpy(g_previous.pointLights, &g_vu.words[165u * 4u], sizeof(g_previous.pointLights));
+                g_previous.pointLights = parameters.point;
             }
             // Its key for interpolation (Renderer::setKey): the object (file, offset) and its instance (two cars of one model
             // apart), with how many had both before it this frame (a model placed several times, the views of a split
@@ -1431,12 +1440,6 @@ namespace tmb::meshes
                                  opaque ? "" : " alpha");
                 }
             }
-            for (uint32_t q = 0; q < 22u; ++q)
-                for (int k = 0; k < 4; ++k)
-                    drawn.check[q][k] = g_vu.w(q, k);
-            for (int k = 0; k < 4; ++k)
-                drawn.check[22][k] = g_vu.w(31, k); // a morphing object's weight
-
             if (marking)
             {
                 const uint32_t mark = g_nextMark;
@@ -1605,8 +1608,10 @@ namespace tmb::meshes
             if (!active())
                 return;
             const Ee ee{rdram, bozo::port::scratchpad(runtime)};
-            for (uint32_t q = 0; q < 3u; ++q)
-                std::memcpy(g_lastLights[q], ee.at(kConstVu5 + 16u + q * 16u), 16);
+            auto &cache = retained(runtime);
+            for (unsigned light = 0; light < 3; ++light)
+                for (unsigned axis = 0; axis < 3; ++axis)
+                    cache.opaqueDirections[light][axis] = ee.f32(kDefaultLightRecords + 16u + axis * 16u + light * 4u);
             g_previous.valid = false;
             // A view before it whose chain hier__Fi did not kick (the menus send theirs with the frame): its objects first.
             if (hookOrder())

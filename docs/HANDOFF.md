@@ -38,7 +38,11 @@ inverse transforms and BSP plane distances, their original-caller tests and RAM 
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader
-parameter packing remain; the published release has not been updated by these source changes.
+parameter packing remained at that step; the published release has not been updated by these source changes.
+
+[`NATIVE_SHADERS.md`](NATIVE_SHADERS.md) covers removal of the mesh shader's `VuImage` and point-light packing,
+named native parameters and retained state, exact complete 1P/4P recordings, and a disc-free numerical suite
+added to Windows/Linux CI. Other macro math, scalar packet builders and legacy extents remain.
 
 [`NATIVE_GRAPHICS_SERVICES.md`](NATIVE_GRAPHICS_SERVICES.md) records removal of the engine GS device/GIF
 reader state and TMB's old packet-based flare adapter, independent/combined tests and unsupported readback limits.

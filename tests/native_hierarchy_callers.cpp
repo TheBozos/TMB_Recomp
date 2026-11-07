@@ -58,7 +58,9 @@ namespace
     };
 
     constexpr uint32_t base = 0x10000, bytes = 0x40000, globals = 0x4c0000, globalBytes = 0xa0000;
-    constexpr uint32_t debug = 0x7484f0, debugBytes = 0xd0; // actual terrain debug-line producer records
+    constexpr uint32_t debug = 0x7484f0, debugBytes = 0x220; // actual terrain line/GS-line producer records
+    constexpr std::pair<uint32_t,uint32_t> regions[] = {{base,bytes},{globals,globalBytes},{debug,debugBytes},{0x66fcc4,4}};
+    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4;
     constexpr uint32_t gp = 0x40000, sp = 0x30000;
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
@@ -114,17 +116,23 @@ void testHierarchyHelperCallers()
     const auto inverse = registry.find(0x1da1e8), direction = registry.find(0x1da298);
     require(inverse && direction, "missing hierarchy leaves");
     auto *ram = rt->memory.flat();
-    auto input = std::make_unique<uint8_t[]>(bytes + globalBytes + debugBytes), expected = std::make_unique<uint8_t[]>(bytes + globalBytes + debugBytes);
+    auto input = std::make_unique<uint8_t[]>(fixtureBytes), expected = std::make_unique<uint8_t[]>(fixtureBytes);
     auto whole = std::make_unique<uint8_t[]>(bozo::kFlatBytes);
     const auto word = [&](uint32_t at, uint32_t value) { std::memcpy(ram + at, &value, 4); };
     const auto fill = [&] {
-        for (auto region : {std::pair{base, bytes}, std::pair{globals, globalBytes}, std::pair{debug, debugBytes}})
+        for (auto region : regions)
             for (uint32_t i = 0; i < region.second; i += 4)
             { const float f = float(int(bits() % 8193) - 4096) / 128.f; std::memcpy(ram + region.first + i, &f, 4); }
     };
-    const auto snapshot = [&](uint8_t *out) { std::memcpy(out, ram + base, bytes); std::memcpy(out + bytes, ram + globals, globalBytes); std::memcpy(out + bytes + globalBytes, ram + debug, debugBytes); };
-    const auto restore = [&] { std::memcpy(ram + base, input.get(), bytes); std::memcpy(ram + globals, input.get() + bytes, globalBytes); std::memcpy(ram + debug, input.get() + bytes + globalBytes, debugBytes); };
-    const auto dataEqual = [&] { return !std::memcmp(expected.get(), ram + base, bytes) && !std::memcmp(expected.get() + bytes, ram + globals, globalBytes) && !std::memcmp(expected.get() + bytes + globalBytes, ram + debug, debugBytes); };
+    const auto snapshot = [&](uint8_t *out) {
+        for (auto [at,size] : regions) { std::memcpy(out,ram + at,size); out += size; }
+    };
+    const auto restore = [&] {
+        const auto *in=input.get(); for (auto [at,size] : regions) { std::memcpy(ram + at,in,size); in += size; }
+    };
+    const auto dataEqual = [&] {
+        const auto *in=expected.get(); for (auto [at,size] : regions) { if (std::memcmp(in,ram + at,size)) return false; in += size; } return true;
+    };
     constexpr uint32_t callers[] = {0x1d0de0, 0x1d0dfc, 0x1d12d8, 0x1d4b94,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, 0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804,
         0x1cd400, 0x1cd768, 0x1cbbc8, 0x1cbc2c, 0x1cc634, 0x1cc6b4,
@@ -142,8 +150,9 @@ void testHierarchyHelperCallers()
         0x1f11a8, 0x1f11ec, 0x1f1b88, 0x1f1c38,
         0x1f2480, 0x1f24c0, 0x1f2e4c, 0x1f2ef8, 0x1f3110, 0x1f315c,
         0x1c8f10, 0x1c8f3c, 0x1c8fd8, 0x1c9000, 0x1c908c, 0x1c90b4,
-        0x1c9140, 0x1c9168, 0x1c91f4, 0x1c921c, 0x1c959c, 0x1c96e8, 0x1d4514, 0x1d4560};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96); };
+        0x1c9140, 0x1c9168, 0x1c91f4, 0x1c921c, 0x1c959c, 0x1c96e8, 0x1d4514, 0x1d4560,
+        0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || kind >= 111; };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -636,13 +645,56 @@ void testHierarchyHelperCallers()
                 if (which < 10) ram[0x18000 + 0x130 + pair*0x40]=uint8_t(n & 1);
                 word(sp + 0x0c,bits()); word(sp + 0x1c,bits());
             }
-            else
+            else if (kind < 111)
             {
                 // Actual view lookup and XYZ addition; initialized nodes return, new nodes reach FX creation.
                 continuation = resume_0x1d4498; services.stop = kind == 109 ? 0xffffffff : 0x1e6980;
                 reg(5,sp); reg(6,sp + 0x10); reg(16,sp + 0x10); reg(17,0x14000);
                 setRegU32(&initial,19,n%4); word(0x4dfcd0 + (n%4)*16,address(0x18000));
                 word(sp + 0x1c,bits()); returnAt(0x70);
+            }
+            else if (kind < 117)
+            {
+                // Paired inverse/world sums through actual line, GS-line or box vertex construction.
+                const unsigned which=kind-111, group=which/2;
+                continuation = group == 0 ? resume_0x1f53e0 : group == 1 ? resume_0x1f54b8 : resume_0x1f55a0;
+                services.stop = 0x1c1e00;
+                reg(4,0x14000); reg(5,which & 1 ? 0x16000 : 0x15000); reg(6,which & 1 ? sp + 0x10 : sp);
+                reg(16,0x14000); reg(17,0x16000); reg(18,sp + 0x10); reg(19,0x17000); reg(20,0x18000);
+                word(0x1400c,bits()); word(0x1700c,bits()); word(0x1800c,bits());
+            }
+            else if (kind == 117)
+            {
+                // Complete terrain edit tail: integer cell selection, protection flag and real no-input polls.
+                continuation = resume_0x1f5678; returnAt(0x20);
+                reg(4,0x14040); reg(5,0x16000); reg(6,sp); word(gp - 0x33c8,address(0x14000));
+                std::memset(ram + 0x14040,0,48); word(0x14040,0x3f800000); word(0x14054,0x3f800000); word(0x14068,0x3f800000);
+                word(0x14080,address(0x19000)); const uint16_t stride=9; std::memcpy(ram + 0x14090,&stride,2);
+                for (unsigned i=0;i<81;++i) {
+                    const uint16_t height=uint16_t(n*521+i), flags=n & 1 ? 0x100 : 0;
+                    std::memcpy(ram + 0x19000+i*8,&height,2); std::memcpy(ram + 0x19006+i*8,&flags,2);
+                }
+                word(0x66fcc4,0); // actual inputGetInput disabled-device branch, no synthetic completion
+                constexpr uint32_t edge[] = {0,1,0x3f7fffff,0x3f800000,0x3f800001,0x40dfffff,0x40e00000,0x40e00001};
+                word(0x16000,edge[n%8]); word(0x16004,edge[(n>>3)%8]); word(0x16008,0x3f800000);
+            }
+            else
+            {
+                // Real wave-type table: bound builders stop at timer input, special types at their actual subcall.
+                continuation = resume_0x1f5898;
+                const unsigned type=n%6, index=(n>>3)%4; const uint32_t wave=0x4ce890+index*0x3b0;
+                services.stop = type == 2 ? 0x1f5c38 : type == 3 ? 0x1dc248 : 0x1f6a28;
+                reg(4,0x14040); reg(5,0x16000); reg(6,wave+0x10); reg(16,wave); reg(20,0x4d0000);
+                setRegU32(&initial,17,type); setRegU32(&initial,18,index); word(wave+0x60,address(0x14000)); word(wave+4,type);
+                constexpr uint32_t targets[] = {0x1f5994,0x1f5994,0x1f595c,0x1f5974,0x1f5994,0x1f5994};
+                for (unsigned i=0;i<6;++i) word(0x4f34d0+4*i,targets[i]);
+                constexpr uint32_t radii[] = {0,0x3e800000,0x3f000000,0x3f800000,0x41180000,0x41280000};
+                initial.fu[20]=radii[(n>>2)%6]; initial.fu[21]=0x3f000000;
+                if (n < 32) {
+                    std::memset(ram + 0x14040,0,48); word(0x14040,0x3f800000); word(0x14054,0x3f800000); word(0x14068,0x3f800000);
+                    constexpr uint32_t edge[] = {0,0x3f7fffff,0x3f800000,0x3f800001,0xbf7fffff,0xbf800000,0xbf800001,0x3f000000};
+                    word(0x16000,edge[n%8]); word(0x16004,edge[(n>>2)%8]);
+                }
             }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {

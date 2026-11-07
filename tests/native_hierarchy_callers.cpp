@@ -29,12 +29,13 @@ namespace
     struct SegmentEnd {};
     struct Services : bozo::RuntimeServices
     {
-        unsigned yields = 0;
+        unsigned yields = 0, randomCalls = 0;
         uint32_t stop = 0x1eeafc;
         // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
         void yield(uint8_t *, R5900Context *ctx, Runtime *) override
         {
             require(++yields < 4096, "caller did not reach segment end");
+            if (ctx->pc == 0x21d228) ++randomCalls;
             if (ctx->pc == stop) throw SegmentEnd{};
         }
         [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
@@ -156,8 +157,8 @@ void testHierarchyHelperCallers()
         0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904,
         0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8,
         0x15e1b8, 0x1b42c8, 0x1b430c, 0x1b43a8, 0x1b4434, 0x1b44c0,
-        0x150bc8, 0x150cc0, 0x150d2c, 0x150d98};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || kind == 135; };
+        0x150bc8, 0x150cc0, 0x150d2c, 0x150d98, 0x108d6c, 0x109870, 0x1099a0};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || kind >= 135; };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -178,6 +179,7 @@ void testHierarchyHelperCallers()
             // Arbitrary opaque payloads must survive native forward outputs without affecting XYZ consumers.
             word(0x1101c, bits()); word(sp + 0x1c, bits()); word(sp + 0x2c, bits()); word(sp + 0x4c, bits());
             RecompiledFunction continuation; services.stop = 0xffffffff; bool fromEntry = false;
+            int expectedSelection = -1;
             if (kind < 2)
             {
                 continuation = resume_0x1d0988; services.stop = 0x1da428;
@@ -809,7 +811,7 @@ void testHierarchyHelperCallers()
                     fromEntry=true; initial.pc=0x1b429c; setRegU32(&initial,2,1+n%3);
                 }
             }
-            else
+            else if (kind <= 135)
             {
                 // Complete tow-truck launcher tail: smoothing, local direction, normalization, matrix and material publication.
                 constexpr uint32_t launcher=0x18000, vehicle=0x1b000, launcherCs=0x1c000, vehicleCs=0x1d000;
@@ -854,9 +856,73 @@ void testHierarchyHelperCallers()
                     else { initial.pc=0x150d14; initial.fu[0]=tilt[n%4]; } // Actual final smoothed-Z publication.
                 }
             }
+            else
+            {
+                // Attractor selection and world positions through their complete real consumers and producer entry calls.
+                constexpr uint32_t object=0x18000, point=0x1b000, output=0x1d000, group=0x1a000;
+                const auto rect = [&](unsigned id, uint32_t x, uint32_t y, int angle) {
+                    const uint32_t at=group+id*0x100;
+                    word(object+8+id*4,address(at)); word(at,x); word(at+4,y); word(at+8,0);
+                    word(at+0x10,0x40800000); word(at+0x14,0x40800000); word(at+0x1c,uint32_t(angle));
+                };
+                reg(4,sp); reg(5,sp+0x40); reg(6,sp+0x50); reg(16,sp+0x40);
+                word(sp+0x0c,bits()); word(sp+0x4c,bits()); word(sp+0x5c,bits()); word(output+0x0c,bits());
+                word(gp-0x7c14,0x40490fdb); word(gp-0x7bfc,0x40490fdb); word(gp-0x7bf8,0x40490fdb);
+                initial.fu[20]=0;
+                if (kind == 136) {
+                    continuation=resume_0x108c60; returnAt(0xf0);
+                    reg(17,object+8+3*4); reg(18,object); reg(19,point); reg(23,object+8); reg(30,object+0x128);
+                    setRegU32(&initial,20,3); setRegU32(&initial,21,0); setRegU32(&initial,22,0);
+                    word(object+0x250,3); word(object+0x128,3); word(object+0x12c,1); word(object+0x130,2);
+                    rect(3,0,0,(n/12)&1 ? -30 : 30); rect(1,0x41200000,0x41200000,0);
+                    rect(2,0xc1200000,0xc1200000,-30);
+                    word(point,0x40000000); word(point+4,0x40000000); word(point+8,0x3f800000);
+                    if (n < 32) {
+                        // Literal strict-boundary cases at a helper boundary, with an identity basis.
+                        constexpr uint32_t xy[][2]={{0x40000000,0x40000000},{0,0x40000000},
+                            {0x40800000,0x40000000},{0x40000000,0},{0x40000000,0x40800000},
+                            {0xbf800000,0x40000000},{0x40a00000,0x40000000},{0x40000000,0xbf800000},
+                            {0x40000000,0x40a00000},{0x80000000,0x40000000},
+                            {0x407fffff,0x40000000},{0x40800001,0x40000000}};
+                        for (unsigned c=0;c<3;++c) for (unsigned r=0;r<3;++r) word(sp+16*c+4*r,c==r ? 0x3f800000 : 0);
+                        word(sp+0x40,xy[n%12][0]); word(sp+0x44,xy[n%12][1]); word(sp+0x48,0x3f800000);
+                        expectedSelection=n%12 == 0 || n%12 == 10 ? 3 : 0;
+                    }
+                    if (n >= 64) {
+                        fromEntry=true; initial.pc=0x108c60; reg(4,object); reg(5,point); setRegU32(&initial,31,0xbad0000);
+                        const unsigned scenario=(n-64)%12; expectedSelection=0;
+                        if (scenario==0 || scenario==9) word(object+0x250,scenario==0 ? 0 : 0xffffffff);
+                        else if (scenario==1 || scenario==10) word(point+8,scenario==1 ? 0 : 0xbf800000);
+                        else if (scenario==2 || scenario==7) { expectedSelection=3; if (scenario==7) rect(1,0,0,0); }
+                        else if (scenario==3) { word(point,0); word(point+4,0); }
+                        else if (scenario==4) { rect(3,0,0,0); word(point,0); }
+                        else if (scenario==5 || scenario==11) {
+                            rect(3,0,0,0); word(point,scenario==5 ? 0x40800000 : 0x407fffff);
+                            word(point+4,0x40800000); expectedSelection=3;
+                        } else if (scenario==6) { word(point,0x41400000); word(point+4,0x41400000); expectedSelection=1; }
+                        else {
+                            rect(3,0x42c80000,0x42c80000,30); rect(1,0xc2c80000,0xc2c80000,-30);
+                            rect(2,0,0,30); expectedSelection=2;
+                        }
+                    }
+                } else {
+                    continuation=kind == 137 ? resume_0x1097c8 : resume_0x1098e8; returnAt(0x90);
+                    reg(17,group); reg(18,output); word(object+8,address(group));
+                    word(group,0x41200000); word(group+4,0x41a00000); word(group+8,0x41f00000);
+                    constexpr uint32_t extent[]={0,0x3f800000,0x40800000,0xc0800000};
+                    word(group+0x10,extent[n%4]); word(group+0x14,extent[(n/4)%4]);
+                    word(group+0x1c,n%4 == 0 ? 0 : n&1 ? 30 : uint32_t(-30));
+                    // The actual generated rand uses guest-backed state, restored with all other fixture memory.
+                    word(0x4e429c,address(0x17000)); word(0x17058,bits());
+                    if (n >= 64) {
+                        fromEntry=true; initial.pc=kind == 137 ? 0x1097c8 : 0x1098e8;
+                        reg(4,object); reg(5,output); setRegU32(&initial,6,0); setRegU32(&initial,31,0xbad0000);
+                    }
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
-                referenceW.clear(); services.yields = 0;
+                referenceW.clear(); services.yields = services.randomCalls = 0;
                 rt->functions.setOverride(0x1da1e8, native ? inverse : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? direction : referenceDirection);
                 auto helper = isInverse(kind) ? (native ? inverse : referenceInverse) : (native ? direction : referenceDirection);
@@ -870,14 +936,17 @@ void testHierarchyHelperCallers()
             try { run(false, a); }
             catch (...) { std::fprintf(stderr, "hierarchy original kind %u case %u\n", kind, n); throw; }
             const auto refControl = _mm_getcsr(); const auto refYields = services.yields;
-            // The tow-truck inverse replaces the shared temporary completely: no forward-W exclusion is needed.
-            if (kind >= 132) require(referenceW.empty(), "tow-truck consumer left opaque forward W unconsumed");
+            const auto refRandomCalls = services.randomCalls;
+            if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
+            if (expectedSelection >= 0) require(getRegU32(&a,2) == uint32_t(expectedSelection), "original attractor boundary selection");
+            // Tow-truck and attractor consumers need no forward-W exclusion.
+            if (kind >= 132) require(referenceW.empty(), "complete consumer left opaque forward W unconsumed");
             // Normalize only forward-output W after all real consumers have run, exposing any W-dependent result.
             for (auto patch : referenceW) std::memcpy(ram + patch.offset, &patch.value, 4);
             const bool wholeCase=n < 4 || (fromEntry && n < 68);
             snapshot(expected.get()); if (wholeCase) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
             restore(); _mm_setcsr(control); run(true, b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
-            if (!cpuEqual(a,b) || !vuUntouched(initial,b) || after != refControl || services.yields != refYields || !dataEqual() ||
+            if (!cpuEqual(a,b) || !vuUntouched(initial,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;

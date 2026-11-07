@@ -44,6 +44,9 @@ transforms, with complete cached-height vertex loops and actual height-query XYZ
 [`NATIVE_TOW_TRUCK.md`](NATIVE_TOW_TRUCK.md) adds the tow-truck launcher's forward/inverse transforms,
 with complete positioning, smoothing, normalization, orientation and material-publication consumers.
 
+[`NATIVE_ATTRACTOR_GROUPS.md`](NATIVE_ATTRACTOR_GROUPS.md) adds group-selection, center and random-position
+inverse transforms, with complete consumers, seeded generated producers and an audited peel-out W boundary.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

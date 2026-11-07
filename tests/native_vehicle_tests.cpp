@@ -165,6 +165,11 @@ int main()
             constexpr uint32_t vehicle = 0x10000, stack = 0x20000;
             const uint32_t cs = n % 3u == 0 ? 0x30000 : vehicle + (n % 3u == 1 ? 0x480 : 0x4c0);
             std::memcpy(callerInput.get() + 0x2018, &cs, 4);
+            if (n < 32) {
+                // Observed peel-out W payloads must not affect the complete coordinate-system consumer.
+                constexpr uint32_t peelingW[] = {0, 0x02000200u, 0x42700000u};
+                std::memcpy(callerInput.get() + 0x52c, &peelingW[(n / 3u) % 3u], 4);
+            }
             std::memcpy(ram + vehicle, callerInput.get(), callerBytes);
             R5900Context initial;
             setRegU32(&initial, 4, vehicle); setRegU32(&initial, 29, stack); setRegU32(&initial, 31, 0xbad0000);

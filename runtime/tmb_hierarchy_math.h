@@ -28,6 +28,7 @@ namespace tmb::hierarchy
         0x1c6bf4, 0x1c6c94, 0x1c6f04, 0x1c7620, // older collision and animated nodes
         0x1c7860, 0x1c7904, 0x1c7ae4, 0x1c7d00, // older BSP point/segment setup
         0x1c9984, 0x1c9b3c, 0x1ca3b8, 0x1caa48, // hierarchy roots, grid and traversal
+        0x1c4fe0, 0x1c51dc, 0x1c53b4, // coordinate-system and older root setup
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

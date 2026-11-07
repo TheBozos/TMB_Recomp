@@ -133,8 +133,10 @@ void testHierarchyHelperCallers()
         0x1c0684, 0x1c0884, 0x1c0a70, 0x1c5d0c, 0x1c639c, 0x1c6bf4, 0x1c6c94, 0x1c6f04,
         0x1c7620, 0x1c6bac, 0x1c6c54, 0x1c7134, 0x1c7160,
         0x1c7860, 0x1c7904, 0x1c7ae4, 0x1c7d00, 0x1c9984, 0x1c9b3c, 0x1ca3b8, 0x1caa48,
-        0x1c7818, 0x1c78c4, 0x1c7a90, 0x1c7bc8, 0x1c7bf8, 0x1c7de8, 0x1c7e14};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57); };
+        0x1c7818, 0x1c78c4, 0x1c7a90, 0x1c7bc8, 0x1c7bf8, 0x1c7de8, 0x1c7e14,
+        0x1c4fe0, 0x1c51dc, 0x1c53b4, 0x1c8094, 0x1c80ac, 0x1c8120, 0x1c8150,
+        0x1c85cc, 0x1c85e0, 0x1c8608, 0x1c863c};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -441,7 +443,7 @@ void testHierarchyHelperCallers()
                     else { reg(18,0x18000); reg(19,0x15000); reg(30,0x520000); std::memcpy(ram + 0x18028,&slot,2); }
                 }
             }
-            else
+            else if (kind < 65)
             {
                 continuation = resume_0x1c7758;
                 const bool publish = kind >= 61;
@@ -478,6 +480,45 @@ void testHierarchyHelperCallers()
                     std::memset(ram + 0x15000,0,48); word(0x15000,0x3f800000); word(0x15014,0x3f800000); word(0x15028,0x3f800000);
                     word(0x1500c,bits()); std::memset(ram + sp + 0x20,0,12);
                     constexpr uint32_t edge[] = {0,0x3f000000,0x3f800000,0x3f7fffff}; word(sp + 0x20,edge[n % 4]);
+                }
+            }
+            else if (kind < 68)
+            {
+                continuation = kind == 65 ? resume_0x1c4ec0 : resume_0x1c50a0;
+                services.stop = 0x1c6818; reg(5,sp); reg(6,0x5101c0);
+                word(gp - 0x3014,address(0x14000)); word(0x14000,address(0x18000));
+                word(0x18000,0x40000 | (n << 7));
+                if (kind == 65) { reg(16,0x5101c0); reg(17,0x15000); reg(18,0x14000); }
+                else
+                {
+                    reg(4,0x14020);
+                    if (kind == 66) reg(16,0x5101c0);
+                    else { reg(18,0x5101c0); reg(19,0x5101b0); }
+                }
+            }
+            else
+            {
+                // Complete point/ray result tails: scalar reconstruction, world sums and packed metadata.
+                const bool point = kind < 72, indexed = kind % 2 == 0, normal = kind < 70 || (kind >= 72 && kind < 74);
+                continuation = point ? resume_0x1c7eb0 : resume_0x1c8280;
+                word(gp - 0x3614,indexed); word(gp - 0x3018,address(0x11000));
+                word(gp - 0x3024,address(0x12000));
+                const uint32_t index = n % 4, offset = (n % 4)*16;
+                if (point)
+                {
+                    reg(16,0x14030); reg(17,sp + 0x20); setRegU32(&initial,18,index*4);
+                    reg(19,0x14000); setRegU32(&initial,20,index); reg(21,sp + 0x10);
+                    reg(22,0x16000); reg(23,0x15000); reg(30,0x510000);
+                    reg(5,normal ? 0x14030 : sp + 0x10);
+                    reg(6,normal ? 0x11010 + (indexed ? index*64 : 0) : sp + 0x20); returnAt(0xc0);
+                }
+                else
+                {
+                    setRegU32(&initial,16,offset); reg(18,sp + 0x120); reg(20,0x14000);
+                    reg(23,0x17000); reg(30,0x16000);
+                    word(sp + 0x140,address(0x15000)); word(sp + 0x144,index); word(sp + 0x148,address(sp + 0x110));
+                    reg(5,normal ? 0x14030 + offset : sp + 0x110);
+                    reg(6,normal ? 0x11010 + (indexed ? index*64 : 0) : sp + 0x120); returnAt(0x1e0);
                 }
             }
             snapshot(input.get());

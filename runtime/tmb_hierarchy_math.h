@@ -16,6 +16,8 @@ namespace tmb::hierarchy
         0x1d23f8, 0x1d2424, // animated collision hierarchy
         0x1cd658, 0x1cda84, 0x1cdae8, // BSP point/segment setup
         0x1170fc,           // vehicle collision-point offset
+        0x1cb1e4, 0x1cb4a4, 0x1cb530, // collision node point/normal setup
+        0x1cb770, 0x1cb834, // point-contact setup and scalar axis tests
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

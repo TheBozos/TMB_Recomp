@@ -238,7 +238,7 @@ target_link_libraries(tmb-native-hierarchy-tests PRIVATE tmb_runtime tmb_generat
 if(MINGW)
     target_link_options(tmb-native-hierarchy-tests PRIVATE -static -Wl,--stack,268435456)
 endif()
-add_executable(tmb-native-contact-tests EXCLUDE_FROM_ALL tests/native_contact_tests.cpp)
+add_executable(tmb-native-contact-tests EXCLUDE_FROM_ALL tests/native_contact_tests.cpp tests/native_sphere_lod_callers.cpp)
 target_include_directories(tmb-native-contact-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})
 target_compile_options(tmb-native-contact-tests PRIVATE -ffp-contract=off -frounding-math)
 target_link_libraries(tmb-native-contact-tests PRIVATE tmb_runtime tmb_generated bozo_host)

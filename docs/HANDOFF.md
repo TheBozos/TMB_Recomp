@@ -76,6 +76,10 @@ consumer boundaries and historical ABI checks.
 and hierarchy root/grid/traversal returns, with generated normalization, segment construction,
 packing and matrix-stack publication checks.
 
+[`NATIVE_POINT_RAY_HELPERS.md`](NATIVE_POINT_RAY_HELPERS.md) adds eleven coordinate-system/root
+and point-contact/ray result transforms, with complete scalar result tails and historical ABI
+checks.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

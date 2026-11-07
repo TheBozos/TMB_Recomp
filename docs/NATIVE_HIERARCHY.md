@@ -82,6 +82,8 @@ The later [traversal/setup increment](NATIVE_HIERARCHY_TRAVERSAL_SETUP.md) exten
 qualification to database traversal and older collision, terrain and animated-node setup.
 The [older BSP/root increment](NATIVE_LEGACY_BSP_HELPERS.md) adds setup/result transforms and
 root/grid/traversal inverse leaves, retaining real query and traversal dispatch.
+The [point/ray increment](NATIVE_POINT_RAY_HELPERS.md) adds coordinate-system/root inverses and
+complete point-contact/ray result tails.
 
 The subsequent [`NATIVE_SCENE.md`](NATIVE_SCENE.md) increment replaces the renderer hierarchy's root/child
 matrix stack, FOV, distance/LOD and point-light selection together with their producers, accessors and mesh

@@ -48,6 +48,10 @@ flare fallback found during that qualification and its native dispatch fix acros
 checks untouched VU state through their continuations, and traces the bounded contact-position W
 RAM difference through the remaining terrain copy chain.
 
+[`NATIVE_TERRAIN_CONTACTS.md`](NATIVE_TERRAIN_CONTACTS.md) replaces the 27 inline terrain, node,
+point-contact and ray-result vector blocks with native XYZ calculations, with generated-block and
+scalar-continuation tests and the retained fourth-component RAM boundary.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

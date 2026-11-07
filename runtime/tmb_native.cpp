@@ -167,7 +167,8 @@ namespace tmb::native
         renderer.setPresentsAlone(true); // the native frame is the whole picture
     }
 
-    // Lens-flare occlusion samples the previous native frame in a match. Disabling this selects the legacy
+    // Lens-flare occlusion samples the previous native frame. Availability does not expire on a host hitch.
+    // Disabling this selects the legacy
     // particle diagnostic, whose unowned SDK readback is explicitly unsupported by the native engine.
     bool flareDepthNative()
     {
@@ -176,7 +177,7 @@ namespace tmb::native
             const char *value = std::getenv("TMB_NATIVE_FLARE_DEPTH");
             return !(value && *value == '0');
         }();
-        return s_on && enabled() && inMatch();
+        return s_on && enabled();
     }
 
     // Native lens flares sample a 4 x 4 block at game screen coordinates from the last presented frame.

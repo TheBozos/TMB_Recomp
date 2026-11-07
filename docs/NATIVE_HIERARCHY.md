@@ -90,6 +90,9 @@ The [terrain-query increment](NATIVE_TERRAIN_QUERY_HELPERS.md) adds LOS/cell/ray
 result reconstruction, retaining the scalar query and normalized publication code.
 The [car/particle increment](NATIVE_CAR_PARTICLE_HELPERS.md) adds the remaining older car-debug
 and hierarchy particle forward returns, checking actual debug vertex and scalar position consumers.
+The [final terrain-call increment](NATIVE_TERRAIN_FINAL_HELPERS.md) adds debug line/box,
+edit and wave inverses. These two transform helpers now have no remaining original direct calls
+in the audited hierarchy/terrain owner ranges; other helpers and inline VU remain.
 
 The subsequent [`NATIVE_SCENE.md`](NATIVE_SCENE.md) increment replaces the renderer hierarchy's root/child
 matrix stack, FOV, distance/LOD and point-light selection together with their producers, accessors and mesh

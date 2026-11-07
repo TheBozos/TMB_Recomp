@@ -35,6 +35,8 @@ namespace tmb::hierarchy
         0x1f11a8, 0x1f11ec, 0x1f1b88, 0x1f1c38, // terrain line-of-sight inputs/results
         0x1f2480, 0x1f24c0, 0x1f2e4c, 0x1f2ef8, // terrain cell BSP inputs/results
         0x1f3110, 0x1f315c, // terrain ray grid endpoints
+        0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, // terrain debug geometry
+        0x1f56a8, 0x1f5904, // terrain modification and wave coordinates
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

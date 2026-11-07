@@ -44,6 +44,10 @@ points, tire-height corrections and light nodes, including the scalar clamps and
 [`NATIVE_PARTICLE_CONTINUATIONS.md`](NATIVE_PARTICLE_CONTINUATIONS.md) records the timing-sensitive
 flare fallback found during that qualification and its native dispatch fix across scheduler resumes.
 
+[`NATIVE_BSP_INVERSES.md`](NATIVE_BSP_INVERSES.md) retires the paired BSP and vehicle inverse leaves,
+checks untouched VU state through their continuations, and traces the bounded contact-position W
+RAM difference through the remaining terrain copy chain.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

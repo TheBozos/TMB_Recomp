@@ -14,6 +14,8 @@ namespace tmb::hierarchy
         0x1d12f8,           // segment collision grid
         0x1d176c, 0x1d1788, // hdTraverse
         0x1d23f8, 0x1d2424, // animated collision hierarchy
+        0x1cd658, 0x1cda84, 0x1cdae8, // BSP point/segment setup
+        0x1170fc,           // vehicle collision-point offset
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

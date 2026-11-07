@@ -238,9 +238,33 @@ int main()
     sphere(ram,&shortcut,&rt);
     if(getRegU32(&shortcut,2)!=1 || nativeMicros)return 3;
     host.native=false;
+    unsigned historicalInverse=0;
+    for (const uint32_t caller:tmb::hierarchy::inverseCallers) for (unsigned n=0;n<64;++n)
+    {
+        for(unsigned i=0;i<512;i+=4) {const auto v=randomBits();std::memcpy(ram+0x10000+i,&v,4);}
+        R5900Context initial;
+        for(unsigned i=1;i<32;++i) for(auto &v:initial.r[i].uw)v=randomBits();
+        for(auto &v:initial.vu0_vf)for(auto &b:v.u)b=randomBits();
+        initial.vu0_vf[0]={};initial.vu0_vf[0].u[3]=0x3f800000;
+        for(auto &v:initial.vu0_acc.u)v=randomBits();
+        initial.vu0_status=randomBits();initial.vu0_mac=randomBits();initial.vi[5]=randomBits();
+        initial.cycles=randomBits();initial.checkpoints=randomBits();
+        const uint32_t alias=n%3==0?0x80000000:n%3==1?0x20000000:0;
+        setRegU32(&initial,4,(0x10080|alias)+(n&15));setRegU32(&initial,5,(0x10100|alias)+((n>>4)&15));
+        setRegU32(&initial,6,(0x10040|alias)+(n&15));setRegU32(&initial,31,caller);
+        auto a=initial,b=initial;
+        mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8(ram,&a,&rt);
+        std::memcpy(expected.data(),ram+0x10000,512);
+        if(!n)std::memcpy(full.get(),ram,bozo::kFlatBytes);
+        inverse(ram,&b,&rt);
+        if(std::memcmp(&a,&b,sizeof(a))||std::memcmp(expected.data(),ram+0x10000,512)||
+           (!n&&std::memcmp(full.get(),ram,bozo::kFlatBytes)))return 8;
+        ++historicalInverse;
+    }
+    std::memset(ram+0x10000,0,4); // restore the shortcut threshold after the inverse ABI arena
     auto original=shortcut,native=shortcut;
     hdHatSphereTestAsm__FP8_fvectorfT0T0_0x1cf7c0(ram,&original,&rt);sphere(ram,&native,&rt);
     if(std::memcmp(&original,&native,sizeof(native)))return 4;
-    std::printf("native hierarchy: %llu helper cases, %llu whole-memory cases, %u geometric edges, %u complete BSP callers (32 whole-memory), 2048 other-caller ABI cases; no native micro calls; CPU/VU/host checks pass\n",
-        (unsigned long long)cases,(unsigned long long)memoryCases,edges,callers);
+    std::printf("native hierarchy: %llu helper cases, %llu whole-memory cases, %u geometric edges, %u complete BSP callers (32 whole-memory), 2048 other-caller ABI cases; %u historical inverse ABI cases (%zu whole-memory); no native micro calls; CPU/VU/host checks pass\n",
+        (unsigned long long)cases,(unsigned long long)memoryCases,edges,callers,historicalInverse,std::size(tmb::hierarchy::inverseCallers));
 }

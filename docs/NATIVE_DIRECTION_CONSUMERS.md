@@ -1,5 +1,8 @@
 # Native vehicle and light directions
 
+The subsequent [BSP/vehicle inverse increment](NATIVE_BSP_INVERSES.md) also retires the inverse leaf
+following vehicle return `11708c`, with unchanged VU state through the paired setup sequence.
+
 This increment extends the native `mathfMulTransVec` (`1da298`) path to four more audited return sites:
 
 | Return | Caller | Immediate consumers |

@@ -151,8 +151,9 @@ void testHierarchyHelperCallers()
         0x1f2480, 0x1f24c0, 0x1f2e4c, 0x1f2ef8, 0x1f3110, 0x1f315c,
         0x1c8f10, 0x1c8f3c, 0x1c8fd8, 0x1c9000, 0x1c908c, 0x1c90b4,
         0x1c9140, 0x1c9168, 0x1c91f4, 0x1c921c, 0x1c959c, 0x1c96e8, 0x1d4514, 0x1d4560,
-        0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || kind >= 111; };
+        0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904,
+        0x1888e8, 0x18b4c0};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -172,7 +173,7 @@ void testHierarchyHelperCallers()
             word(0x14000, n & 1 ? 0x40000 | (n << 7) : 0); ram[0x14006] = uint8_t(n);
             // Arbitrary opaque payloads must survive native forward outputs without affecting XYZ consumers.
             word(0x1101c, bits()); word(sp + 0x1c, bits()); word(sp + 0x2c, bits()); word(sp + 0x4c, bits());
-            RecompiledFunction continuation; services.stop = 0xffffffff;
+            RecompiledFunction continuation; services.stop = 0xffffffff; bool fromEntry = false;
             if (kind < 2)
             {
                 continuation = resume_0x1d0988; services.stop = 0x1da428;
@@ -678,7 +679,7 @@ void testHierarchyHelperCallers()
                 constexpr uint32_t edge[] = {0,1,0x3f7fffff,0x3f800000,0x3f800001,0x40dfffff,0x40e00000,0x40e00001};
                 word(0x16000,edge[n%8]); word(0x16004,edge[(n>>3)%8]); word(0x16008,0x3f800000);
             }
-            else
+            else if (kind == 118)
             {
                 // Real wave-type table: bound builders stop at timer input, special types at their actual subcall.
                 continuation = resume_0x1f5898;
@@ -696,13 +697,46 @@ void testHierarchyHelperCallers()
                     word(0x16000,edge[n%8]); word(0x16004,edge[(n>>2)%8]);
                 }
             }
+            else if (kind == 119)
+            {
+                // Complete suspension consumer: transformed Z and selected bump determine ride height.
+                constexpr uint32_t vehicle=0x18000;
+                continuation = resume_0x188738; reg(4,vehicle+0x4a0); reg(5,vehicle+0x1d80); reg(6,sp);
+                reg(16,vehicle+0x4a0); reg(17,vehicle); returnAt(0x30); word(sp+0x0c,bits());
+                if (n < 16) {
+                    std::memset(ram+vehicle+0x4a0,0,48); word(vehicle+0x4a0,0x3f800000); word(vehicle+0x4b4,0x3f800000); word(vehicle+0x4c8,0x3f800000);
+                    constexpr uint32_t edge[] = {0,1,0x80000000,0x80000001,0x3f7fffff,0x3f800000,0x3f800001,0xbf800001};
+                    word(vehicle+0x1d88,edge[n%8]); word(vehicle+0x1ddc,edge[(n>>1)%8]);
+                }
+            }
+            else
+            {
+                // Tire reconstruction through real CS copy, smoothing/lower clamp and return; also complete entry paths.
+                constexpr uint32_t vehicle=0x18000;
+                continuation = resume_0x18b420;
+                reg(4,vehicle+0xd0); reg(5,sp); reg(6,sp+0x10); reg(16,vehicle+0x1a90+(n%4)*0xf0);
+                reg(17,vehicle); reg(18,vehicle+0x1d0); reg(19,sp+0x10); reg(20,vehicle+0x240);
+                word(vehicle+0x2018,address(0x1c000)); word(sp+0x1c,bits()); returnAt(0x70);
+                constexpr uint32_t heights[] = {0,0xc0400001,0xc0400000,0xc03fffff,0x3f800000,0xbf800000,1,0x80000001};
+                word(vehicle+0x1e8,heights[n%8]); word(vehicle+0x1ed0,n & 8 ? 0xc1000000 : 0x41000000);
+                word(gp-0x59f4,0x3f000000); word(gp-0x59f0,0x3dcccccd);
+                if (n >= 64) {
+                    fromEntry=true; initial.pc=0x18b420; setRegU32(&initial,31,0xbad0000); reg(4,vehicle);
+                    ram[vehicle+0x490]=uint8_t(n & 1); word(vehicle+0x1ee4,n%4);
+                    word(vehicle+0x1f0,n & 2 ? 0x3f800000 : 0xbf800000); word(vehicle+0x1f4,n & 4 ? 0x40000000 : 0x3f000000);
+                    for (unsigned i=0;i<4;++i) {
+                        const uint32_t tire=vehicle+0x1a90+i*0xf0; const float h=float((i+n)%4)/4.f;
+                        std::memcpy(ram+tire+0x38,&h,4); word(tire+0xb8,(n>>i)&1);
+                    }
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
                 referenceW.clear(); services.yields = 0;
                 rt->functions.setOverride(0x1da1e8, native ? inverse : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? direction : referenceDirection);
                 auto helper = isInverse(kind) ? (native ? inverse : referenceInverse) : (native ? direction : referenceDirection);
-                helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return");
+                if (!fromEntry) { helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return"); }
                 try { continuation(ram, &ctx, rt.get()); }
                 catch (const SegmentEnd &) { require(services.stop != 0xffffffff, "unexpected segment end"); return; }
                 require(services.stop == 0xffffffff && ctx.pc == 0xbad0000, "hierarchy consumer returned early");
@@ -714,10 +748,11 @@ void testHierarchyHelperCallers()
             const auto refControl = _mm_getcsr(); const auto refYields = services.yields;
             // Normalize only forward-output W after all real consumers have run, exposing any W-dependent result.
             for (auto patch : referenceW) std::memcpy(ram + patch.offset, &patch.value, 4);
-            snapshot(expected.get()); if (n < 4) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
+            const bool wholeCase=n < 4 || (fromEntry && n < 68);
+            snapshot(expected.get()); if (wholeCase) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
             restore(); _mm_setcsr(control); run(true, b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
             if (!cpuEqual(a,b) || !vuUntouched(initial,b) || after != refControl || services.yields != refYields || !dataEqual() ||
-                (n < 4 && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
+                (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;
         }

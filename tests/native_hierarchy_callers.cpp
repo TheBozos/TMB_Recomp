@@ -152,8 +152,9 @@ void testHierarchyHelperCallers()
         0x1c8f10, 0x1c8f3c, 0x1c8fd8, 0x1c9000, 0x1c908c, 0x1c90b4,
         0x1c9140, 0x1c9168, 0x1c91f4, 0x1c921c, 0x1c959c, 0x1c96e8, 0x1d4514, 0x1d4560,
         0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904,
-        0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || kind >= 123; };
+        0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8,
+        0x15e1b8, 0x1b42c8, 0x1b430c, 0x1b43a8, 0x1b4434, 0x1b44c0};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -754,7 +755,7 @@ void testHierarchyHelperCallers()
                     word(particle+0x2d90,0x3e800000); word(particle+0x2d94,n&2 ? 0x3f400000 : 0x3e800000);
                 }
             }
-            else
+            else if (kind <= 125)
             {
                 // Complete emitter-coordinate consumers, including full entry calls across all four attachment modes.
                 constexpr uint32_t emitter=0x18000, attached=0x15000, relative=0x16000;
@@ -775,6 +776,34 @@ void testHierarchyHelperCallers()
                     fromEntry=true; initial.pc=0x1e4298; setRegU32(&initial,31,0xbad0000);
                     reg(4,emitter); reg(5,0x17300); reg(6,output);
                     if (kind == 124) { word(emitter+0xd4,0); word(emitter+0xdc,n&8 ? address(relative) : 0); }
+                }
+            }
+            else if (kind == 126)
+            {
+                // Vehicle shadow vertices: query staging, or the complete cached-height loop and center publication.
+                constexpr uint32_t vehicle=0x18000;
+                continuation = resume_0x15df38;
+                reg(4,sp+0x10); reg(5,sp+0x50); reg(6,sp+0x60); reg(16,vehicle);
+                reg(17,0x1a000); reg(18,0x19000); setRegU32(&initial,19,0); reg(20,sp+0x60);
+                reg(21,sp+0x10); reg(22,0x1c000); reg(23,sp+0x50); setRegU32(&initial,30,1+n%4);
+                returnAt(0x110); word(sp+0x6c,bits()); word(sp+0x70,n < 64 ? 1 : 0);
+                constexpr uint32_t height[]={0,1,0x80000000,0x80000001,0xbf800000,0x3f7fffff,0x3f800000,0x40000000};
+                initial.fu[21]=height[n%8];
+                if (n < 64) services.stop=0x21d0b8; // Actual hdHatTest copies XYZ and stages its downward ray first.
+                else { fromEntry=true; initial.pc=0x15e190; }
+            }
+            else
+            {
+                // Weapon shadow motion/corners through world addition and real hdHatTest XYZ/downward-ray staging.
+                constexpr uint32_t weapon=0x18000, cs=0x1a000;
+                continuation = resume_0x1b41d0; services.stop=0x21d0b8;
+                reg(4,cs+0x20); reg(5,kind == 127 ? sp : sp+0x10); reg(6,kind == 127 ? sp : sp+0x20);
+                reg(16,weapon); reg(17,sp+0x10); reg(18,sp+0x20); returnAt(0xd0);
+                word(weapon+0x130,address(cs)); word(cs+0x1c,bits()); word(sp+0x0c,bits()); word(sp+0x2c,bits());
+                word(gp-0x4858,0x42c80000); initial.fu[26]=0; initial.fu[28]=0x41200000; initial.fu[25]=0x41700000;
+                if (kind == 127 && n >= 64) {
+                    // Actual movement-Z producer and in-place transform, then the first corner and height-query prefix.
+                    fromEntry=true; initial.pc=0x1b429c; setRegU32(&initial,2,1+n%3);
                 }
             }
             snapshot(input.get());

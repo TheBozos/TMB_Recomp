@@ -67,3 +67,7 @@ movement, other direction-helper callers and the remaining hierarchy/VU math are
 [The suspension/tire-height increment](NATIVE_SUSPENSION_TIRE.md) subsequently adds the two
 forward transform leaves used by suspension ride-height and tire pivot reconstruction, with
 generated consumer tails and complete tire-height entry-call comparisons.
+
+[Native shadow transforms](NATIVE_SHADOWS.md) subsequently add the vehicle shadow vertex
+transform and five weapon shadow motion/height-sample transforms, with generated vertex-loop
+and height-query staging comparisons.

@@ -38,6 +38,9 @@ and tire-height transform leaves, with complete generated scalar consumers and t
 [`NATIVE_PARTICLE_EMISSION.md`](NATIVE_PARTICLE_EMISSION.md) adds the emitted-direction and
 attached/relative emitter transforms, with real particle metadata consumers and complete emitter-coordinate entry calls.
 
+[`NATIVE_SHADOWS.md`](NATIVE_SHADOWS.md) adds vehicle shadow vertices and weapon shadow motion/height-sample
+transforms, with complete cached-height vertex loops and actual height-query XYZ staging consumers.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

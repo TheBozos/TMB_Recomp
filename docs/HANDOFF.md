@@ -64,6 +64,10 @@ checks, live-route coverage and the directly traced height-BSP temporary W diffe
 terrain, auxiliary BSP, animated-node and lighting/attachment returns, with generated packing,
 normalization and colour-consumer checks and a paired line-result W trace.
 
+[`NATIVE_BSP_CROSSINGS.md`](NATIVE_BSP_CROSSINGS.md) adds thirteen BSP point/segment-crossing
+returns, including actual point emission, duplicate/capacity checks and comparison of meaningful
+inverse W when it replaces an earlier forward record.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

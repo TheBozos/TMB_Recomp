@@ -8,6 +8,8 @@ The later [helper-consumer increment](NATIVE_HIERARCHY_HELPERS.md) extends it to
 also retires eight height/BSP/line-of-sight forward returns.
 The subsequent [query/lighting increment](NATIVE_HIERARCHY_QUERY_RESULTS.md) extends the inverse
 allowlist to twenty-six and the forward allowlist to twenty-seven.
+The later [BSP crossing increment](NATIVE_BSP_CROSSINGS.md) brings both allowlists to thirty-three,
+with actual scalar crossing-point emission and meaningful inverse-W overwrite checks.
 
 This increment replaces three calculation boundaries in the USA collision/height hierarchy. The player path
 uses game records directly and leaves VU registers, accumulator, flags and data memory untouched.

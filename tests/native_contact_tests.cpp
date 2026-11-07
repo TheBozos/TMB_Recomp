@@ -12,6 +12,7 @@
 
 namespace tmb::graphics { void install(Registry &); }
 namespace tmb::math { void install(Registry &); }
+void testSphereLodCallers();
 namespace
 {
     uint32_t randomState = 0x78ac2139;
@@ -303,6 +304,7 @@ int main()
                 ++cases;
             }
     testContactCallers(*rt, host, handler);
+    testSphereLodCallers();
     std::printf("native contact blocks: %llu generated comparisons, %llu whole-memory checks; CPU/VU/host untouched, destination W preserved\n", (unsigned long long)cases, (unsigned long long)wholeCases);
     return 0;
 }

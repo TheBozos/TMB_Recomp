@@ -12,7 +12,7 @@ namespace tmb::math
         unsigned basis, input, translation, output; // GPR addresses; translation is add/sub's right operand
         ContactOperation operation;
     };
-    inline constexpr std::array<ContactVector, 27> contactVectors{{
+    inline constexpr std::array<ContactVector, 30> contactVectors{{
         {0x1cb1ac, 0x1cb1b8,  0,  2,  3,  4, ContactOperation::Add},
         {0x1cb1f0, 0x1cb1fc,  0,  4,  2, 23, ContactOperation::Add},
         {0x1cb438, 0x1cb454,  2, 20,  0,  3, ContactOperation::Transform},
@@ -40,6 +40,9 @@ namespace tmb::math
         {0x1cc060, 0x1cc06c,  0,  4, 23,  2, ContactOperation::Subtract},
         {0x1cc074, 0x1cc090,  3,  2,  0, 18, ContactOperation::Transform},
         {0x1cc09c, 0x1cc0a8,  0,  2, 18,  5, ContactOperation::Add},
+        {0x1c6714, 0x1c6720,  0,  5,  4, 29, ContactOperation::Subtract},
+        {0x1c69bc, 0x1c69c8,  0,  3,  2, 29, ContactOperation::Subtract},
+        {0x1cadc4, 0x1cadd0,  0,  5,  4, 29, ContactOperation::Subtract},
     }};
     bool contactInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t pc);
 }

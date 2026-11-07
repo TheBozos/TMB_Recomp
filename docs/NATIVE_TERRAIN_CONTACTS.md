@@ -1,5 +1,8 @@
 # Native inline terrain and contact calculations
 
+The subsequent [sphere/LOD increment](NATIVE_SPHERE_LOD.md) extends this handler to thirty blocks
+and replaces six additional collision hierarchy helper returns.
+
 The player now calculates all 27 inline vector blocks in these four collision owners from native
 matrix/vector records. There are no VU register loads, arithmetic, accumulator/flag updates or
 register stores on these block paths. The 150 retired instruction sites include 48 arithmetic VU

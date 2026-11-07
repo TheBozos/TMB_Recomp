@@ -78,6 +78,9 @@ from the regenerated production output and the engine checkout remains clean.
 
 ## Remaining work
 
+The later [traversal/setup increment](NATIVE_HIERARCHY_TRAVERSAL_SETUP.md) extends inverse/forward
+qualification to database traversal and older collision, terrain and animated-node setup.
+
 The subsequent [`NATIVE_SCENE.md`](NATIVE_SCENE.md) increment replaces the renderer hierarchy's root/child
 matrix stack, FOV, distance/LOD and point-light selection together with their producers, accessors and mesh
 consumers. Other game math helpers and VU macro blocks remain. Neither increment claims complete VU

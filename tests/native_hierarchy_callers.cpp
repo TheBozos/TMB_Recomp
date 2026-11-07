@@ -129,8 +129,10 @@ void testHierarchyHelperCallers()
         0x1cd400, 0x1cd768, 0x1cbbc8, 0x1cbc2c, 0x1cc634, 0x1cc6b4,
         0x1ccec8, 0x1ccef8, 0x1cd884, 0x1cd8b4, 0x1d41c8, 0x1d9cac,
         0x1cdf80, 0x1ce028, 0x1ce220, 0x1ce644, 0x1ce674, 0x1ce7b4, 0x1cea40,
-        0x1cdf40, 0x1cdfe4, 0x1ce1cc, 0x1ce37c, 0x1ce3a4, 0x1cdd3c};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30); };
+        0x1cdf40, 0x1cdfe4, 0x1ce1cc, 0x1ce37c, 0x1ce3a4, 0x1cdd3c,
+        0x1c0684, 0x1c0884, 0x1c0a70, 0x1c5d0c, 0x1c639c, 0x1c6bf4, 0x1c6c94, 0x1c6f04,
+        0x1c7620, 0x1c6bac, 0x1c6c54, 0x1c7134, 0x1c7160};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -320,7 +322,7 @@ void testHierarchyHelperCallers()
                 setRegU32(&initial,21,(n % 4)*64); setRegU32(&initial,22,0); setRegU32(&initial,30,0);
                 word(gp - 0x2fe8,address(0x11000));
             }
-            else
+            else if (kind < 37)
             {
                 continuation = resume_0x1cdeb8;
                 const bool publish = kind == 34 || kind == 35;
@@ -355,6 +357,68 @@ void testHierarchyHelperCallers()
                     std::memset(ram+0x15000,0,48);word(0x15000,0x3f800000);word(0x15014,0x3f800000);word(0x15028,0x3f800000);
                     word(0x1500c,bits());std::memset(ram+sp+0x20,0,12);
                     constexpr uint32_t edge[] = {0,0x3f000000,0x3f800000,0x3f7fffff};word(sp+0x20,edge[n % 4]);
+                }
+            }
+            else if (kind < 40)
+            {
+                continuation = resume_0x1c0300;
+                reg(18,0x14000); reg(20,0x16000); word(0x14000,0x40000);
+                if (kind < 39)
+                {
+                    services.stop = 0x2bad000; setRegU32(&initial,21,services.stop);
+                    reg(4,0x16000); reg(5,sp + 0xa0); reg(6,sp);
+                    if (kind == 37) { reg(17,0x14000); reg(22,sp + 0xa0); reg(30,0x17000); }
+                    else { reg(16,sp + 0xa0); reg(19,0x15000); reg(22,0x17000); }
+                }
+                else
+                {
+                    services.stop = 0x1e6980; reg(4,0x15000); reg(5,0x14010); reg(6,sp + 0x20);
+                    reg(16,0x14010); reg(20,0x15000); reg(22,sp + 0x20); reg(30,sp + 0x30);
+                }
+            }
+            else if (kind == 40 || kind == 41 || kind == 45)
+            {
+                continuation = kind == 40 ? resume_0x1c5470 : kind == 41 ? resume_0x1c60e8 : resume_0x1c73a0;
+                word(gp - 0x3004,kind == 45 ? (n % 3 == 0 ? 1199 : n % 3 == 1 ? 1200 : 0) : n & 1 ? 1199 : 0);
+                if (kind == 40) { services.stop = 0x1da428; reg(21,0x15000); }
+                else if (kind == 41)
+                {
+                    services.stop = 0x1da428; reg(18,0x18000); reg(19,0x15000); reg(30,0x510000);
+                    std::memcpy(ram + 0x18028,&slot,2);
+                }
+                else
+                {
+                    reg(17,0x14000); reg(18,0x15000); reg(19,0x18000);
+                    std::memcpy(ram + 0x18028,&slot,2); word(gp - 0x2ffc,1); returnAt(0xc0);
+                }
+            }
+            else
+            {
+                word(gp - 0x3028,address(0x17000)); word(gp - 0x3024,address(0x12000));
+                word(gp - 0x3020,address(0x13000)); word(gp - 0x301c,address(0x15000));
+                std::memcpy(ram + 0x512758,&slot,2); ram[0x1703a] = uint8_t(n & 1);
+                reg(5,kind == 46 || kind == 48 ? 0x16000 : kind == 47 || kind == 49 ? 0x17000 : sp);
+                reg(6,kind >= 46 ? sp : sp + 0x10);
+                setRegU32(&initial,20,0);
+                if (kind >= 48)
+                {
+                    continuation = resume_0x1c70c0; services.stop = 0x21d0b8;
+                    reg(18,0x510110); setRegU32(&initial,19,0);
+                }
+                else
+                {
+                    continuation = resume_0x1c6ad0; services.stop = 0x1da710;
+                    reg(16,sp + 0x10); reg(17,0x512730); reg(19,0x19000); reg(21,sp + 0x20);
+                    reg(22,0x512770); reg(23,0x14000); reg(30,0x512740);
+                    setRegU32(&initial,18,0);
+                    word(sp + 0x40,address(0x19000)); word(0x14008,1);
+                    if (kind == 44) { setRegU32(&initial,18,0); reg(21,0x510000); setRegU32(&initial,30,1); }
+                    if (kind == 43 && n < 16)
+                    {
+                        std::memset(ram + 0x15000,0,48); word(0x15000,0x3f800000); word(0x15014,0x3f800000); word(0x15028,0x3f800000);
+                        word(0x1500c,bits()); std::memset(ram + sp,0,12);
+                        constexpr uint32_t edge[] = {0,0x3f000000,0x3f800000,0x3f7fffff}; word(sp,edge[n % 4]);
+                    }
                 }
             }
             snapshot(input.get());

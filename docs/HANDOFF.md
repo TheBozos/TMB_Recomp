@@ -88,6 +88,10 @@ publication and integer-grid consumer checks.
 cell-collision and ray inverse returns, with translated endpoint pairs and real result
 normalization/publication consumers.
 
+[`NATIVE_CAR_PARTICLE_HELPERS.md`](NATIVE_CAR_PARTICLE_HELPERS.md) adds the fourteen older
+car-debug and hierarchy particle forward returns, with actual debug-line vertex records,
+view lookup and scalar position consumers.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

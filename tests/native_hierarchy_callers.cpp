@@ -58,6 +58,7 @@ namespace
     };
 
     constexpr uint32_t base = 0x10000, bytes = 0x40000, globals = 0x4c0000, globalBytes = 0xa0000;
+    constexpr uint32_t debug = 0x7484f0, debugBytes = 0xd0; // actual terrain debug-line producer records
     constexpr uint32_t gp = 0x40000, sp = 0x30000;
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
@@ -113,17 +114,17 @@ void testHierarchyHelperCallers()
     const auto inverse = registry.find(0x1da1e8), direction = registry.find(0x1da298);
     require(inverse && direction, "missing hierarchy leaves");
     auto *ram = rt->memory.flat();
-    auto input = std::make_unique<uint8_t[]>(bytes + globalBytes), expected = std::make_unique<uint8_t[]>(bytes + globalBytes);
+    auto input = std::make_unique<uint8_t[]>(bytes + globalBytes + debugBytes), expected = std::make_unique<uint8_t[]>(bytes + globalBytes + debugBytes);
     auto whole = std::make_unique<uint8_t[]>(bozo::kFlatBytes);
     const auto word = [&](uint32_t at, uint32_t value) { std::memcpy(ram + at, &value, 4); };
     const auto fill = [&] {
-        for (auto region : {std::pair{base, bytes}, std::pair{globals, globalBytes}})
+        for (auto region : {std::pair{base, bytes}, std::pair{globals, globalBytes}, std::pair{debug, debugBytes}})
             for (uint32_t i = 0; i < region.second; i += 4)
             { const float f = float(int(bits() % 8193) - 4096) / 128.f; std::memcpy(ram + region.first + i, &f, 4); }
     };
-    const auto snapshot = [&](uint8_t *out) { std::memcpy(out, ram + base, bytes); std::memcpy(out + bytes, ram + globals, globalBytes); };
-    const auto restore = [&] { std::memcpy(ram + base, input.get(), bytes); std::memcpy(ram + globals, input.get() + bytes, globalBytes); };
-    const auto dataEqual = [&] { return !std::memcmp(expected.get(), ram + base, bytes) && !std::memcmp(expected.get() + bytes, ram + globals, globalBytes); };
+    const auto snapshot = [&](uint8_t *out) { std::memcpy(out, ram + base, bytes); std::memcpy(out + bytes, ram + globals, globalBytes); std::memcpy(out + bytes + globalBytes, ram + debug, debugBytes); };
+    const auto restore = [&] { std::memcpy(ram + base, input.get(), bytes); std::memcpy(ram + globals, input.get() + bytes, globalBytes); std::memcpy(ram + debug, input.get() + bytes + globalBytes, debugBytes); };
+    const auto dataEqual = [&] { return !std::memcmp(expected.get(), ram + base, bytes) && !std::memcmp(expected.get() + bytes, ram + globals, globalBytes) && !std::memcmp(expected.get() + bytes + globalBytes, ram + debug, debugBytes); };
     constexpr uint32_t callers[] = {0x1d0de0, 0x1d0dfc, 0x1d12d8, 0x1d4b94,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, 0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804,
         0x1cd400, 0x1cd768, 0x1cbbc8, 0x1cbc2c, 0x1cc634, 0x1cc6b4,
@@ -139,8 +140,10 @@ void testHierarchyHelperCallers()
         0x1ef318, 0x1ef44c, 0x1ef484, 0x1ef4c0, 0x1ef4fc, 0x1ef68c, 0x1ef6d4,
         0x1efc5c, 0x1efca0, 0x1efef8, 0x1f06b4,
         0x1f11a8, 0x1f11ec, 0x1f1b88, 0x1f1c38,
-        0x1f2480, 0x1f24c0, 0x1f2e4c, 0x1f2ef8, 0x1f3110, 0x1f315c};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || kind >= 76; };
+        0x1f2480, 0x1f24c0, 0x1f2e4c, 0x1f2ef8, 0x1f3110, 0x1f315c,
+        0x1c8f10, 0x1c8f3c, 0x1c8fd8, 0x1c9000, 0x1c908c, 0x1c90b4,
+        0x1c9140, 0x1c9168, 0x1c91f4, 0x1c921c, 0x1c959c, 0x1c96e8, 0x1d4514, 0x1d4560};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -610,13 +613,36 @@ void testHierarchyHelperCallers()
                 initial.fu[22]=0x3f000000; initial.fu[23]=0x3f800000;
                 initial.fu[24]=0xbf000000; initial.fu[25]=0xbf800000;
             }
-            else
+            else if (kind < 97)
             {
                 // Paired ray endpoints plus translation through segment subtraction dispatch.
                 continuation = resume_0x1f30a0; services.stop = 0x1daf28;
                 reg(4,0x14040); reg(5,kind == 95 ? 0x15000 : 0x16000); reg(6,kind == 95 ? sp : sp + 0x10);
                 reg(16,0x14040); reg(17,sp + 0x10); reg(23,0x14000);
                 word(sp + 0x54,address(0x16000));
+            }
+            else if (kind < 109)
+            {
+                // Real car debug-line producer: transformed corners, world sums, colour and XYZW records.
+                continuation = resume_0x1c8db0; services.stop = 0x1c1e00;
+                const unsigned which=kind-97, pair=which/2;
+                constexpr uint32_t inputs[] = {0xb0,0xc0,0xc0,0xd0,0xd0,0xe0,0xe0,0xb0,0xf0,0x100};
+                word(gp - 0x2ff8,address(0x14000)); word(gp - 0x2ff4,address(0x16000));
+                word(gp - 0x2fe8,address(0x18000)); word(0x14000,address(0x15000));
+                word(sp + 0x70,address(sp + 0x20)); word(sp + 0x60,address(0x17000));
+                reg(4,0x15020); reg(30,sp + 0x10); reg(22,sp + 0x10);
+                reg(5,0x14000 + (which < 10 ? inputs[which] : 0x160 + (n%4)*16));
+                reg(6,which < 10 && !(which & 1) ? sp : sp + 0x10);
+                if (which < 10) ram[0x18000 + 0x130 + pair*0x40]=uint8_t(n & 1);
+                word(sp + 0x0c,bits()); word(sp + 0x1c,bits());
+            }
+            else
+            {
+                // Actual view lookup and XYZ addition; initialized nodes return, new nodes reach FX creation.
+                continuation = resume_0x1d4498; services.stop = kind == 109 ? 0xffffffff : 0x1e6980;
+                reg(5,sp); reg(6,sp + 0x10); reg(16,sp + 0x10); reg(17,0x14000);
+                setRegU32(&initial,19,n%4); word(0x4dfcd0 + (n%4)*16,address(0x18000));
+                word(sp + 0x1c,bits()); returnAt(0x70);
             }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {

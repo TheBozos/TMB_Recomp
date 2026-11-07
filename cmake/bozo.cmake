@@ -107,6 +107,12 @@ add_custom_command(
     DEPENDS ${gen_files} "${CMAKE_SOURCE_DIR}/tools/tmb_hud_fixture.py"
     COMMENT "Extracting original vehicle blocks for optional comparisons")
 target_sources(tmb_generated PRIVATE ${native_original_dir}/tmb_vehicle_original.cpp ${native_original_dir}/tmb_vehicle_original.h)
+add_custom_command(
+    OUTPUT ${native_original_dir}/tmb_contact_original.cpp ${native_original_dir}/tmb_contact_original.h
+    COMMAND Python3::Interpreter "${CMAKE_SOURCE_DIR}/tools/tmb_hud_fixture.py" ${gen_dir} contact ${native_original_dir}
+    DEPENDS ${gen_files} "${CMAKE_SOURCE_DIR}/tools/tmb_hud_fixture.py"
+    COMMENT "Extracting original terrain/contact blocks for optional comparisons")
+target_sources(tmb_generated PRIVATE ${native_original_dir}/tmb_contact_original.cpp ${native_original_dir}/tmb_contact_original.h)
 target_link_libraries(tmb_generated PUBLIC bozo_runtime_headers)
 target_include_directories(tmb_generated PUBLIC ${gen_dir} ${native_original_dir})
 target_compile_options(tmb_generated PRIVATE ${TMB_GEN_OPT} -w)
@@ -122,6 +128,8 @@ if(TMB_WINDOW)
 endif()
 add_dependencies(tmb_runtime tmb_generated)
 set_source_files_properties("${CMAKE_SOURCE_DIR}/runtime/tmb_native_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_projection_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_hud_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_vehicle_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_hierarchy_math.cpp" "${CMAKE_SOURCE_DIR}/runtime/tmb_scene.cpp" PROPERTIES
+    COMPILE_OPTIONS "-ffp-contract=off;-frounding-math")
+set_source_files_properties("${CMAKE_SOURCE_DIR}/runtime/tmb_contact_math.cpp" PROPERTIES
     COMPILE_OPTIONS "-ffp-contract=off;-frounding-math")
 target_compile_options(tmb_runtime PRIVATE -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable)
 # The draw lists as the reference build (the fork) computed them (the PS2XREF1 `draws` field): it compiled TMB's runtime
@@ -229,6 +237,13 @@ target_compile_options(tmb-native-hierarchy-tests PRIVATE -ffp-contract=off -fro
 target_link_libraries(tmb-native-hierarchy-tests PRIVATE tmb_runtime tmb_generated bozo_host)
 if(MINGW)
     target_link_options(tmb-native-hierarchy-tests PRIVATE -static -Wl,--stack,268435456)
+endif()
+add_executable(tmb-native-contact-tests EXCLUDE_FROM_ALL tests/native_contact_tests.cpp)
+target_include_directories(tmb-native-contact-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})
+target_compile_options(tmb-native-contact-tests PRIVATE -ffp-contract=off -frounding-math)
+target_link_libraries(tmb-native-contact-tests PRIVATE tmb_runtime tmb_generated bozo_host)
+if(MINGW)
+    target_link_options(tmb-native-contact-tests PRIVATE -static -Wl,--stack,268435456)
 endif()
 add_executable(tmb-native-scene-tests EXCLUDE_FROM_ALL tests/native_scene_tests.cpp)
 target_include_directories(tmb-native-scene-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})

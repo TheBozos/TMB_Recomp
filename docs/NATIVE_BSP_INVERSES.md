@@ -68,6 +68,6 @@ vehicle effects, and all four snow-arena views advancing with driving/firing. De
 deterministic sound records remain exact. Flawless device audio, full-campaign acceptance and console
 visual parity are not claimed by these bounded tests.
 
-The next useful removal is the remaining inline terrain/contact transform and its scalar consumers,
-using native records through the complete result chain. Other inverse callers still need their own
-consumer audits before entering the allowlist.
+The subsequent [terrain/contact increment](NATIVE_TERRAIN_CONTACTS.md) replaces the inline vector
+blocks in terrain, node, point-contact and ray-result construction. Scalar algorithms and other
+inverse callers still need their own consumer audits before being replaced.

@@ -41,6 +41,9 @@ attached/relative emitter transforms, with real particle metadata consumers and 
 [`NATIVE_SHADOWS.md`](NATIVE_SHADOWS.md) adds vehicle shadow vertices and weapon shadow motion/height-sample
 transforms, with complete cached-height vertex loops and actual height-query XYZ staging consumers.
 
+[`NATIVE_TOW_TRUCK.md`](NATIVE_TOW_TRUCK.md) adds the tow-truck launcher's forward/inverse transforms,
+with complete positioning, smoothing, normalization, orientation and material-publication consumers.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

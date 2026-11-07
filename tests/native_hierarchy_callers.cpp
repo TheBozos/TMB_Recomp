@@ -59,8 +59,10 @@ namespace
 
     constexpr uint32_t base = 0x10000, bytes = 0x40000, globals = 0x4c0000, globalBytes = 0xa0000;
     constexpr uint32_t debug = 0x7484f0, debugBytes = 0x220; // actual terrain line/GS-line producer records
-    constexpr std::pair<uint32_t,uint32_t> regions[] = {{base,bytes},{globals,globalBytes},{debug,debugBytes},{0x66fcc4,4}};
-    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4;
+    constexpr uint32_t towVectors = 0x23d060, towVectorBytes = 0x50, towMaterials = 0x190c20, towMaterialBytes = 0x100;
+    constexpr std::pair<uint32_t,uint32_t> regions[] = {{base,bytes},{globals,globalBytes},{debug,debugBytes},{0x66fcc4,4},
+        {towVectors,towVectorBytes},{towMaterials,towMaterialBytes}};
+    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4 + towVectorBytes + towMaterialBytes;
     constexpr uint32_t gp = 0x40000, sp = 0x30000;
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
@@ -153,8 +155,9 @@ void testHierarchyHelperCallers()
         0x1c9140, 0x1c9168, 0x1c91f4, 0x1c921c, 0x1c959c, 0x1c96e8, 0x1d4514, 0x1d4560,
         0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904,
         0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8,
-        0x15e1b8, 0x1b42c8, 0x1b430c, 0x1b43a8, 0x1b4434, 0x1b44c0};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125); };
+        0x15e1b8, 0x1b42c8, 0x1b430c, 0x1b43a8, 0x1b4434, 0x1b44c0,
+        0x150bc8, 0x150cc0, 0x150d2c, 0x150d98};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || kind == 135; };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -792,7 +795,7 @@ void testHierarchyHelperCallers()
                 if (n < 64) services.stop=0x21d0b8; // Actual hdHatTest copies XYZ and stages its downward ray first.
                 else { fromEntry=true; initial.pc=0x15e190; }
             }
-            else
+            else if (kind <= 131)
             {
                 // Weapon shadow motion/corners through world addition and real hdHatTest XYZ/downward-ray staging.
                 constexpr uint32_t weapon=0x18000, cs=0x1a000;
@@ -804,6 +807,51 @@ void testHierarchyHelperCallers()
                 if (kind == 127 && n >= 64) {
                     // Actual movement-Z producer and in-place transform, then the first corner and height-query prefix.
                     fromEntry=true; initial.pc=0x1b429c; setRegU32(&initial,2,1+n%3);
+                }
+            }
+            else
+            {
+                // Complete tow-truck launcher tail: smoothing, local direction, normalization, matrix and material publication.
+                constexpr uint32_t launcher=0x18000, vehicle=0x1b000, launcherCs=0x1c000, vehicleCs=0x1d000;
+                constexpr uint32_t outputCs=0x1e000, attachment=0x1f000, material=0x20000;
+                continuation=resume_0x150b60;
+                reg(17,launcher); reg(20,vehicle); reg(18,sp+0x50); reg(21,sp+0x50);
+                reg(22,launcher+0x360); reg(19,launcher+0x350); reg(16,kind == 135 ? sp+0x60 : sp+0x10);
+                reg(23,0x240000); reg(30,0x240000); returnAt(0x100);
+                reg(4,kind == 133 ? sp+0x10 : kind == 134 ? vehicleCs+0x20 : launcherCs+0x10);
+                reg(5,kind == 132 ? 0x23d070 : kind == 133 ? 0x23d0a0 : kind == 134 ? launcher+0x350 : sp+0x50);
+                reg(6,sp+0x50); initial.fu[20]=0x3e800000; initial.fu[21]=0x3c23d70a;
+                word(launcher+0x2a0,address(launcherCs)); word(launcher+0x2a4,address(outputCs));
+                word(launcher+0x34c,address(attachment)); word(vehicle+0x2018,address(vehicleCs));
+                word(launcher, n&1 ? 1 : 2); word(launcher+0x188,n&2 ? 1 : n&8 ? 0xffffffff : 0); word(launcher+0x27c,0);
+                ram[vehicle+0x475]=0; ram[vehicle+0x487]=uint8_t(n&4 ? 1 : 0);
+                ram[attachment+0x0c]=0xa5; // Make both clearing and retaining the visibility byte observable.
+                const uint32_t slot=(n%4)*4; word(gp-0x4154,slot);
+                word(towMaterials+slot+0x60,address(material)); word(towMaterials+slot+0x80,address(material+0x10));
+                word(gp-0x620c,0x3e800000); word(gp-0x6208,0xbe800000); word(gp-0x6204,0x3e800000);
+                word(gp-0x6200,0x3e800000); word(gp-0x61fc,0x3c23d70a);
+                word(gp-0x4824,0x38d1b717); word(gp-0x47fc,0x38d1b717);
+                constexpr uint32_t tilt[]={0,0x80000000,0x3f000000,0xbf000000};
+                word(vehicle+0x1f8,tilt[n%4]); word(vehicleCs+0x64,tilt[(n/4)%4]); word(vehicleCs+0x68,tilt[(n/16)%4]);
+                word(sp+0x5c,bits()); word(launcherCs+0x1c,bits()); word(0x23d0ac,bits());
+                // Fixed reference point used by the real vector subtraction; preserve its opaque fourth word.
+                word(sp+0x60,0); word(sp+0x64,0); word(sp+0x68,0x40000000);
+                if (kind == 135 && n < 64 && n%8 < 5) {
+                    // Zero-length and vertical directions take the real normalization/orientation fallback branches.
+                    for (unsigned column=0;column<3;++column) for (unsigned row=0;row<3;++row)
+                        word(launcherCs+0x10+16*column+4*row,column == row ? 0x3f800000 : 0);
+                    word(sp+0x50,n%8 == 1 || n%8 == 3 ? 0x3f800000 : 0);
+                    word(sp+0x54,n%8 == 2 || n%8 == 3 ? 0x3f800000 : 0);
+                    word(sp+0x58,n%8 == 4 ? 0 : 0x40000000);
+                }
+                if (n >= 64) {
+                    fromEntry=true;
+                    if (kind == 132 || kind == 135) {
+                        initial.pc=0x150b60; reg(4,launcher); reg(5,vehicle); setRegU32(&initial,31,0xbad0000);
+                        word(launcher+0x27c,kind == 135 ? 1 : 0); word(sp-0x120+0x5c,bits());
+                        if (kind == 135) ram[vehicle+0x475]=uint8_t((n&24) == 24 ? 1 : 0);
+                    } else if (kind == 133) initial.pc=0x150be0; // Actual tilt/clamp and rotation-matrix producer.
+                    else { initial.pc=0x150d14; initial.fu[0]=tilt[n%4]; } // Actual final smoothed-Z publication.
                 }
             }
             snapshot(input.get());
@@ -822,6 +870,8 @@ void testHierarchyHelperCallers()
             try { run(false, a); }
             catch (...) { std::fprintf(stderr, "hierarchy original kind %u case %u\n", kind, n); throw; }
             const auto refControl = _mm_getcsr(); const auto refYields = services.yields;
+            // The tow-truck inverse replaces the shared temporary completely: no forward-W exclusion is needed.
+            if (kind >= 132) require(referenceW.empty(), "tow-truck consumer left opaque forward W unconsumed");
             // Normalize only forward-output W after all real consumers have run, exposing any W-dependent result.
             for (auto patch : referenceW) std::memcpy(ram + patch.offset, &patch.value, 4);
             const bool wholeCase=n < 4 || (fromEntry && n < 68);

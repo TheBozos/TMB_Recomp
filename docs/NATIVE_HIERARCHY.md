@@ -88,6 +88,8 @@ The [terrain-input increment](NATIVE_TERRAIN_INPUT_HELPERS.md) adds animated-nod
 and height/material-query inverse transforms, retaining scalar height and grid calculations.
 The [terrain-query increment](NATIVE_TERRAIN_QUERY_HELPERS.md) adds LOS/cell/ray inputs and
 result reconstruction, retaining the scalar query and normalized publication code.
+The [car/particle increment](NATIVE_CAR_PARTICLE_HELPERS.md) adds the remaining older car-debug
+and hierarchy particle forward returns, checking actual debug vertex and scalar position consumers.
 
 The subsequent [`NATIVE_SCENE.md`](NATIVE_SCENE.md) increment replaces the renderer hierarchy's root/child
 matrix stack, FOV, distance/LOD and point-light selection together with their producers, accessors and mesh

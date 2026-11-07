@@ -46,3 +46,7 @@ clocks) and untouched legacy packet output. The leaf test does not claim GPU occ
 Final gameplay/movie/loading reruns and audio limits are recorded in
 [`NATIVE_DIRECTION_CONSUMERS.md`](NATIVE_DIRECTION_CONSUMERS.md). This is bounded regression coverage;
 full campaign, console visual parity and explicit legacy diagnostic modes are not qualified by it.
+
+[Native particle-emission transforms](NATIVE_PARTICLE_EMISSION.md) subsequently retire five
+emitted-direction and emitter-coordinate helper returns. That increment preserves this
+backend selection and adds generated emission/metadata and emitter-coordinate consumer checks.

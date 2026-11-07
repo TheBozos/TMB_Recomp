@@ -23,6 +23,9 @@ namespace tmb::hierarchy
         0x1cd400, 0x1cd768, // animated point setup and BSP auxiliary segment setup
         0x1cdf80, 0x1ce028, 0x1ce220, // BSP point setup and normalization
         0x1ce644, 0x1ce674, 0x1ce7b4, 0x1cea40, // segment crossing endpoints
+        0x1c0684, 0x1c0884, 0x1c0a70, // database traversal and modeled effect setup
+        0x1c5d0c, 0x1c639c, // older collision grid and hierarchy traversal
+        0x1c6bf4, 0x1c6c94, 0x1c6f04, 0x1c7620, // older collision and animated nodes
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

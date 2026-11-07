@@ -76,3 +76,6 @@ restoration or broader memory-hash mask is introduced.
 Full campaign, console visual parity, unaudited direction callers and complete VU removal remain
 outside this bounded qualification. Further BSP inverse directions and other hot direction callers
 still need their own consumer audit.
+
+The subsequent [`NATIVE_DIRECTION_CONSUMERS.md`](NATIVE_DIRECTION_CONSUMERS.md) increment adds the
+vehicle collision-point, tire-height and light-node direction callers with their generated consumers.

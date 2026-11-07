@@ -38,6 +38,12 @@ inverse transforms and BSP plane distances, their original-caller tests and RAM 
 [`NATIVE_DIRECTIONS.md`](NATIVE_DIRECTIONS.md) adds three hot BSP collision direction callers to the
 native record path, with generated-continuation tests, complete gameplay comparisons and stack-W audit.
 
+[`NATIVE_DIRECTION_CONSUMERS.md`](NATIVE_DIRECTION_CONSUMERS.md) extends that scope to vehicle collision
+points, tire-height corrections and light nodes, including the scalar clamps and normalization consumers.
+
+[`NATIVE_PARTICLE_CONTINUATIONS.md`](NATIVE_PARTICLE_CONTINUATIONS.md) records the timing-sensitive
+flare fallback found during that qualification and its native dispatch fix across scheduler resumes.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

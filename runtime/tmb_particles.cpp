@@ -2314,6 +2314,14 @@ namespace tmb::particles
                              static_cast<unsigned long long>(st.unfinished));
         }
 
+        bool nativeFlareContinuation(PS2Runtime *runtime)
+        {
+            // A checkpoint may unwind particleDraw's native scope before the flare leaf is dispatched.
+            // The native backend and explicit options remain valid across that scheduler continuation.
+            return bozo::port::nativeGraphics(runtime) && settings().on && settings().flares && !settings().check &&
+                   !(settings().toggleFlares && toggledOff()) && tmb::native::flareDepthNative();
+        }
+
         void lensTestOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             if (g_flaresCheck)
@@ -2332,7 +2340,7 @@ namespace tmb::particles
                     compareFlares(0, mine, saveFlares(rdram, gp, view), mineResult, static_cast<int32_t>(getRegU32(ctx, 2)));
                 return;
             }
-            if (!g_flaresNative)
+            if (!g_flaresNative && !nativeFlareContinuation(runtime))
             {
                 ctx->pc = kLensTest;
                 gameLensTest(rdram, ctx, runtime);
@@ -2373,7 +2381,7 @@ namespace tmb::particles
                 }
                 return;
             }
-            if (!g_flaresNative)
+            if (!g_flaresNative && !nativeFlareContinuation(runtime))
             {
                 ctx->pc = kLensRender;
                 gameLensRender(rdram, ctx, runtime);
@@ -2406,7 +2414,8 @@ namespace tmb::particles
             const uint32_t view = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
             g_view = view;
             const bool toggledAll = toggledOff() && !settings().toggleFlares;
-            if (!settings().on || !tmb::native::effectsInStream() || u32(rdram, gp + static_cast<uint32_t>(kGpColours)) == 0u || toggledAll)
+            if (!settings().on || (!bozo::port::nativeGraphics(runtime) && !tmb::native::effectsInStream()) ||
+                u32(rdram, gp + static_cast<uint32_t>(kGpColours)) == 0u || toggledAll)
             {
                 g_flaresNative = false;
                 ctx->pc = kParticleDraw;

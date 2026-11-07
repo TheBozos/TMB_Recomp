@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 namespace tmb::math { void install(Registry &); }
+namespace tmb::hierarchy { void install(Registry &); }
 namespace
 {
     void require(bool value, const char *message) { if (!value) throw std::runtime_error(message); }
@@ -53,10 +54,15 @@ namespace
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
     {
-        // The native direction leaf deliberately has no VU side effects. Later original inverse leaves still do.
+        // Native leaves retire VU effects; compare the remaining complete CPU contract here.
         std::memset(reinterpret_cast<uint8_t *>(&a) + vuAt, 0, vuBytes);
         std::memset(reinterpret_cast<uint8_t *>(&b) + vuAt, 0, vuBytes);
         return !std::memcmp(&a, &b, sizeof(a));
+    }
+    bool vuUntouched(const R5900Context &before, const R5900Context &after)
+    {
+        return !std::memcmp(reinterpret_cast<const uint8_t *>(&before) + vuAt,
+                            reinterpret_cast<const uint8_t *>(&after) + vuAt, vuBytes);
     }
 }
 
@@ -67,7 +73,10 @@ void testDirectionCallers()
     rt->functions.setGenerated(tmb_function_table, tmb_function_count);
     rt->functions.setResume(tmb_resume_table, tmb_resume_count);
     tmb::Registry registry; tmb::math::install(registry);
+    tmb::hierarchy::install(registry);
     const auto nativeDirection = registry.find(0x1da298);
+    const auto nativeInverse = registry.find(0x1da1e8);
+    const auto originalInverse = mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8;
     const auto originalDirection = mathfMulTransVec__FPA3_A3_fP8_fvectorT1_0x1da298;
     auto *ram = rt->memory.flat();
     constexpr unsigned arenaBytes = 0x40000, globals = 0x525000, globalBytes = 0x3000;
@@ -118,6 +127,7 @@ void testDirectionCallers()
             const auto run = [&](RecompiledFunction direction, R5900Context &ctx)
             {
                 services.yields = 0; rt->functions.setOverride(0x1da298, direction);
+                rt->functions.setOverride(0x1da1e8, direction == nativeDirection ? nativeInverse : originalInverse);
                 direction(ram, &ctx, rt.get());
                 require(ctx.pc == caller, "direction returned to wrong caller");
                 try { resume_0x1cd538(ram, &ctx, rt.get()); }
@@ -135,7 +145,7 @@ void testDirectionCallers()
             std::memcpy(ram + 0x10000, input.get(), arenaBytes);
             std::memcpy(ram + globals, input.get() + arenaBytes, globalBytes);
             run(nativeDirection, b); const unsigned after = _mm_getcsr(); _mm_setcsr(saved);
-            if (!cpuEqual(a, b) || after != control || referenceYields != services.yields ||
+            if (!cpuEqual(a, b) || !vuUntouched(initial, b) || after != control || referenceYields != services.yields ||
                 std::memcmp(expected.get(), ram + 0x10000, arenaBytes) ||
                 std::memcmp(expected.get() + arenaBytes, ram + globals, globalBytes) ||
                 (n < 4 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
@@ -152,7 +162,7 @@ void testDirectionCallers()
             ++cases;
         }
     _mm_setcsr(saved);
-    std::printf("BSP direction callers: %u generated continuation cases, %u whole-memory checks; XYZ consumers, CPU/clock/checkpoints and FP control exact; historical helper ABI exact\n", cases, memoryCases);
+    std::printf("BSP direction callers: %u generated forward/inverse continuation cases, %u whole-memory checks; XYZ consumers, full inverse output, CPU/clock/checkpoints and FP control exact; VU untouched; historical direction ABI exact\n", cases, memoryCases);
 
     // Vehicle point setup through its next loop boundary, complete remaining tire-height loops,
     // and light-node continuations through their epilogue (including normalization and attenuation).
@@ -242,6 +252,7 @@ void testDirectionCallers()
             const auto run = [&](RecompiledFunction direction, R5900Context &ctx)
             {
                 services.yields = 0; rt->functions.setOverride(0x1da298, direction);
+                rt->functions.setOverride(0x1da1e8, direction == nativeDirection ? nativeInverse : originalInverse);
                 direction(ram, &ctx, rt.get()); require(ctx.pc == caller, "new direction return");
                 try { continuation(ram, &ctx, rt.get()); }
                 catch (const SegmentEnd &) { require(kind == 0, "unexpected segment stop"); return; }
@@ -258,7 +269,7 @@ void testDirectionCallers()
             _mm_setcsr(control); run(nativeDirection, b);
             const unsigned after = _mm_getcsr(); _mm_setcsr(saved);
             // Original scalar normalization can raise host exception flags; compare its complete FP effects too.
-            if (!cpuEqual(a, b) || after != referenceControl || referenceYields != services.yields ||
+            if (!cpuEqual(a, b) || !vuUntouched(initial, b) || after != referenceControl || referenceYields != services.yields ||
                 std::memcmp(expected.get(), ram + 0x10000, arenaBytes) ||
                 (n < 4 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
             {
@@ -274,5 +285,49 @@ void testDirectionCallers()
             ++addedCases;
         }
     _mm_setcsr(saved);
-    std::printf("Vehicle/light directions: %u generated continuation cases, %u whole-memory checks; collision point/inverse consumers, tire loops/clamps and light normalization/attenuation CPU/memory/clock/FP exact outside direction W; historical ABI exact\n", addedCases, addedMemory);
+    std::printf("Vehicle/light directions: %u generated continuation cases, %u whole-memory checks; native collision forward/inverse, tire loops/clamps and light normalization/attenuation CPU/memory/clock/FP exact outside direction W; VU untouched; historical direction ABI exact\n", addedCases, addedMemory);
+
+    // hdTerrain copies an inherited position.W into the vehicle's 0x40-byte contact records.
+    // Run the actual body-result consumer through its XYZ subtraction to the next dot-product call.
+    // Arbitrary W bits must have no CPU, VU, clock, FP or memory effect outside that input word.
+    unsigned contactCases = 0, contactMemory = 0;
+    services.stop = 0x1da710;
+    for (unsigned mode = 0; mode < 4; ++mode) for (unsigned n = 0; n < 128; ++n)
+    {
+        constexpr uint32_t vehicle = 0x10000, sp = 0x30000;
+        const uint32_t result = vehicle + 0xb10 + (n % 4) * 0x40;
+        for (unsigned i = 0; i < arenaBytes; i += 4)
+        {
+            const float f = float(int(bits() % 4097) - 2048) / 128.f;
+            std::memcpy(ram + 0x10000 + i, &f, 4);
+        }
+        ram[result + 0x30] = 1;
+        std::memcpy(input.get(), ram + 0x10000, arenaBytes);
+        R5900Context initial;
+        const uint32_t alias = n % 3 == 0 ? 0x80000000 : n % 3 == 1 ? 0x20000000 : 0;
+        setRegU32(&initial, 4, vehicle | alias); setRegU32(&initial, 5, n % 4);
+        setRegU32(&initial, 29, sp | alias); initial.pc = 0x118178; initial.cycleLimit = 0;
+        const unsigned control = ((saved | 0x1f80) & ~0xe040u) | (mode << 13) | (n & 1 ? 0x8040 : 0);
+        const auto run = [&](R5900Context &ctx)
+        {
+            services.yields = 0;
+            try { resume_0x118178(ram, &ctx, rt.get()); }
+            catch (const SegmentEnd &) { return; }
+            throw std::runtime_error("contact consumer did not reach dot-product boundary");
+        };
+        auto a = initial, b = initial;
+        _mm_setcsr(control); run(a);
+        const auto referenceControl = _mm_getcsr(); const auto referenceYields = services.yields;
+        std::memcpy(expected.get(), ram + 0x10000, arenaBytes);
+        if (n < 4) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++contactMemory; }
+        std::memcpy(ram + 0x10000, input.get(), arenaBytes);
+        const uint32_t poisonedW = bits(); std::memcpy(ram + result + 12, &poisonedW, 4);
+        _mm_setcsr(control); run(b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
+        std::memcpy(ram + result + 12, input.get() + result - 0x10000 + 12, 4);
+        require(!std::memcmp(&a, &b, sizeof(a)) && after == referenceControl && services.yields == referenceYields &&
+                !std::memcmp(expected.get(), ram + 0x10000, arenaBytes) &&
+                (n >= 4 || !std::memcmp(whole.get(), ram, bozo::kFlatBytes)), "contact position W affected XYZ consumer");
+        ++contactCases;
+    }
+    std::printf("Vehicle contacts: %u generated XYZ consumer cases, %u whole-memory checks; arbitrary position W has no downstream effect through subtraction\n", contactCases, contactMemory);
 }

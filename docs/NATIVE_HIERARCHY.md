@@ -1,5 +1,8 @@
 # Native hierarchy collision calculations
 
+The later [BSP/vehicle inverse increment](NATIVE_BSP_INVERSES.md) extends the eleven-entry allowlist
+described below to fifteen and records its paired continuation checks and contact-W RAM boundary.
+
 This increment replaces three calculation boundaries in the USA collision/height hierarchy. The player path
 uses game records directly and leaves VU registers, accumulator, flags and data memory untouched.
 BozoEngine stays at the previously qualified `4a8f70a`; no engine API or renderer change is included.

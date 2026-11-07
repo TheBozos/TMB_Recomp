@@ -71,3 +71,6 @@ generated consumer tails and complete tire-height entry-call comparisons.
 [Native shadow transforms](NATIVE_SHADOWS.md) subsequently add the vehicle shadow vertex
 transform and five weapon shadow motion/height-sample transforms, with generated vertex-loop
 and height-query staging comparisons.
+
+[Native tow-truck launcher transforms](NATIVE_TOW_TRUCK.md) subsequently add three forward
+and one inverse site, with complete generated positioning, smoothing and orientation consumers.

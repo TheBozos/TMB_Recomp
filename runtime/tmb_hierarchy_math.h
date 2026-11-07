@@ -38,6 +38,7 @@ namespace tmb::hierarchy
         0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, // terrain debug geometry
         0x1f56a8, 0x1f5904, // terrain modification and wave coordinates
         0x1e435c, 0x1e43b4, 0x1e43c8, // relative emitter position and direction
+        0x150d98, // tow-truck launcher local direction before normalization/orientation construction
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

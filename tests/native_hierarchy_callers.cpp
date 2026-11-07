@@ -1,0 +1,227 @@
+// SPDX-License-Identifier: MIT
+// Real hierarchy helper consumers compiled from the local game ELF; no copied game implementation.
+#include "tmb_port.h"
+#include "tmb_native_math.h"
+#include "tmb_hierarchy_math.h"
+#include "bozo/libs/libraries.h"
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <stdexcept>
+#include <vector>
+#include <algorithm>
+namespace tmb::math { void install(Registry &); }
+namespace tmb::hierarchy { void install(Registry &); }
+namespace
+{
+    void require(bool ok, const char *why) { if (!ok) throw std::runtime_error(why); }
+    uint32_t seed = 0x13bc91a7;
+    uint32_t bits() { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5; return seed; }
+    struct Host : bozo::port::Host
+    {
+        bozo::libs::Libraries libs;
+        bool enabled = true;
+        bozo::libs::Libraries &libraries() override { return libs; }
+        bool nativeGraphics() const override { return enabled; }
+        void frameEnd(Runtime *, R5900Context *) override { throw std::runtime_error("unexpected frame"); }
+        bool callLibrary(Runtime *, R5900Context *, uint32_t) override { throw std::runtime_error("unexpected library"); }
+    };
+    struct SegmentEnd {};
+    struct Services : bozo::RuntimeServices
+    {
+        unsigned yields = 0;
+        uint32_t stop = 0x1eeafc;
+        // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
+        void yield(uint8_t *, R5900Context *ctx, Runtime *) override
+        {
+            require(++yields < 64, "caller did not reach segment end");
+            if (ctx->pc == stop) throw SegmentEnd{};
+        }
+        [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
+        void unknownTarget(uint8_t *, R5900Context *ctx, Runtime *, uint32_t pc) override
+        { std::fprintf(stderr, "unexpected target %x return %x\n", pc, getRegU32(ctx, 31)); unexpected(); }
+        void syscall(uint8_t *, R5900Context *, Runtime *, uint32_t) override { unexpected(); }
+        void breakpoint(uint8_t *, R5900Context *, Runtime *, uint32_t) override { unexpected(); }
+        void trap(uint8_t *, R5900Context *, Runtime *) override { unexpected(); }
+        void unimplemented(uint8_t *, R5900Context *, Runtime *, uint32_t) override { unexpected(); }
+        void eret(uint8_t *, R5900Context *, Runtime *) override { unexpected(); }
+        uint32_t cop0Read(R5900Context *, Runtime *, uint32_t) override { unexpected(); }
+        void cop0Write(R5900Context *, Runtime *, uint32_t, uint32_t) override { unexpected(); }
+        bool cop0Condition(R5900Context *, Runtime *) override { unexpected(); }
+        void vu0CallMicroprogram(uint8_t *, R5900Context *, Runtime *, uint32_t) override { unexpected(); }
+        uint32_t vu0ControlRead(R5900Context *, Runtime *, uint32_t) override { unexpected(); }
+        void vu0ControlWrite(R5900Context *, Runtime *, uint32_t, uint32_t) override { unexpected(); }
+        void ioRead(R5900Context *ctx, Runtime *, uint32_t at, uint32_t, uint64_t[2]) override
+        { std::fprintf(stderr, "unexpected read %x at %x return %x\n", at, ctx->pc, getRegU32(ctx, 31)); unexpected(); }
+        void ioWrite(R5900Context *ctx, Runtime *, uint32_t at, uint32_t, const uint64_t[2]) override
+        { std::fprintf(stderr, "unexpected write %x at %x return %x\n", at, ctx->pc, getRegU32(ctx, 31)); unexpected(); }
+    };
+
+    constexpr uint32_t base = 0x10000, bytes = 0x40000, globals = 0x530000, globalBytes = 0x30000;
+    constexpr uint32_t gp = 0x40000, sp = 0x30000;
+    constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
+    bool cpuEqual(R5900Context a, R5900Context b)
+    {
+        std::memset(reinterpret_cast<uint8_t *>(&a) + vuAt, 0, vuBytes);
+        std::memset(reinterpret_cast<uint8_t *>(&b) + vuAt, 0, vuBytes);
+        return !std::memcmp(&a, &b, sizeof(a));
+    }
+    bool vuUntouched(const R5900Context &initial, const R5900Context &after)
+    { return !std::memcmp(reinterpret_cast<const uint8_t *>(&initial) + vuAt, reinterpret_cast<const uint8_t *>(&after) + vuAt, vuBytes); }
+    void context(R5900Context &ctx, uint32_t alias)
+    {
+        for (unsigned r = 1; r < 32; ++r) for (auto &v : ctx.r[r].uw) v = bits();
+        for (auto &v : ctx.vu0_vf) for (auto &b : v.u) b = bits();
+        ctx.vu0_vf[0] = {}; ctx.vu0_vf[0].u[3] = 0x3f800000;
+        for (auto &b : ctx.vu0_acc.u) b = bits();
+        ctx.vu0_status = bits(); ctx.vu0_mac = bits(); ctx.vi[5] = bits();
+        setRegU32(&ctx, 28, gp | alias); setRegU32(&ctx, 29, sp | alias); setRegU32(&ctx, 31, 0xbad0000);
+        ctx.cycleLimit = 0;
+    }
+    struct SavedW { uint32_t offset, value; };
+    std::vector<SavedW> referenceW;
+    void referenceDirection(uint8_t *ram, R5900Context *ctx, Runtime *rt)
+    {
+        const auto offset = bozo::GuestMemory::flatOffset(getRegU32(ctx, 6) & ~15u, 16);
+        require(offset >= 0, "invalid reference output");
+        if (std::none_of(referenceW.begin(), referenceW.end(), [&](auto p) { return p.offset == uint32_t(offset) + 12; }))
+        {
+            uint32_t value; std::memcpy(&value, ram + offset + 12, 4);
+            referenceW.push_back({uint32_t(offset) + 12, value});
+        }
+        // Leave the real original W and all VU effects intact through the complete consumer sequence.
+        mathfMulTransVec__FPA3_A3_fP8_fvectorT1_0x1da298(ram, ctx, rt);
+    }
+}
+
+void testHierarchyHelperCallers()
+{
+    auto rt = std::make_unique<Runtime>(); Host host; Services services;
+    rt->port = &host; rt->services = &services;
+    rt->functions.setGenerated(tmb_function_table, tmb_function_count);
+    rt->functions.setResume(tmb_resume_table, tmb_resume_count);
+    tmb::Registry registry; tmb::math::install(registry); tmb::hierarchy::install(registry);
+    const auto inverse = registry.find(0x1da1e8), direction = registry.find(0x1da298);
+    require(inverse && direction, "missing hierarchy leaves");
+    auto *ram = rt->memory.flat();
+    auto input = std::make_unique<uint8_t[]>(bytes + globalBytes), expected = std::make_unique<uint8_t[]>(bytes + globalBytes);
+    auto whole = std::make_unique<uint8_t[]>(bozo::kFlatBytes);
+    const auto word = [&](uint32_t at, uint32_t value) { std::memcpy(ram + at, &value, 4); };
+    const auto fill = [&] {
+        for (auto region : {std::pair{base, bytes}, std::pair{globals, globalBytes}})
+            for (uint32_t i = 0; i < region.second; i += 4)
+            { const float f = float(int(bits() % 8193) - 4096) / 128.f; std::memcpy(ram + region.first + i, &f, 4); }
+    };
+    const auto snapshot = [&](uint8_t *out) { std::memcpy(out, ram + base, bytes); std::memcpy(out + bytes, ram + globals, globalBytes); };
+    const auto restore = [&] { std::memcpy(ram + base, input.get(), bytes); std::memcpy(ram + globals, input.get() + bytes, globalBytes); };
+    const auto dataEqual = [&] { return !std::memcmp(expected.get(), ram + base, bytes) && !std::memcmp(expected.get() + bytes, ram + globals, globalBytes); };
+    constexpr uint32_t callers[] = {0x1d0de0, 0x1d0dfc, 0x1d12d8, 0x1d4b94,
+        0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, 0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804};
+    const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
+    for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
+        for (unsigned n = 0; n < 128; ++n)
+        {
+            fill(); const uint32_t alias = n % 3 == 0 ? 0x80000000 : n % 3 == 1 ? 0x20000000 : 0;
+            const auto address = [&](uint32_t v) { return v | alias; };
+            R5900Context initial; context(initial, alias);
+            const auto reg = [&](unsigned r, uint32_t v) { setRegU32(&initial, r, address(v)); };
+            const auto returnAt = [&](uint32_t offset) { word(sp + offset, 0xbad0000); word(sp + offset + 4, 0); };
+            reg(4, 0x15000); reg(5, sp + 0x20); reg(6, 0x19000);
+            setRegU32(&initial, 31, callers[kind]); initial.pc = kind < 4 ? 0x1da1e8 : 0x1da298;
+            word(gp - 0x2fb4, address(0x11000)); word(gp - 0x2fbc, address(0x12000)); word(gp - 0x2fb8, address(0x12000));
+            word(gp - 0x2f94, address(0x11000)); word(gp - 0x2f9c, address(0x12000)); word(gp - 0x2fa0, address(0x13000));
+            word(gp - 0x2f98, address(0x12000)); word(gp - 0x2f8c, 0);
+            const uint16_t slot = n % 4;
+            std::memcpy(ram + 0x53cc58, &slot, 2); std::memcpy(ram + 0x551e68, &slot, 2);
+            word(0x14000, n & 1 ? 0x40000 | (n << 7) : 0); ram[0x14006] = uint8_t(n);
+            // Arbitrary opaque payloads must survive native forward outputs without affecting XYZ consumers.
+            word(0x1101c, bits()); word(sp + 0x1c, bits()); word(sp + 0x2c, bits()); word(sp + 0x4c, bits());
+            RecompiledFunction continuation; services.stop = 0xffffffff;
+            if (kind < 2)
+            {
+                continuation = resume_0x1d0988; services.stop = 0x1da428;
+                reg(16, sp + 0x20); reg(17, sp + 0x30); reg(18, 0x18000); reg(19, 0x19000); reg(21, 0x15000);
+                if (kind == 1) reg(6, sp + 0x30);
+            }
+            else if (kind == 2)
+            {
+                continuation = resume_0x1d0988; services.stop = 0x1d1bc0;
+                reg(5, sp); reg(16, sp + 0x20); reg(17, 0x15000); reg(19, 0x14000);
+                reg(22, 0x19000); reg(23, 0x18000); reg(30, 0x1a000);
+            }
+            else if (kind == 3)
+            {
+                continuation = resume_0x1d4ab8; services.stop = 0x201310;
+                reg(5, sp + 0x50); reg(6, sp + 0x60); reg(16, sp + 0x50); reg(20, sp + 0x10);
+                reg(21, 0x18000); setRegU32(&initial, 18, 0); word(0x18000, address(0x14000));
+            }
+            else if (kind < 6)
+            {
+                continuation = resume_0x1cfb10; reg(22, 0x540000); reg(23, 0x540000);
+                if (kind == 4)
+                { reg(5, sp + 0x20); reg(6, 0x11010); reg(16, sp + 0x20); services.stop = 0x219b38; }
+                else { reg(5, sp + 0x30); reg(6, sp + 0x40); reg(16, sp + 0x40); returnAt(0xd0); }
+            }
+            else if (kind < 8)
+            {
+                continuation = resume_0x1d0190;
+                reg(16, 0x53cc70); reg(17, kind == 6 ? sp + 0x20 : sp + 0x10);
+                reg(18, 0x53cc30); reg(19, 0x53cc40); returnAt(0x90);
+                reg(5, kind == 6 ? sp + 0x30 : sp); reg(6, kind == 6 ? 0x11010 : sp + 0x10);
+            }
+            else if (kind < 10)
+            {
+                continuation = resume_0x1d2560;
+                reg(16, 0x551e80); reg(17, sp + 0x30); reg(18, sp + 0x40);
+                reg(19, 0x551e40); reg(20, 0x14000); returnAt(0xa0);
+                reg(5, kind == 8 ? sp + 0x10 : sp + 0x30); reg(6, kind == 8 ? 0x11010 : sp + 0x40);
+            }
+            else
+            {
+                continuation = resume_0x1d26f0;
+                reg(16, sp + 0x20); reg(17, kind == 10 ? sp + 0x30 : sp + 0x10);
+                reg(18, 0x54f870); reg(19, 0x551e80); reg(20, 0x550000); reg(21, 0x550000);
+                reg(22, 0x551e40); reg(23, 0x14000); returnAt(0xb0);
+                reg(5, kind == 10 ? sp + 0x30 : sp + 0x10); reg(6, kind == 10 ? 0x11010 : sp + 0x20);
+                initial.fu[20] = n & 1 ? 0x3f800000 : 0xbf800000;
+            }
+            snapshot(input.get());
+            const auto run = [&](bool native, R5900Context &ctx) {
+                referenceW.clear(); services.yields = 0;
+                rt->functions.setOverride(0x1da1e8, native ? inverse : mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8);
+                rt->functions.setOverride(0x1da298, native ? direction : referenceDirection);
+                auto helper = kind < 4 ? (native ? inverse : mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8) : (native ? direction : referenceDirection);
+                helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return");
+                try { continuation(ram, &ctx, rt.get()); }
+                catch (const SegmentEnd &) { require(services.stop != 0xffffffff, "unexpected segment end"); return; }
+                require(services.stop == 0xffffffff && ctx.pc == 0xbad0000, "hierarchy consumer returned early");
+            };
+            const unsigned control = ((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u);
+            auto a = initial, b = initial; _mm_setcsr(control);
+            try { run(false, a); }
+            catch (...) { std::fprintf(stderr, "hierarchy original kind %u case %u\n", kind, n); throw; }
+            const auto refControl = _mm_getcsr(); const auto refYields = services.yields;
+            // Normalize only forward-output W after all real consumers have run, exposing any W-dependent result.
+            for (auto patch : referenceW) std::memcpy(ram + patch.offset, &patch.value, 4);
+            snapshot(expected.get()); if (n < 4) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
+            restore(); _mm_setcsr(control); run(true, b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
+            if (!cpuEqual(a,b) || !vuUntouched(initial,b) || after != refControl || services.yields != refYields || !dataEqual() ||
+                (n < 4 && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
+            { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
+            ++cases;
+        }
+    host.enabled = false;
+    for (unsigned kind = 4; kind < std::size(callers); ++kind) for (unsigned n = 0; n < 64; ++n)
+    {
+        fill(); R5900Context initial; context(initial, 0);
+        setRegU32(&initial,4,0x15000+(n&15)); setRegU32(&initial,5,0x16000+((n>>2)&15));
+        setRegU32(&initial,6,0x17000+(n&15)); setRegU32(&initial,31,callers[kind]);
+        snapshot(input.get()); auto a=initial,b=initial;
+        mathfMulTransVec__FPA3_A3_fP8_fvectorT1_0x1da298(ram,&a,rt.get()); snapshot(expected.get());
+        if (n < 4) std::memcpy(whole.get(),ram,bozo::kFlatBytes);
+        restore(); direction(ram,&b,rt.get());
+        require(!std::memcmp(&a,&b,sizeof(a)) && dataEqual() && (n >= 4 || !std::memcmp(whole.get(),ram,bozo::kFlatBytes)), "historical hierarchy direction ABI");
+    }
+    _mm_setcsr(saved);
+    std::printf("hierarchy consumers: %u generated sequences, %u whole-memory checks; CPU/clock/FP exact outside retired VU/forward W; native VU untouched; 512 historical forward ABI cases (32 whole-memory)\n", cases, memoryCases);
+}

@@ -4,6 +4,8 @@ The later [BSP/vehicle inverse increment](NATIVE_BSP_INVERSES.md) extends the el
 described below to fifteen and records its paired continuation checks and contact-W RAM boundary.
 The subsequent [sphere/LOD increment](NATIVE_SPHERE_LOD.md) adds five collision-node/point returns,
 bringing the inverse allowlist to twenty, and qualifies their scalar consumers.
+The later [helper-consumer increment](NATIVE_HIERARCHY_HELPERS.md) extends it to twenty-four and
+also retires eight height/BSP/line-of-sight forward returns.
 
 This increment replaces three calculation boundaries in the USA collision/height hierarchy. The player path
 uses game records directly and leaves VU registers, accumulator, flags and data memory untouched.

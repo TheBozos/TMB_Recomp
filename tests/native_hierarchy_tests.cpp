@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 namespace tmb::hierarchy { void install(Registry &); }
+void testHierarchyHelperCallers();
 namespace
 {
     struct Host : bozo::ee::Host, bozo::port::Host
@@ -265,6 +266,7 @@ int main()
     auto original=shortcut,native=shortcut;
     hdHatSphereTestAsm__FP8_fvectorfT0T0_0x1cf7c0(ram,&original,&rt);sphere(ram,&native,&rt);
     if(std::memcmp(&original,&native,sizeof(native)))return 4;
+    testHierarchyHelperCallers();
     std::printf("native hierarchy: %llu helper cases, %llu whole-memory cases, %u geometric edges, %u complete BSP callers (32 whole-memory), 2048 other-caller ABI cases; %u historical inverse ABI cases (%zu whole-memory); no native micro calls; CPU/VU/host checks pass\n",
         (unsigned long long)cases,(unsigned long long)memoryCases,edges,callers,historicalInverse,std::size(tmb::hierarchy::inverseCallers));
 }

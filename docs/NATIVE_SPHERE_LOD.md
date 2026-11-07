@@ -1,5 +1,8 @@
 # Native sphere/LOD and collision helper calculations
 
+The subsequent [hierarchy helper increment](NATIVE_HIERARCHY_HELPERS.md) adds twelve more returns,
+with generated consumer tails and a paired trace of height-BSP temporary W.
+
 Three inline difference blocks now use native XYZ records: `hdSphereTest` at `1c6710`,
 `hdLodNode` at `1c69a0`, and the sphere overload at `1cadb8`. Their instruction ranges are
 `1c6714..1c6720`, `1c69bc..1c69c8`, and `1cadc4..1cadd0`. Together with the preceding

@@ -56,6 +56,10 @@ scalar-continuation tests and the retained fourth-component RAM boundary.
 collision hierarchy helper returns, with complete generated sphere/LOD callers, scalar consumer
 sequences and qualified gameplay/loading/movie routes. It records the remaining raw-RAM audit limit.
 
+[`NATIVE_HIERARCHY_HELPERS.md`](NATIVE_HIERARCHY_HELPERS.md) adds twelve segment-grid, control-node,
+height/BSP and line-of-sight helper returns. It records generated consumer tails, historical ABI
+checks, live-route coverage and the directly traced height-BSP temporary W difference.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

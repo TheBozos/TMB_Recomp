@@ -98,3 +98,7 @@ The subsequent [`NATIVE_SCENE.md`](NATIVE_SCENE.md) increment replaces the rende
 matrix stack, FOV, distance/LOD and point-light selection together with their producers, accessors and mesh
 consumers. Other game math helpers and VU macro blocks remain. Neither increment claims complete VU
 removal or full campaign/console visual parity.
+
+The later [attractor-group increment](NATIVE_ATTRACTOR_GROUPS.md) adds point-in-group,
+center and random-position inverse leaves, with complete selection/publication consumers,
+generated random producers and an audited indirect peel-out W boundary.

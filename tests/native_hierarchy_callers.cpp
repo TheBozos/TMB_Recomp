@@ -92,6 +92,15 @@ namespace
         // Leave the real original W and all VU effects intact through the complete consumer sequence.
         mathfMulTransVec__FPA3_A3_fP8_fvectorT1_0x1da298(ram, ctx, rt);
     }
+    void referenceInverse(uint8_t *ram, R5900Context *ctx, Runtime *rt)
+    {
+        const auto offset = bozo::GuestMemory::flatOffset(getRegU32(ctx, 6) & ~15u, 16);
+        require(offset >= 0, "invalid inverse output");
+        mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8(ram, ctx, rt);
+        // An inverse may reuse a forward record, replacing opaque W with meaningful basis[0].W.
+        // Its full later write must be compared exactly, without the earlier forward-W exclusion.
+        std::erase_if(referenceW, [&](auto patch) { return patch.offset == uint32_t(offset) + 12; });
+    }
 }
 
 void testHierarchyHelperCallers()
@@ -118,8 +127,10 @@ void testHierarchyHelperCallers()
     constexpr uint32_t callers[] = {0x1d0de0, 0x1d0dfc, 0x1d12d8, 0x1d4b94,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, 0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804,
         0x1cd400, 0x1cd768, 0x1cbbc8, 0x1cbc2c, 0x1cc634, 0x1cc6b4,
-        0x1ccec8, 0x1ccef8, 0x1cd884, 0x1cd8b4, 0x1d41c8, 0x1d9cac};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13; };
+        0x1ccec8, 0x1ccef8, 0x1cd884, 0x1cd8b4, 0x1d41c8, 0x1d9cac,
+        0x1cdf80, 0x1ce028, 0x1ce220, 0x1ce644, 0x1ce674, 0x1ce7b4, 0x1cea40,
+        0x1cdf40, 0x1cdfe4, 0x1ce1cc, 0x1ce37c, 0x1ce3a4, 0x1cdd3c};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -263,7 +274,7 @@ void testHierarchyHelperCallers()
                 reg(5,sp); reg(6,sp + 0x10); word(0x4dfcd0 + (n % 4) * 16, address(0x18000));
                 word(0x14000,n << 7);
             }
-            else
+            else if (kind == 23)
             {
                 continuation = resume_0x1d9c30;
                 setRegU32(&initial,16,2u << (n % 3)); setRegU32(&initial,17,2u << ((n >> 2) % 3));
@@ -277,12 +288,81 @@ void testHierarchyHelperCallers()
                 }
                 for (unsigned i=0;i<64;++i) word(0x17000+i*4,bits());
             }
+            else if (kind >= 27 && kind <= 30)
+            {
+                // Complete crossing tails, including the real point emitter and its capacity/duplicate guards.
+                continuation = kind < 29 ? resume_0x1ce588 : kind == 29 ? resume_0x1ce738 : resume_0x1ce958;
+                constexpr unsigned axes[] = {4,6,8,9}; const auto axis = axes[n % 4], index = n % 4;
+                word(gp - 0x2fe8,address(0x11000)); word(gp - 0x2ff4,address(0x12000));
+                word(gp - 0x2ff8,address(0x17000)); word(0x17000,address(0x15000));
+                word(gp - 0x2fcc,n % 3 == 0 ? 0 : n % 3 == 1 ? 48 : 49); word(gp - 0x35f4,0);
+                word(0x525470 + index * 4,(n >> 4) & 1);
+                reg(5,0x16000); reg(6,kind == 28 ? sp + 0x10 : sp);
+                reg(16,sp + 0x20); reg(18,0x19000);
+                if (kind < 29)
+                { setRegU32(&initial,17,index*64); setRegU32(&initial,19,axis); returnAt(0x90); }
+                else if (kind == 29)
+                { setRegU32(&initial,17,axis); setRegU32(&initial,19,index); returnAt(0x60); }
+                else
+                { setRegU32(&initial,17,index); setRegU32(&initial,19,axis); returnAt(0x90); }
+                if (kind >= 29 && n < 48)
+                {
+                    std::memset(ram+0x15000,0,48); word(0x15000,0x3f800000); word(0x15014,0x3f800000); word(0x15028,0x3f800000);
+                    word(0x1500c,bits()); std::memset(ram+0x19000,0,12);
+                    constexpr uint32_t edge[] = {0,0x409fffff,0x40a00000,0x40a00001,0xc0a00000,0xc0a00001};
+                    word(0x16000,edge[(n >> 2) % 6]); word(0x16004,edge[(n >> 2) % 6]);
+                }
+            }
+            else if (kind == 36)
+            {
+                continuation = resume_0x1cd538; services.stop = 0x1cdcb8;
+                reg(16,0x15000); reg(17,0x14000); reg(19,sp + 0x60); reg(5,sp + 0x50); reg(6,sp + 0x60);
+                setRegU32(&initial,21,(n % 4)*64); setRegU32(&initial,22,0); setRegU32(&initial,30,0);
+                word(gp - 0x2fe8,address(0x11000));
+            }
+            else
+            {
+                continuation = resume_0x1cdeb8;
+                const bool publish = kind == 34 || kind == 35;
+                services.stop = publish ? 0xffffffff : 0x201650;
+                setRegU32(&initial,16,0); setRegU32(&initial,20,64);
+                setRegU32(&initial,21,(n % 4)*64); setRegU32(&initial,30,(n % 4)*64);
+                reg(17,0x527a00); reg(18,sp + 0x30); reg(19,sp + 0x20);
+                reg(22,0x527a40); reg(23,sp + 0x70);
+                word(0x527a28,n % 4); word(gp - 0x2ff8,address(0x17000));
+                word(gp - 0x2fec,address(0x15000)); word(gp - 0x2ff4,address(0x12000));
+                word(gp - 0x2ff0,address(0x13000)); word(gp - 0x2fe8,address(0x11000));
+                ram[0x1703a] = uint8_t(n & 1);
+                word(sp + 0x90,address(0x14000)); word(0x1400c,address(0x18000));
+                word(0x14000,n & 1 ? 0x40000 | (n << 7) : 0);
+                if (kind == 24 || kind == 25) reg(6,sp + 0x30);
+                if (kind == 31 || kind == 32)
+                { reg(5,kind == 31 ? 0x16000 : 0x17040); reg(6,sp + 0x20); }
+                if (kind == 26 || kind == 33)
+                {
+                    reg(17,sp + 0x80); reg(20,sp + 0x40);
+                    reg(6,sp + 0x30); if (kind == 33) reg(5,0x16000);
+                }
+                if (publish)
+                {
+                    reg(16,0x527a40); reg(20,sp + 0x40);
+                    reg(5,kind == 34 ? sp + 0x50 : sp + 0x20);
+                    reg(6,kind == 34 ? 0x11010 + (n % 4)*64 : sp + 0x30);
+                    ram[sp+0x6e]=uint8_t(n); returnAt(0x130);
+                }
+                if (kind == 25 && n < 16)
+                {
+                    std::memset(ram+0x15000,0,48);word(0x15000,0x3f800000);word(0x15014,0x3f800000);word(0x15028,0x3f800000);
+                    word(0x1500c,bits());std::memset(ram+sp+0x20,0,12);
+                    constexpr uint32_t edge[] = {0,0x3f000000,0x3f800000,0x3f7fffff};word(sp+0x20,edge[n % 4]);
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
                 referenceW.clear(); services.yields = 0;
-                rt->functions.setOverride(0x1da1e8, native ? inverse : mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8);
+                rt->functions.setOverride(0x1da1e8, native ? inverse : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? direction : referenceDirection);
-                auto helper = isInverse(kind) ? (native ? inverse : mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8) : (native ? direction : referenceDirection);
+                auto helper = isInverse(kind) ? (native ? inverse : referenceInverse) : (native ? direction : referenceDirection);
                 helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return");
                 try { continuation(ram, &ctx, rt.get()); }
                 catch (const SegmentEnd &) { require(services.stop != 0xffffffff, "unexpected segment end"); return; }

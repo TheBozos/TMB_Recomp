@@ -1,5 +1,8 @@
 # Native hierarchy query and lighting transforms
 
+The subsequent [BSP crossing increment](NATIVE_BSP_CROSSINGS.md) adds thirteen further returns,
+bringing both inverse and forward allowlists to thirty-three.
+
 Twelve further hierarchy returns use the existing native record implementations: ten forward
 directions and two inverse directions. The audited allowlists now contain twenty-seven forward
 and twenty-six inverse returns. This extends [the grid/result increment](NATIVE_HIERARCHY_HELPERS.md).

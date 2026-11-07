@@ -29,6 +29,9 @@ namespace tmb::hierarchy
         0x1c7860, 0x1c7904, 0x1c7ae4, 0x1c7d00, // older BSP point/segment setup
         0x1c9984, 0x1c9b3c, 0x1ca3b8, 0x1caa48, // hierarchy roots, grid and traversal
         0x1c4fe0, 0x1c51dc, 0x1c53b4, // coordinate-system and older root setup
+        0x1ef318, // terrain animated-node coordinates
+        0x1ef44c, 0x1ef484, 0x1ef4c0, 0x1ef4fc, 0x1ef68c, 0x1ef6d4, // terrain bounds and height extrema
+        0x1efc5c, 0x1efca0, 0x1efef8, 0x1f06b4, // height/material query inputs
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

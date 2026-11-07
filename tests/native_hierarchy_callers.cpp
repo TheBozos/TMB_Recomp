@@ -57,7 +57,7 @@ namespace
         { std::fprintf(stderr, "unexpected write %x at %x return %x\n", at, ctx->pc, getRegU32(ctx, 31)); unexpected(); }
     };
 
-    constexpr uint32_t base = 0x10000, bytes = 0x40000, globals = 0x4d0000, globalBytes = 0x90000;
+    constexpr uint32_t base = 0x10000, bytes = 0x40000, globals = 0x4c0000, globalBytes = 0xa0000;
     constexpr uint32_t gp = 0x40000, sp = 0x30000;
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
@@ -135,8 +135,10 @@ void testHierarchyHelperCallers()
         0x1c7860, 0x1c7904, 0x1c7ae4, 0x1c7d00, 0x1c9984, 0x1c9b3c, 0x1ca3b8, 0x1caa48,
         0x1c7818, 0x1c78c4, 0x1c7a90, 0x1c7bc8, 0x1c7bf8, 0x1c7de8, 0x1c7e14,
         0x1c4fe0, 0x1c51dc, 0x1c53b4, 0x1c8094, 0x1c80ac, 0x1c8120, 0x1c8150,
-        0x1c85cc, 0x1c85e0, 0x1c8608, 0x1c863c};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67); };
+        0x1c85cc, 0x1c85e0, 0x1c8608, 0x1c863c,
+        0x1ef318, 0x1ef44c, 0x1ef484, 0x1ef4c0, 0x1ef4fc, 0x1ef68c, 0x1ef6d4,
+        0x1efc5c, 0x1efca0, 0x1efef8, 0x1f06b4};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 86); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -496,7 +498,7 @@ void testHierarchyHelperCallers()
                     else { reg(18,0x5101c0); reg(19,0x5101b0); }
                 }
             }
-            else
+            else if (kind < 76)
             {
                 // Complete point/ray result tails: scalar reconstruction, world sums and packed metadata.
                 const bool point = kind < 72, indexed = kind % 2 == 0, normal = kind < 70 || (kind >= 72 && kind < 74);
@@ -520,6 +522,49 @@ void testHierarchyHelperCallers()
                     reg(5,normal ? 0x14030 + offset : sp + 0x110);
                     reg(6,normal ? 0x11010 + (indexed ? index*64 : 0) : sp + 0x120); returnAt(0x1e0);
                 }
+            }
+            else if (kind == 76)
+            {
+                continuation = resume_0x1ef090; services.stop = n & 1 ? 0x1eec38 : 0xffffffff;
+                reg(5,sp); reg(6,0x18000); reg(16,0x18000); reg(17,0x14000); reg(18,0x15000); reg(20,0x19000);
+                word(0x14004,1 + (n & 1)); word(0x140cc,address(0x16000)); returnAt(0xb0);
+            }
+            else if (kind < 83)
+            {
+                // Complete terrain-node tails: four corners, real height scan, extrema and aggregate bounds.
+                continuation = resume_0x1ef3c0;
+                reg(4,0x14010); reg(5,sp + 0x20); reg(6,sp + 0x10);
+                reg(16,0x14000); reg(17,sp + 0x10); reg(18,0x14010); reg(19,sp + 0x20);
+                reg(20,0x4d0000); reg(21,sp + 0x50); reg(22,sp + 0x60); returnAt(0x100);
+                const uint16_t width = n % 4, height = (n >> 2) % 4;
+                std::memcpy(ram + 0x1409c,&width,2); std::memcpy(ram + 0x1409e,&height,2); std::memcpy(ram + 0x140a0,&width,2);
+                word(0x14090,address(0x19000)); word(gp - 0x33c4,1 + (n & 1));
+                for (unsigned i=0;i<16;++i)
+                { constexpr uint16_t heights[] = {0,0x561e,0x561f,0xffff}; const uint16_t h=heights[(i+n)%4]; std::memcpy(ram+0x19000+i*8,&h,2); }
+                const float x = kind == 78 || kind == 80 ? float(int(width)-1) : 0.f;
+                const float y = kind == 79 || kind == 80 ? float(int(height)-1) : 0.f;
+                std::memcpy(ram + sp + 0x20,&x,4); std::memcpy(ram + sp + 0x24,&y,4); word(sp + 0x28,0);
+                word(sp + 0x80,width ? width-1 : 0); word(sp + 0x84,height ? height-1 : 0); word(sp + 0x88,0xffff);
+                initial.fu[20]=0x42000000; initial.fu[21]=0xc2000000; initial.fu[22]=0x42000000; initial.fu[23]=0xc2000000; initial.fu[24]=0xbf800000;
+            }
+            else if (kind < 85)
+            {
+                continuation = resume_0x1efb98; services.stop = 0x1f2370;
+                word(gp - 0x33c8,address(0x14000)); reg(16,0x18000); reg(18,0x16000); reg(19,sp + 0x30); reg(20,sp + 0x20);
+                reg(4,kind == 83 ? 0x14010 : 0x14040); reg(5,sp); reg(6,kind == 83 ? sp + 0x20 : sp + 0x30);
+            }
+            else
+            {
+                // Keep valid grid coordinates around integer boundaries through actual row-stride dispatch.
+                continuation = kind == 85 ? resume_0x1efe10 : resume_0x1f0550; services.stop = 0x217ae8;
+                word(gp - 0x33c8,address(0x14000)); word(gp - 0x33a0,9); word(gp - 0x339c,0);
+                const uint16_t dimension=9; std::memcpy(ram+0x1408c,&dimension,2); std::memcpy(ram+0x1408e,&dimension,2);
+                reg(4,0x14040); reg(5,0x16000); reg(6,0x4ca390); reg(19,0x16000); reg(20,0x4ca390);
+                if (kind == 85) { reg(16,0x4d0000); setRegU32(&initial,18,0); }
+                else { reg(30,0x4d0000); setRegU32(&initial,22,0); }
+                std::memset(ram+0x14040,0,48); word(0x14040,0x3f800000); word(0x14054,0x3f800000); word(0x14068,0x3f800000);
+                constexpr uint32_t edge[] = {0,1,0x3f7fffff,0x3f800000,0x3f800001,0x40dfffff,0x40e00000,0x40e00001};
+                word(0x16000,edge[n%8]); word(0x16004,edge[(n>>3)%8]); word(0x16008,0x3f800000); word(0x1402c,0);
             }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {

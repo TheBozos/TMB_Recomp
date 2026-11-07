@@ -18,6 +18,8 @@ namespace tmb::hierarchy
         0x1170fc,           // vehicle collision-point offset
         0x1cb1e4, 0x1cb4a4, 0x1cb530, // collision node point/normal setup
         0x1cb770, 0x1cb834, // point-contact setup and scalar axis tests
+        0x1d0de0, 0x1d0dfc, 0x1d12d8, // segment collision-grid local points
+        0x1d4b94, // control-node BSP segment setup
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

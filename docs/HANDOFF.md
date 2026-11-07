@@ -35,6 +35,9 @@ direction, exact full-frame records, original-caller tests and the remaining mul
 [`NATIVE_SUSPENSION_TIRE.md`](NATIVE_SUSPENSION_TIRE.md) adds the suspension ride-height
 and tire-height transform leaves, with complete generated scalar consumers and tire entry calls.
 
+[`NATIVE_PARTICLE_EMISSION.md`](NATIVE_PARTICLE_EMISSION.md) adds the emitted-direction and
+attached/relative emitter transforms, with real particle metadata consumers and complete emitter-coordinate entry calls.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

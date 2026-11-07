@@ -152,8 +152,8 @@ void testHierarchyHelperCallers()
         0x1c8f10, 0x1c8f3c, 0x1c8fd8, 0x1c9000, 0x1c908c, 0x1c90b4,
         0x1c9140, 0x1c9168, 0x1c91f4, 0x1c921c, 0x1c959c, 0x1c96e8, 0x1d4514, 0x1d4560,
         0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904,
-        0x1888e8, 0x18b4c0};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118); };
+        0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || kind >= 123; };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -709,7 +709,7 @@ void testHierarchyHelperCallers()
                     word(vehicle+0x1d88,edge[n%8]); word(vehicle+0x1ddc,edge[(n>>1)%8]);
                 }
             }
-            else
+            else if (kind == 120)
             {
                 // Tire reconstruction through real CS copy, smoothing/lower clamp and return; also complete entry paths.
                 constexpr uint32_t vehicle=0x18000;
@@ -728,6 +728,53 @@ void testHierarchyHelperCallers()
                         const uint32_t tire=vehicle+0x1a90+i*0xf0; const float h=float((i+n)%4)/4.f;
                         std::memcpy(ram+tire+0x38,&h,4); word(tire+0xb8,(n>>i)&1);
                     }
+                }
+            }
+            else if (kind == 121)
+            {
+                // In-place emitted direction through real position/velocity, bounds, lifetime and metadata publication.
+                constexpr uint32_t particle=0x18000;
+                const uint32_t slot=n%3;
+                continuation = resume_0x1e4400;
+                reg(4,particle+0x2ca0); reg(5,sp+0x40); reg(6,sp+0x40); reg(18,particle);
+                reg(19,0x1d000+slot*16); reg(20,0x1d800+slot*16); reg(21,0x1c000); setRegU32(&initial,22,slot);
+                reg(23,0x1c010); reg(30,sp+0x40); returnAt(0xf0); word(sp+0x4c,bits());
+                word(sp+0x50,n&3); word(sp+0x54,address(0x1e000)); word(sp+0x5c,address(0x1e100));
+                word(particle+0x2e70,slot+1);
+                constexpr uint32_t types[]={1,2,3,7,8,9}; word(particle+0x2e40,types[(n/3)%6]);
+                word(particle+0x2d98,0x3f000000); word(particle+0x2d9c,n&4 ? 0x3fc00000 : 0x3f000000);
+                word(particle+0x2e24,n&8 ? 0x3dcccccd : 0); word(particle+0x2e28,30u<<16);
+                word(particle+0x2da4,n&16 ? 0x3f800000 : 0);
+                initial.fu[20]=0x3f000000; initial.fu[22]=0x40000000; initial.fu[23]=0x3f000000; initial.fu[24]=0x3e800000;
+                if (n >= 64) {
+                    // Enter before the actual range RNG branches; random direction generation is outside this fixture.
+                    fromEntry=true; initial.pc=0x1e4714;
+                    word(sp+0x58,address(particle+0x2ca0)); word(particle+0x2d8c,0x3f800000);
+                    word(particle+0x2d78,0x3f000000); word(particle+0x2d7c,n&1 ? 0x3fc00000 : 0x3f000000);
+                    word(particle+0x2d90,0x3e800000); word(particle+0x2d94,n&2 ? 0x3f400000 : 0x3e800000);
+                }
+            }
+            else
+            {
+                // Complete emitter-coordinate consumers, including full entry calls across all four attachment modes.
+                constexpr uint32_t emitter=0x18000, attached=0x15000, relative=0x16000;
+                const uint32_t output=n&16 ? 0x17300 : 0x1c000;
+                continuation = resume_0x1e4298;
+                reg(17,emitter); reg(18,sp+0x50); reg(19,output); reg(20,0x17300); returnAt(0xb0);
+                word(emitter+0xd0,address(0x17000)); word(emitter+0xd4,address(attached));
+                word(emitter+0xd8,address(0x17100)); word(emitter+0xdc,address(relative));
+                word(emitter+0xf0,address(0x17200)); word(emitter+0xf4,address(0x19000));
+                word(relative+0xc,bits()); word(emitter+0xc,bits()); word(output+0xc,bits());
+                if (kind == 122) {
+                    reg(4,attached); reg(5,0x17200); reg(6,sp+0x50); word(sp+0x5c,bits());
+                    word(emitter+0xdc,n&8 ? address(relative) : 0);
+                } else {
+                    reg(4,relative); reg(5,kind == 125 ? 0x17300 : sp); reg(6,kind == 125 ? output : emitter);
+                }
+                if ((kind == 122 || kind == 124) && n >= 64) {
+                    fromEntry=true; initial.pc=0x1e4298; setRegU32(&initial,31,0xbad0000);
+                    reg(4,emitter); reg(5,0x17300); reg(6,output);
+                    if (kind == 124) { word(emitter+0xd4,0); word(emitter+0xdc,n&8 ? address(relative) : 0); }
                 }
             }
             snapshot(input.get());

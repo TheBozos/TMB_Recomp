@@ -63,3 +63,7 @@ device-audio or subjective listening claim.
 
 Existing camera/HUD tests and the 12 release-tool regressions pass. Full campaign, rare multi-step
 movement, other direction-helper callers and the remaining hierarchy/VU math are not claimed qualified.
+
+[The suspension/tire-height increment](NATIVE_SUSPENSION_TIRE.md) subsequently adds the two
+forward transform leaves used by suspension ride-height and tire pivot reconstruction, with
+generated consumer tails and complete tire-height entry-call comparisons.

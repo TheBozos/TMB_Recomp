@@ -32,6 +32,9 @@ the TMB resident-binding audit, exact draw/sound comparisons and movie/loading/g
 [`NATIVE_VEHICLE.md`](NATIVE_VEHICLE.md) covers native vehicle spatial calculations and the audited skid
 direction, exact full-frame records, original-caller tests and the remaining multi-step coverage limit.
 
+[`NATIVE_SUSPENSION_TIRE.md`](NATIVE_SUSPENSION_TIRE.md) adds the suspension ride-height
+and tire-height transform leaves, with complete generated scalar consumers and tire entry calls.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

@@ -72,6 +72,10 @@ inverse W when it replaces an earlier forward record.
 traversal, older collision-node/terrain and animated matrix-stack setup returns, with real scalar
 consumer boundaries and historical ABI checks.
 
+[`NATIVE_LEGACY_BSP_HELPERS.md`](NATIVE_LEGACY_BSP_HELPERS.md) adds fifteen older BSP setup/result
+and hierarchy root/grid/traversal returns, with generated normalization, segment construction,
+packing and matrix-stack publication checks.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

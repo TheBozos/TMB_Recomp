@@ -83,7 +83,24 @@ Total native forward calls are 1,127,230 / 283,936 (one-player / four-player).
 Default runs make zero original-helper comparisons and execute zero VU0
 microprograms. These counts are coverage evidence, not a speedup measurement.
 
-Fresh windowed gameplay/loading/movie checks are in progress.
+After observer removal, the player, headless runner, historical checker and all
+eleven native suites rebuild; all suites pass again. The three production
+binaries contain no temporary observer markers.
+
+Fresh 6,500-frame actual four-player and one-player windowed routes and a
+4,200-frame movie/menu route complete through clean exit, using isolated scratch
+user data. Reviewed captures show decoded movie playback (1,000), return to menu
+(1,800), Junkyard loading (one-player 4,500), active one-player gameplay and vehicle
+shadows (5,500 / 6,300), and four advancing snow-arena views with snow/tire effects
+(four-player 5,500 / 6,300). The windowed one-player route reaches the new vehicle
+site 11,942 times; the weapon sites remain cold. These captures establish bounded
+functional coverage, not pixel-exact windowed or console parity.
+
+All three stereo 48 kHz WAV recordings contain audio. Device logs report
+27.7 / 77.2 / 29.2 ms of silence (movie / one-player / four-player), with underruns
+and dropped frames. Deterministic gameplay sound matches the previous increment;
+flawless device audio, subjective listening and full campaign acceptance are not
+claimed.
 
 ## Remaining scope
 

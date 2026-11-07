@@ -34,7 +34,7 @@ namespace
         // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
         void yield(uint8_t *, R5900Context *ctx, Runtime *) override
         {
-            require(++yields < 64, "caller did not reach segment end");
+            require(++yields < 4096, "caller did not reach segment end");
             if (ctx->pc == stop) throw SegmentEnd{};
         }
         [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
@@ -57,7 +57,7 @@ namespace
         { std::fprintf(stderr, "unexpected write %x at %x return %x\n", at, ctx->pc, getRegU32(ctx, 31)); unexpected(); }
     };
 
-    constexpr uint32_t base = 0x10000, bytes = 0x40000, globals = 0x530000, globalBytes = 0x30000;
+    constexpr uint32_t base = 0x10000, bytes = 0x40000, globals = 0x4d0000, globalBytes = 0x90000;
     constexpr uint32_t gp = 0x40000, sp = 0x30000;
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
@@ -116,7 +116,10 @@ void testHierarchyHelperCallers()
     const auto restore = [&] { std::memcpy(ram + base, input.get(), bytes); std::memcpy(ram + globals, input.get() + bytes, globalBytes); };
     const auto dataEqual = [&] { return !std::memcmp(expected.get(), ram + base, bytes) && !std::memcmp(expected.get() + bytes, ram + globals, globalBytes); };
     constexpr uint32_t callers[] = {0x1d0de0, 0x1d0dfc, 0x1d12d8, 0x1d4b94,
-        0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, 0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804};
+        0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, 0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804,
+        0x1cd400, 0x1cd768, 0x1cbbc8, 0x1cbc2c, 0x1cc634, 0x1cc6b4,
+        0x1ccec8, 0x1ccef8, 0x1cd884, 0x1cd8b4, 0x1d41c8, 0x1d9cac};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13; };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -127,7 +130,7 @@ void testHierarchyHelperCallers()
             const auto reg = [&](unsigned r, uint32_t v) { setRegU32(&initial, r, address(v)); };
             const auto returnAt = [&](uint32_t offset) { word(sp + offset, 0xbad0000); word(sp + offset + 4, 0); };
             reg(4, 0x15000); reg(5, sp + 0x20); reg(6, 0x19000);
-            setRegU32(&initial, 31, callers[kind]); initial.pc = kind < 4 ? 0x1da1e8 : 0x1da298;
+            setRegU32(&initial, 31, callers[kind]); initial.pc = isInverse(kind) ? 0x1da1e8 : 0x1da298;
             word(gp - 0x2fb4, address(0x11000)); word(gp - 0x2fbc, address(0x12000)); word(gp - 0x2fb8, address(0x12000));
             word(gp - 0x2f94, address(0x11000)); word(gp - 0x2f9c, address(0x12000)); word(gp - 0x2fa0, address(0x13000));
             word(gp - 0x2f98, address(0x12000)); word(gp - 0x2f8c, 0);
@@ -176,7 +179,7 @@ void testHierarchyHelperCallers()
                 reg(19, 0x551e40); reg(20, 0x14000); returnAt(0xa0);
                 reg(5, kind == 8 ? sp + 0x10 : sp + 0x30); reg(6, kind == 8 ? 0x11010 : sp + 0x40);
             }
-            else
+            else if (kind < 12)
             {
                 continuation = resume_0x1d26f0;
                 reg(16, sp + 0x20); reg(17, kind == 10 ? sp + 0x30 : sp + 0x10);
@@ -185,12 +188,101 @@ void testHierarchyHelperCallers()
                 reg(5, kind == 10 ? sp + 0x30 : sp + 0x10); reg(6, kind == 10 ? 0x11010 : sp + 0x20);
                 initial.fu[20] = n & 1 ? 0x3f800000 : 0xbf800000;
             }
+            else if (kind == 12)
+            {
+                continuation = resume_0x1cd180;
+                reg(17, 0x14000); reg(18, 0x15000); reg(19, 0x18000);
+                word(gp - 0x35ec, n % 3 == 0 ? 1199 : n % 3 == 1 ? 1200 : 0);
+                word(gp - 0x2fc0, 1); returnAt(0xc0);
+            }
+            else if (kind == 13)
+            {
+                continuation = resume_0x1cd538; services.stop = 0x201650;
+                reg(19, sp + 0x60); reg(6, sp + 0x50);
+                word(sp + 0x120, address(sp + 0x100)); word(sp + 0x11c, address(sp + 0xf0));
+                word(sp + 0x130, address(sp + 0x50)); word(sp + 0x110, address(0x14000));
+                word(0x1400c, address(0x17000)); word(sp + 0x128, address(sp + 0x20));
+                initial.fu[20] = 0x3f800000;
+            }
+            else if (kind < 18)
+            {
+                const bool point = kind < 16, first = kind % 2 == 0;
+                continuation = point ? resume_0x1cba48 : resume_0x1cc588;
+                word(gp - 0x2fdc, n % 4); word(gp - 0x2fe8, address(0x11000));
+                word(0x14000, n & 1 ? 0x40000 | (n << 7) : 0); ram[0x14006] = uint8_t(n);
+                word(0x527a28, n % 4); reg(23, 0x520000); returnAt(point ? 0xb0 : 0xc0);
+                if (point)
+                {
+                    reg(16, sp + 0x20); reg(17, 0x16000); reg(18, 0x14000); reg(19, sp + 0x30);
+                    reg(20, sp + 0x40); reg(21, 0x18000); reg(22, 0x15000);
+                    reg(5, first ? 0x16000 : sp + 0x30); reg(6, first ? 0x19010 : sp + 0x40);
+                    word(0x16000, n & 2 ? 0xbf800000 : 0x3f800000);
+                }
+                else
+                {
+                    reg(17, first ? sp + 0x30 : sp + 0x20); reg(18, 0x18000); reg(19, 0x527a40);
+                    reg(20, 0x5253e0); reg(21, first ? 0x520000 : sp + 0x10); reg(22, 0x520000);
+                    reg(23, 0x14000); reg(30, 0x527a00);
+                    reg(5, first ? sp + 0x30 : sp + 0x10); reg(6, first ? 0x19010 : sp + 0x20);
+                    initial.fu[20] = n & 2 ? 0x3f800000 : 0xbf800000;
+                }
+            }
+            else if (kind < 20)
+            {
+                continuation = resume_0x1cce58; services.stop = 0x1eeafc;
+                word(gp - 0x2ff4, address(0x12000)); word(gp - 0x2ff8, address(0x17000));
+                word(gp - 0x2fec, address(0x15000)); word(gp - 0x2ff0, address(0x13000));
+                word(gp - 0x2fe8, address(0x11000));
+                for (unsigned r : {16u, 17u, 18u, 21u}) setRegU32(&initial, r, 0);
+                reg(19, 0x520000); reg(20, 0x520000);
+                reg(22, 0x5253c0); reg(5, 0x17000); reg(6, sp);
+                if (n < 16)
+                {
+                    std::memset(ram + 0x15000, 0, 48);
+                    word(0x15000, 0x3f800000); word(0x15014, 0x3f800000); word(0x15028, 0x3f800000);
+                    std::memset(ram + 0x17000, 0, 12);
+                    constexpr uint32_t edge[] = {0, 0x3f000000, 0x3f800000, 0x3f7fffff};
+                    word(0x17000, edge[n % 4]);
+                }
+            }
+            else if (kind < 22)
+            {
+                continuation = resume_0x1cd538; services.stop = 0x1cd5d0;
+                reg(17, 0x527a00); setRegU32(&initial, 18, (n % 4) * 64); reg(19, sp + 0x60);
+                setRegU32(&initial, 20, 0); reg(23, sp + 0x40); reg(30, sp + 0x90);
+                reg(5, kind == 20 ? sp + 0x70 : sp + 0x40); reg(6, kind == 20 ? 0x19010 : sp + 0x90);
+                word(0x527a28, n % 4); word(sp + 0x11c, address(sp + 0x20));
+                word(sp + 0x110, address(0x14000)); word(sp + 0x114, 2);
+                word(0x14000, n & 1 ? 0x40000 | (n << 7) : 0);
+                word(gp - 0x2fe8, address(0x11000));
+            }
+            else if (kind == 22)
+            {
+                continuation = resume_0x1d4188; services.stop = 0x1e38f0;
+                reg(16, sp + 0x10); setRegU32(&initial,18,n % 4); reg(19,0x14000);
+                reg(5,sp); reg(6,sp + 0x10); word(0x4dfcd0 + (n % 4) * 16, address(0x18000));
+                word(0x14000,n << 7);
+            }
+            else
+            {
+                continuation = resume_0x1d9c30;
+                setRegU32(&initial,16,2u << (n % 3)); setRegU32(&initial,17,2u << ((n >> 2) % 3));
+                reg(18,0x14000); reg(19,0x16000); reg(20,0x17000); reg(5,sp + 0x60); reg(6,sp);
+                word(0x14008,n & 1); word(0x14040,0x3f000000); word(0x14044,0xbf000000); returnAt(0xa0);
+                if (n < 16)
+                {
+                    std::memset(ram + 0x15000,0,48); word(0x15000,0x3f800000); word(0x15014,0x3f800000); word(0x15028,0x3f800000);
+                    constexpr uint32_t edge[] = {0,0x3effffff,0x3f000000,0x3f000001};
+                    word(sp + 0x60,edge[n % 4]); word(sp + 0x64,edge[(n >> 2) % 4]);
+                }
+                for (unsigned i=0;i<64;++i) word(0x17000+i*4,bits());
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
                 referenceW.clear(); services.yields = 0;
                 rt->functions.setOverride(0x1da1e8, native ? inverse : mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8);
                 rt->functions.setOverride(0x1da298, native ? direction : referenceDirection);
-                auto helper = kind < 4 ? (native ? inverse : mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8) : (native ? direction : referenceDirection);
+                auto helper = isInverse(kind) ? (native ? inverse : mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8) : (native ? direction : referenceDirection);
                 helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return");
                 try { continuation(ram, &ctx, rt.get()); }
                 catch (const SegmentEnd &) { require(services.stop != 0xffffffff, "unexpected segment end"); return; }
@@ -210,9 +302,10 @@ void testHierarchyHelperCallers()
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;
         }
-    host.enabled = false;
+    host.enabled = false; unsigned historical = 0;
     for (unsigned kind = 4; kind < std::size(callers); ++kind) for (unsigned n = 0; n < 64; ++n)
     {
+        if (isInverse(kind)) continue;
         fill(); R5900Context initial; context(initial, 0);
         setRegU32(&initial,4,0x15000+(n&15)); setRegU32(&initial,5,0x16000+((n>>2)&15));
         setRegU32(&initial,6,0x17000+(n&15)); setRegU32(&initial,31,callers[kind]);
@@ -221,7 +314,8 @@ void testHierarchyHelperCallers()
         if (n < 4) std::memcpy(whole.get(),ram,bozo::kFlatBytes);
         restore(); direction(ram,&b,rt.get());
         require(!std::memcmp(&a,&b,sizeof(a)) && dataEqual() && (n >= 4 || !std::memcmp(whole.get(),ram,bozo::kFlatBytes)), "historical hierarchy direction ABI");
+        ++historical;
     }
     _mm_setcsr(saved);
-    std::printf("hierarchy consumers: %u generated sequences, %u whole-memory checks; CPU/clock/FP exact outside retired VU/forward W; native VU untouched; 512 historical forward ABI cases (32 whole-memory)\n", cases, memoryCases);
+    std::printf("hierarchy consumers: %u generated sequences, %u whole-memory checks; CPU/clock/FP exact outside retired VU/forward W; native VU untouched; %u historical forward ABI cases (%u whole-memory)\n", cases, memoryCases, historical, historical / 16);
 }

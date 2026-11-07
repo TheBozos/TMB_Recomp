@@ -80,6 +80,10 @@ packing and matrix-stack publication checks.
 and point-contact/ray result transforms, with complete scalar result tails and historical ABI
 checks.
 
+[`NATIVE_TERRAIN_INPUT_HELPERS.md`](NATIVE_TERRAIN_INPUT_HELPERS.md) adds eleven terrain-node,
+height-query and material-query inverse returns, with actual height scans, aggregate bounds
+publication and integer-grid consumer checks.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

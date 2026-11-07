@@ -86,6 +86,8 @@ The [point/ray increment](NATIVE_POINT_RAY_HELPERS.md) adds coordinate-system/ro
 complete point-contact/ray result tails.
 The [terrain-input increment](NATIVE_TERRAIN_INPUT_HELPERS.md) adds animated-node, terrain-bounds
 and height/material-query inverse transforms, retaining scalar height and grid calculations.
+The [terrain-query increment](NATIVE_TERRAIN_QUERY_HELPERS.md) adds LOS/cell/ray inputs and
+result reconstruction, retaining the scalar query and normalized publication code.
 
 The subsequent [`NATIVE_SCENE.md`](NATIVE_SCENE.md) increment replaces the renderer hierarchy's root/child
 matrix stack, FOV, distance/LOD and point-light selection together with their producers, accessors and mesh

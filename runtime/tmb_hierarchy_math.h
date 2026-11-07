@@ -32,6 +32,9 @@ namespace tmb::hierarchy
         0x1ef318, // terrain animated-node coordinates
         0x1ef44c, 0x1ef484, 0x1ef4c0, 0x1ef4fc, 0x1ef68c, 0x1ef6d4, // terrain bounds and height extrema
         0x1efc5c, 0x1efca0, 0x1efef8, 0x1f06b4, // height/material query inputs
+        0x1f11a8, 0x1f11ec, 0x1f1b88, 0x1f1c38, // terrain line-of-sight inputs/results
+        0x1f2480, 0x1f24c0, 0x1f2e4c, 0x1f2ef8, // terrain cell BSP inputs/results
+        0x1f3110, 0x1f315c, // terrain ray grid endpoints
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

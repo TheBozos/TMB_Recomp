@@ -137,8 +137,10 @@ void testHierarchyHelperCallers()
         0x1c4fe0, 0x1c51dc, 0x1c53b4, 0x1c8094, 0x1c80ac, 0x1c8120, 0x1c8150,
         0x1c85cc, 0x1c85e0, 0x1c8608, 0x1c863c,
         0x1ef318, 0x1ef44c, 0x1ef484, 0x1ef4c0, 0x1ef4fc, 0x1ef68c, 0x1ef6d4,
-        0x1efc5c, 0x1efca0, 0x1efef8, 0x1f06b4};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 86); };
+        0x1efc5c, 0x1efca0, 0x1efef8, 0x1f06b4,
+        0x1f11a8, 0x1f11ec, 0x1f1b88, 0x1f1c38,
+        0x1f2480, 0x1f24c0, 0x1f2e4c, 0x1f2ef8, 0x1f3110, 0x1f315c};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || kind >= 76; };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -553,7 +555,7 @@ void testHierarchyHelperCallers()
                 word(gp - 0x33c8,address(0x14000)); reg(16,0x18000); reg(18,0x16000); reg(19,sp + 0x30); reg(20,sp + 0x20);
                 reg(4,kind == 83 ? 0x14010 : 0x14040); reg(5,sp); reg(6,kind == 83 ? sp + 0x20 : sp + 0x30);
             }
-            else
+            else if (kind < 87)
             {
                 // Keep valid grid coordinates around integer boundaries through actual row-stride dispatch.
                 continuation = kind == 85 ? resume_0x1efe10 : resume_0x1f0550; services.stop = 0x217ae8;
@@ -565,6 +567,56 @@ void testHierarchyHelperCallers()
                 std::memset(ram+0x14040,0,48); word(0x14040,0x3f800000); word(0x14054,0x3f800000); word(0x14068,0x3f800000);
                 constexpr uint32_t edge[] = {0,1,0x3f7fffff,0x3f800000,0x3f800001,0x40dfffff,0x40e00000,0x40e00001};
                 word(0x16000,edge[n%8]); word(0x16004,edge[(n>>3)%8]); word(0x16008,0x3f800000); word(0x1402c,0);
+            }
+            else if (kind < 89)
+            {
+                // Paired LOS inputs, including the context translations, through segment subtraction dispatch.
+                continuation = resume_0x1f10c0; services.stop = 0x1daf28;
+                word(gp - 0x33c8,address(0x14000));
+                word(sp + 0x16c,address(0x16000)); word(sp + 0x1c8,address(sp + 0x10));
+                word(sp + 0x1cc,address(sp + 0x20));
+                reg(4,0x14040); reg(5,kind == 87 ? 0x15000 : 0x16000); reg(6,kind == 87 ? sp : sp + 0x10);
+            }
+            else if (kind < 91)
+            {
+                // World position, complete normal normalization/copy and distance publication before debug draw.
+                continuation = resume_0x1f10c0; services.stop = 0x1f50f0;
+                word(gp - 0x33c8,address(0x14000)); word(gp - 0x33d8,1);
+                word(sp + 0x170,address(0x18000)); word(sp + 0x1c0,address(sp + 0x110));
+                reg(4,0x14000); reg(5,kind == 89 ? sp + 0x90 : sp + 0xb0); reg(6,sp + 0x110);
+                reg(16,0x18010); reg(22,sp + 0xc0); reg(30,sp + 0xa0);
+                initial.fu[20]=0x41200000; initial.fu[21]=0x40800000;
+                initial.fu[22]=0x3f000000; initial.fu[23]=0x3f800000;
+                initial.fu[24]=0xbf000000; initial.fu[25]=0xbf800000;
+            }
+            else if (kind < 93)
+            {
+                // Paired cell BSP endpoints, real scalar segment records and BSP pointer lookup.
+                continuation = resume_0x1f2370; services.stop = 0x201650;
+                reg(4,0x14000); reg(5,kind == 91 ? 0x15000 : 0x16000); reg(6,kind == 91 ? sp + 0xd0 : sp + 0xe0);
+                reg(20,0x14000); reg(21,0x17000); reg(22,0x15000); reg(23,0x19000);
+                word(sp + 0x140,address(0x16000)); word(0x14088,address(0x18000));
+                const uint16_t index=n%4; std::memcpy(ram + 0x17002,&index,2);
+                for (unsigned i=0;i<4;++i) word(0x18000+4*i,address(0x1a000+16*i));
+            }
+            else if (kind < 95)
+            {
+                // Complete cell-result tail, retaining meaningful transformed W in the result copy.
+                continuation = resume_0x1f2370;
+                reg(4,0x14000); reg(5,kind == 93 ? sp + 0x90 : sp + 0xb0); reg(6,sp + 0xd0);
+                reg(16,sp + 0xd0); reg(20,0x14000); reg(23,0x18000); returnAt(0x1f0);
+                word(gp - 0x33d8,0); word(gp - 0x33e0,0); word(gp - 0x33dc,0);
+                word(sp + 0x144,n & 1); initial.fu[20]=0x41200000; initial.fu[21]=0x40800000;
+                initial.fu[22]=0x3f000000; initial.fu[23]=0x3f800000;
+                initial.fu[24]=0xbf000000; initial.fu[25]=0xbf800000;
+            }
+            else
+            {
+                // Paired ray endpoints plus translation through segment subtraction dispatch.
+                continuation = resume_0x1f30a0; services.stop = 0x1daf28;
+                reg(4,0x14040); reg(5,kind == 95 ? 0x15000 : 0x16000); reg(6,kind == 95 ? sp : sp + 0x10);
+                reg(16,0x14040); reg(17,sp + 0x10); reg(23,0x14000);
+                word(sp + 0x54,address(0x16000));
             }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {

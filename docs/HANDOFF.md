@@ -84,6 +84,10 @@ checks.
 height-query and material-query inverse returns, with actual height scans, aggregate bounds
 publication and integer-grid consumer checks.
 
+[`NATIVE_TERRAIN_QUERY_HELPERS.md`](NATIVE_TERRAIN_QUERY_HELPERS.md) adds ten terrain LOS,
+cell-collision and ray inverse returns, with translated endpoint pairs and real result
+normalization/publication consumers.
+
 [`NATIVE_SCENE.md`](NATIVE_SCENE.md) covers the subsequent renderer hierarchy producer/consumer replacement:
 native scene/frame/light records, zero VU0 program calls in both qualified routes, packet-buffer-only RAM
 differences at the checked gameplay snapshot, and movie/loading/1P/4P validation. Other macro math and shader

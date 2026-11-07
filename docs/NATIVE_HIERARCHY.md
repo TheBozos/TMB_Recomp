@@ -6,6 +6,8 @@ The subsequent [sphere/LOD increment](NATIVE_SPHERE_LOD.md) adds five collision-
 bringing the inverse allowlist to twenty, and qualifies their scalar consumers.
 The later [helper-consumer increment](NATIVE_HIERARCHY_HELPERS.md) extends it to twenty-four and
 also retires eight height/BSP/line-of-sight forward returns.
+The subsequent [query/lighting increment](NATIVE_HIERARCHY_QUERY_RESULTS.md) extends the inverse
+allowlist to twenty-six and the forward allowlist to twenty-seven.
 
 This increment replaces three calculation boundaries in the USA collision/height hierarchy. The player path
 uses game records directly and leaves VU registers, accumulator, flags and data memory untouched.

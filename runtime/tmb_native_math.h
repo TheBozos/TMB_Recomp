@@ -9,11 +9,14 @@
 
 namespace tmb::math
 {
-    // Audited XYZ-only consumers: skid, BSP/collision nodes, vehicle points/heights and light nodes.
-    inline constexpr std::array<uint32_t, 17> directionReturns{
+    // Audited XYZ-only consumers: collision queries, vehicle spatial records and hierarchy lighting/attachments.
+    inline constexpr std::array<uint32_t, 27> directionReturns{
         0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc, 0x11708c, 0x1880e0, 0x1d4284, 0x1d42e8, 0x1cb19c,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, // height-test collision/BSP results
-        0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804}; // line-of-sight BSP/volume results
+        0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804, // line-of-sight BSP/volume results
+        0x1cbbc8, 0x1cbc2c, 0x1cc634, 0x1cc6b4, // point/line result publication
+        0x1ccec8, 0x1ccef8, 0x1cd884, 0x1cd8b4, // terrain point and BSP auxiliary results
+        0x1d41c8, 0x1d9cac}; // burning attachment and light-volume colour coordinates
 
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };

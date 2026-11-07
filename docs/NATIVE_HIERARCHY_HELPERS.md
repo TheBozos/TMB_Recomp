@@ -1,5 +1,8 @@
 # Native hierarchy helper consumers
 
+The later [query/lighting increment](NATIVE_HIERARCHY_QUERY_RESULTS.md) adds twelve further returns,
+bringing the inverse/forward allowlists to twenty-six / twenty-seven.
+
 Twelve more hierarchy return sites use the existing native record calculations. The inverse
 allowlist grows from twenty to twenty-four entries; forward directions grow from nine to seventeen.
 BozoEngine remains pinned at `4a8f70a`. This change extends the

@@ -131,8 +131,10 @@ void testHierarchyHelperCallers()
         0x1cdf80, 0x1ce028, 0x1ce220, 0x1ce644, 0x1ce674, 0x1ce7b4, 0x1cea40,
         0x1cdf40, 0x1cdfe4, 0x1ce1cc, 0x1ce37c, 0x1ce3a4, 0x1cdd3c,
         0x1c0684, 0x1c0884, 0x1c0a70, 0x1c5d0c, 0x1c639c, 0x1c6bf4, 0x1c6c94, 0x1c6f04,
-        0x1c7620, 0x1c6bac, 0x1c6c54, 0x1c7134, 0x1c7160};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45); };
+        0x1c7620, 0x1c6bac, 0x1c6c54, 0x1c7134, 0x1c7160,
+        0x1c7860, 0x1c7904, 0x1c7ae4, 0x1c7d00, 0x1c9984, 0x1c9b3c, 0x1ca3b8, 0x1caa48,
+        0x1c7818, 0x1c78c4, 0x1c7a90, 0x1c7bc8, 0x1c7bf8, 0x1c7de8, 0x1c7e14};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -392,7 +394,7 @@ void testHierarchyHelperCallers()
                     std::memcpy(ram + 0x18028,&slot,2); word(gp - 0x2ffc,1); returnAt(0xc0);
                 }
             }
-            else
+            else if (kind < 50)
             {
                 word(gp - 0x3028,address(0x17000)); word(gp - 0x3024,address(0x12000));
                 word(gp - 0x3020,address(0x13000)); word(gp - 0x301c,address(0x15000));
@@ -419,6 +421,63 @@ void testHierarchyHelperCallers()
                         word(0x1500c,bits()); std::memset(ram + sp,0,12);
                         constexpr uint32_t edge[] = {0,0x3f000000,0x3f800000,0x3f7fffff}; word(sp,edge[n % 4]);
                     }
+                }
+            }
+            else if (kind >= 54 && kind <= 57)
+            {
+                // Root continuations publish packed stack state before actual traversal dispatch.
+                if (kind < 56)
+                {
+                    continuation = resume_0x1c9858; services.stop = 0x1cae18;
+                    reg(6,0x525490); word(gp - 0x2fe4,address(0x14000));
+                    if (kind == 54) reg(16,0x525490);
+                    else { reg(18,0x525490); reg(19,0x525480); }
+                }
+                else
+                {
+                    continuation = kind == 56 ? resume_0x1c9bf8 : resume_0x1ca798;
+                    services.stop = 0x1da428; word(gp - 0x35ec,n & 1 ? 1199 : 0);
+                    if (kind == 56) reg(21,0x15000);
+                    else { reg(18,0x18000); reg(19,0x15000); reg(30,0x520000); std::memcpy(ram + 0x18028,&slot,2); }
+                }
+            }
+            else
+            {
+                continuation = resume_0x1c7758;
+                const bool publish = kind >= 61;
+                services.stop = publish ? (kind < 63 ? 0x1c77d8 : 0xffffffff) : 0x201650;
+                word(gp - 0x3028,address(0x17000)); word(gp - 0x3024,address(0x12000));
+                word(gp - 0x3020,address(0x13000)); word(gp - 0x301c,address(0x15000));
+                word(gp - 0x3018,address(0x11000)); std::memcpy(ram + 0x512758,&slot,2);
+                word(sp + 0x90,address(0x14000)); word(0x1400c,address(0x18000));
+                word(sp + 0x94,address(sp + 0x80)); word(sp + 0x98,address(sp + 0x50));
+                word(sp + 0x9c,64); word(sp + 0xa0,0x70); word(sp + 0xa4,0);
+                word(0x17004,3); ram[0x1703a] = uint8_t(n & 1);
+                reg(16,0x512730); reg(17,sp + 0x30); reg(18,sp + 0x20); reg(19,sp + 0x70);
+                reg(20,0x512770); reg(21,0x510110); setRegU32(&initial,22,64); setRegU32(&initial,23,0);
+                reg(30,0x512740); reg(5,sp + 0x20); reg(6,sp + 0x30);
+                if (kind == 58 || kind == 59) { reg(5,kind == 58 ? 0x16000 : 0x17070); reg(6,sp + 0x20); }
+                if (kind == 52 || kind == 60)
+                {
+                    reg(16,sp + 0x80); reg(19,sp + 0x70); reg(20,sp + 0x40);
+                    if (kind == 60) reg(5,sp + 0x20);
+                }
+                if (kind == 53)
+                { reg(17,0x512730); reg(19,sp + 0x30); reg(5,0x510100); }
+                if (publish)
+                {
+                    reg(20,sp + 0x40); reg(21,0x512730);
+                    reg(5,kind == 61 || kind == 63 ? sp + 0x50 : sp + 0x20);
+                    reg(6,kind == 61 || kind == 63 ? 0x11010 + (kind == 61 ? 64 : 0) : sp + 0x30);
+                    if (kind < 63) { reg(16,0x512730); setRegU32(&initial,23,0); }
+                    else { reg(17,0x512730); reg(18,sp + 0x40); reg(19,sp + 0x30); reg(20,0x512770); setRegU32(&initial,21,0xfffc0000); returnAt(0x140); }
+                    ram[sp + 0x6e]=uint8_t(n);
+                }
+                if (kind == 51 && n < 16)
+                {
+                    std::memset(ram + 0x15000,0,48); word(0x15000,0x3f800000); word(0x15014,0x3f800000); word(0x15028,0x3f800000);
+                    word(0x1500c,bits()); std::memset(ram + sp + 0x20,0,12);
+                    constexpr uint32_t edge[] = {0,0x3f000000,0x3f800000,0x3f7fffff}; word(sp + 0x20,edge[n % 4]);
                 }
             }
             snapshot(input.get());

@@ -15,6 +15,10 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_FERRIS_SMASHER_FORWARD.md`](NATIVE_FERRIS_SMASHER_FORWARD.md) adds the falling Ferris wheel car and
+smasher hit-camera forwards. Coverage is 148/269 known forward returns (121 remain), with 134/134
+known inverse returns native.
+
 [`NATIVE_ENVWEAPON_FORWARD.md`](NATIVE_ENVWEAPON_FORWARD.md) adds the two environment gun fire-point
 forwards. Coverage is 146/269 known forward returns (123 remain), with 134/134 known inverse
 returns native.

@@ -1,5 +1,7 @@
 # Native environment gun forward transforms
 
+[Ferris wheel fall and smasher camera forwards](NATIVE_FERRIS_SMASHER_FORWARD.md) follow with two environment sites.
+
 The two `Launcher::UpdateEnvWeapon` (`14d3a0`) forward returns use native XYZ
 arithmetic after the [Cop SUV laser-aim forwards](NATIVE_COPSUV_AIM_FORWARD.md).
 Known forward coverage grows from 144 to 146 of 269 returns (123 remain). Known

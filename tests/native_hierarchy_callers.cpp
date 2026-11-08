@@ -35,6 +35,7 @@ namespace
     {
         unsigned yields = 0, randomCalls = 0, weatherPoints = 0, weatherIdentities = 0;
         std::array<unsigned,5> spatialCalls{};
+        std::array<unsigned,3> aiActions{};
         uint32_t stop = 0x1eeafc;
         // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
         void yield(uint8_t *, R5900Context *ctx, Runtime *) override
@@ -46,6 +47,8 @@ namespace
             constexpr uint32_t spatial[]={0x1b28cc,0x1b28e8,0x168ca0,0x1691b0,0x169378};
             if (ctx->pc == 0x1da298) for (unsigned i=0;i<std::size(spatial);++i)
                 if (getRegU32(ctx,31)==spatial[i]) ++spatialCalls[i];
+            constexpr uint32_t ai[]={0x128420,0x106010,0x1068e8};
+            for(unsigned i=0;i<std::size(ai);++i) if(ctx->pc==ai[i]) ++aiActions[i];
             if (ctx->pc == stop) throw SegmentEnd{};
         }
         [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
@@ -86,7 +89,8 @@ namespace
     { return !std::memcmp(reinterpret_cast<const uint8_t *>(&initial) + vuAt, reinterpret_cast<const uint8_t *>(&after) + vuAt, vuBytes); }
     constexpr uint32_t auditedInverseReturns[]={0x1161f4,0x116618,0x119090,0x11927c,0x11985c,0x119870,0x119e64,
         0x11afb0,0x11b018,0x11b9a8,0x11c38c,0x11c3c0,0x11c540,0x1ab558,0x1ab8f4,0x1abad4,
-        0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030};
+        0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030,
+        0x1029f8,0x102c20,0x102d74,0x105c68,0x105eec};
     std::array<unsigned,std::size(auditedInverseReturns)> auditedInverseCalls{};
     void countAuditedInverse(const R5900Context *ctx) {
         for(unsigned i=0;i<std::size(auditedInverseReturns);++i)
@@ -200,9 +204,10 @@ void testHierarchyHelperCallers()
         0x1b28cc, 0x1b28e8, 0x168ca0, 0x1691b0, 0x169378,
         0x1161f4,0x116618,0x119090,0x11927c,0x11985c,0x119870,0x119e64,
         0x11afb0,0x11b018,0x11b9a8,0x11c38c,0x11c3c0,0x11c540,0x1ab558,0x1ab8f4,0x1abad4,
-        0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030};
+        0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030,
+        0x1029f8,0x102c20,0x102d74,0x105c68,0x105eec};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138) || kind >= 155; };
-    const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
+    const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0; std::array<unsigned,2> aiShotPublications{};
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
         {
@@ -1245,7 +1250,7 @@ void testHierarchyHelperCallers()
                 require(basis>=0,"invalid collision/drift basis"); word(uint32_t(basis)+12,bits());
                 if(n>=64 && !fromEntry) { fromEntry=true; initial.pc=prefix; }
             }
-            else
+            else if (kind <= 177)
             {
                 // Complete rigid-body entries retain real cross/dot products, friction and impulse application.
                 constexpr uint32_t body=0x18000, other=0x1c000, point=0x19000, normal=0x19040, velocity=0x19080, cs=0x22000;
@@ -1302,10 +1307,70 @@ void testHierarchyHelperCallers()
                     }
                 }
             }
+            else
+            {
+                constexpr uint32_t vehicle=0x18000, info=0x1c000, driver=0x20000, cs=0x22000, target=0x24000;
+                const unsigned scenario=(n%64)/8;
+                const auto f=[&](uint32_t at,float v) { uint32_t u; std::memcpy(&u,&v,4); word(at,u); };
+                const auto fp=[&](unsigned r,float v) { std::memcpy(&initial.fu[r],&v,4); };
+                const auto xyz=[&](uint32_t at,float x,float y,float z) { f(at,x); f(at+4,y); f(at+8,z); };
+                word(vehicle+0x2004,address(info)); word(vehicle+0x2008,address(driver)); word(vehicle+0x2018,address(cs));
+                word(driver+0xb0,address(vehicle)); word(driver+0xb4,address(target)); word(driver+0x174,address(cs));
+                xyz(vehicle+0xd0,n%4 ? 1.f : 0.f,n%4 ? 0.f : 1.f,0.f);
+                xyz(vehicle+0xe0,n%4 ? 0.f : -1.f,n%4 ? 1.f : 0.f,0.f); xyz(vehicle+0xf0,0.f,0.f,1.f);
+                word(vehicle+0xdc,bits());
+                constexpr float lateral[]={-4.f,-3.f,-1.5f,0.f,1.5f,3.f,4.f,0.f};
+                xyz(target+0x1e0,lateral[n%8],float(int(n%5)-2)*.5f,0.f); f(target+0x2d4,8.f);
+                f(vehicle+0x2dc,0.f); f(vehicle+0x2cc,.5f); f(vehicle+0x1f8,n%2 ? .1f : -.1f);
+                word(vehicle+0x20a8,scenario==6 ? 0x40 : 0); word(vehicle+0x2140,0); word(vehicle+0x224c,11);
+                word(vehicle+0x1a54,0); word(vehicle+0x474,0); word(driver+0x270,1); word(driver+4,0);
+                f(cs+0x68,n%2 ? 3.1f : -3.1f); f(driver+0x48,n%2 ? 3.f : -3.f); f(driver+0x54,n%2 ? 3.f : -3.f);
+                f(driver+0x5c,.1f); f(driver+0x1a8,20.f); f(driver+0x1b4,10.f); word(driver+0x22c,n%3 ? 1 : 100);
+                f(vehicle+0x2d4,25.f); f(info+0x20,scenario==4 ? 80.f : 20.f); f(info+0x24,n%2 ? .2f : -.2f);
+                f(info+0x28,scenario==5 ? 1.f : 0.f); word(info+0x60c,1); word(info+0x614,scenario==3 ? 1 : 0);
+                word(info+0x5b8,0); word(info+0x47c,n%6); word(info+0x480,1+n%11); word(info+0x5cc,n%2); word(info+0x5f8,0);
+                word(info+0x4b0,0); f(info+0x404,1.f); word(info+0x414,0); word(info+0x488,0);
+                for(unsigned i=0;i<6;++i) { f(info+0x208+4*i,i%2 ? 80.f : 20.f); f(info+0xf0+4*i,.75f); f(info+0x64+4*i,100.f); }
+                for(unsigned i=0;i<11;++i) word(0x4e48f0+4*i,i%3==0 ? 0x105f58 : i%3==1 ? 0x105f64 : 0x105f70);
+                word(gp-0x4154,address(0x310000)); f(0x4c3d84,n%3 ? 2.f : 0.f); word(0x4c3db0,4);
+                for(auto o:{0x7da4u,0x7d9cu,0x7d98u,0x7d84u}) f(gp-o,.5f);
+                f(gp-0x7da0,.5f); f(gp-0x7d88,.5f); f(gp-0x7d90,10.f); f(gp-0x7d8c,10.f);
+                f(gp-0x71a0,.5f); f(gp-0x719c,.75f); f(gp-0x7d94,5.f);
+                f(gp-0x7ca4,1.f); f(gp-0x7ca0,1.5f); f(gp-0x7c9c,.25f); f(gp-0x7c98,.5f);
+                f(gp-0x7c94,100.f); f(gp-0x7c90,80.f); f(gp-0x7c8c,60.f); f(gp-0x7c88,.75f); f(gp-0x7c84,.5f);
+                word(gp-0x487c,0x40490fdb); word(gp-0x4878,0x49742400); word(gp-0x4874,0x3e22f983); word(gp-0x4870,0x40c90fdb);
+                word(gp-0x486c,0xc0490fdb); word(gp-0x4868,0xc9742400); word(gp-0x4864,0x40490fdb);
+                word(gp-0x4860,0x3e22f983); word(gp-0x485c,0x40c90fdb);
+                reg(4,vehicle+0xd0); reg(5,target+0x1e0); reg(6,kind==178 ? sp+0x10 : sp);
+                reg(16,vehicle); setRegU32(&initial,17,1); setRegU32(&initial,18,0);
+                uint32_t entry=0;
+                if(kind==178) {
+                    continuation=resume_0x102108; entry=0x102944; reg(18,vehicle); reg(20,sp+0x30);
+                    setRegU32(&initial,23,n%2); setRegU32(&initial,30,0); f(sp+0x3c,10.f); returnAt(0xd0);
+                } else if(kind==179) { continuation=resume_0x102b98; entry=0x102b98; f(sp+0x10,10.f); returnAt(0x30); }
+                else if(kind==180) { continuation=resume_0x102c68; entry=0x102c68; fp(20,n%2 ? 25.f : -25.f); returnAt(0x30); }
+                else if(kind==181) { continuation=resume_0x105bb0; entry=0x105bb0; fp(20,3.f); fp(21,10.f); fp(22,.5f); returnAt(0x40); }
+                else { continuation=resume_0x105e88; entry=0x105e88; fp(20,.5f); fp(21,10.f); returnAt(0x40); }
+                if(kind==178) {
+                    if(scenario==1) word(info+0x60c,0); if(scenario==2) word(driver+0x270,0);
+                    if(scenario==3) word(vehicle+0x1a54,1); if(scenario==4) word(driver+4,5);
+                    if(scenario==6) f(info+0x20,800.f); if(scenario==7) f(info+0x24,1.f);
+                } else if(kind<=180) {
+                    if(scenario==1) { word(vehicle+0x20a8,0x40); word(vehicle+0x2140,1); }
+                    if(scenario==2) { word(info+0x5b8,1); f(cs+0x68,0.f); f(info+0x24,0.f); }
+                    if(scenario==3) word(vehicle+0x2140,5);
+                } else {
+                    if(scenario==1) f(vehicle+0x2dc,2.f); if(scenario==2) f(target+0x2d4,0.f);
+                }
+                if(n>=64) {
+                    fromEntry=true; initial.pc=entry; reg(4,vehicle); setRegU32(&initial,31,0xbad0000);
+                    fp(12,scenario==7 ? 200.f : 10.f); fp(13,scenario==6 ? 1.f : .5f);
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
                 referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
-                services.spatialCalls.fill(0); auditedInverseCalls.fill(0);
+                services.spatialCalls.fill(0); auditedInverseCalls.fill(0); services.aiActions.fill(0);
                 rt->functions.setOverride(0x1da1e8, native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : direction) : referenceDirection);
                 sawDirectionEntry=false;
@@ -1340,9 +1405,12 @@ void testHierarchyHelperCallers()
             const auto refRandomCalls = services.randomCalls;
             const auto refWeatherPoints=services.weatherPoints, refWeatherIdentities=services.weatherIdentities;
             const auto refSpatialCalls=services.spatialCalls;
-            const auto refAuditedInverseCalls=auditedInverseCalls;
+            const auto refAuditedInverseCalls=auditedInverseCalls; const auto refAiActions=services.aiActions;
+            if(kind>=181) aiShotPublications[kind-181]+=refAiActions[2]!=0;
             if(kind>=155) {
-                const bool rejected=kind>=172 && kind<=176 && fromEntry && n>=112;
+                const unsigned scenario=(n%64)/8;
+                const bool rejected=(kind>=172 && kind<=176 && fromEntry && n>=112) ||
+                    (fromEntry && (kind==178 ? scenario!=0 : kind==180 || kind==181 ? scenario==1 || scenario==2 : kind==182 ? scenario==1 : false));
                 require(refAuditedInverseCalls[kind-155]==unsigned(!rejected),"audited inverse producer reach");
             }
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
@@ -1386,11 +1454,13 @@ void testHierarchyHelperCallers()
             // Full rear-view entries retain the original rotation producer's identity-helper VU writes.
             const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : initial;
             if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls ||
-                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || !dataEqual() ||
+                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || services.aiActions != refAiActions || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;
         }
+    require(aiShotPublications[0] && aiShotPublications[1],"AI fixtures did not publish front/rear attack states");
+    std::printf("AI attack publication cases: front %u rear %u\n",aiShotPublications[0],aiShotPublications[1]);
     host.enabled = false; unsigned historical = 0;
     for (unsigned kind = 4; kind < std::size(callers); ++kind) for (unsigned n = 0; n < 64; ++n)
     {

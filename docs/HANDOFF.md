@@ -65,6 +65,9 @@ collision and drift inverse returns, with full XYZW checks and explicit generate
 [`NATIVE_RIGID_BODY_INVERSES.md`](NATIVE_RIGID_BODY_INVERSES.md) adds seven rigid-body inverse
 returns, with complete impulse/collision entries and point-velocity consumers.
 
+[`NATIVE_AI_INVERSES.md`](NATIVE_AI_INVERSES.md) adds five AI inverse returns,
+with steering, attack-range and shot-policy consumers plus real attack-state publication.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

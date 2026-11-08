@@ -1,5 +1,7 @@
 # Native falling helicopter forward transforms
 
+[Junk jet and blimp flight forwards](NATIVE_FLYER_FORWARD.md) follow with two more environment sites.
+
 The two helicopter death forward returns use native XYZ arithmetic after the
 [Ferris wheel fall and smasher camera forwards](NATIVE_FERRIS_SMASHER_FORWARD.md).
 Known forward coverage grows from 148 to 150 of 269 returns (119 remain). Known

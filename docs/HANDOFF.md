@@ -15,6 +15,10 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_COLLISION_FORWARD.md`](NATIVE_COLLISION_FORWARD.md) adds six vehicle-collision
+forwards for velocity reconstruction, forces, impact offsets and morph hit placement.
+Coverage is 119/269 known forward returns (150 remain), with 134/134 known inverses native.
+
 Native graphics DMA/register removal: implementation and validation details are in
 [`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `4a8f70a`, including native graphics completion
 and the current shared native port services. The published v0.4.0 package remains the earlier release described above.

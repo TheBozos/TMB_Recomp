@@ -40,6 +40,8 @@ namespace
         std::array<unsigned,5> vehicleLightActions{}, finalActions{};
         std::array<unsigned,9> rigidActions{};
         std::array<unsigned,5> driverActions{};
+        std::array<unsigned,10> collisionActions{};
+        std::array<uint32_t,12> collisionVelocities{};
         std::array<uint32_t,6> driverQueryEndpoints{};
         uint32_t stop = 0x1eeafc, stop2 = 0xffffffff;
         // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
@@ -66,6 +68,14 @@ namespace
             }
             constexpr uint32_t driverHelpers[]={0x1d02b8,0x1f2140,0x1d0538,0x1db230,0x18b6b8};
             for(unsigned i=0;i<std::size(driverHelpers);++i) if(ctx->pc==driverHelpers[i]) ++driverActions[i];
+            constexpr uint32_t collisionHelpers[]={0x11ae70,0x11af08,0x11b210,0x1da778,0x1dbef0,0x1dbd98,0x11c0e0,0x1dbe58,0x1bffc8,0x21c300};
+            for(unsigned i=0;i<std::size(collisionHelpers);++i) if(ctx->pc==collisionHelpers[i]) ++collisionActions[i];
+            if(ctx->pc==0x11ae70) for(unsigned i=0;i<2;++i) {
+                const auto at=bozo::GuestMemory::flatOffset(getRegU32(ctx,i ? 7 : 4),0x2d8);
+                require(at>=0,"invalid collision vehicle");
+                std::memcpy(collisionVelocities.data()+6*i,ram+at+0x1e0,12);
+                for(unsigned j=0;j<3;++j) std::memcpy(collisionVelocities.data()+6*i+3+j,ram+at+(j==2 ? 0x2d4 : 0x2c4+4*j),4);
+            }
             if (ctx->pc == stop || ctx->pc == stop2) throw SegmentEnd{};
         }
         [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
@@ -161,11 +171,20 @@ namespace
         countDriverDirection(ctx); const auto before=*ctx; nativeDirectionImplementation(ram,ctx,rt);
         require(vuUntouched(before,*ctx),"driver forward leaf changed VU state");
     }
+    constexpr uint32_t collisionDirectionReturns[]={0x11ad1c,0x11ada0,0x11b26c,0x11bba8,0x11bbe8,0x11c368};
+    std::array<unsigned,std::size(collisionDirectionReturns)> collisionDirectionCalls{};
+    void countCollisionDirection(const R5900Context *ctx) {
+        for(unsigned i=0;i<std::size(collisionDirectionReturns);++i) if(getRegU32(ctx,31)==collisionDirectionReturns[i]) ++collisionDirectionCalls[i];
+    }
+    void collisionDirection(uint8_t *ram,R5900Context *ctx,Runtime *rt) {
+        countCollisionDirection(ctx); const auto before=*ctx; nativeDirectionImplementation(ram,ctx,rt);
+        require(vuUntouched(before,*ctx),"collision forward leaf changed VU state");
+    }
     struct SavedW { uint32_t offset, value; };
     std::vector<SavedW> referenceW;
     void referenceDirection(uint8_t *ram, R5900Context *ctx, Runtime *rt)
     {
-        countRigidDirection(ctx); countDriverDirection(ctx);
+        countRigidDirection(ctx); countDriverDirection(ctx); countCollisionDirection(ctx);
         const auto offset = bozo::GuestMemory::flatOffset(getRegU32(ctx, 6) & ~15u, 16);
         require(offset >= 0, "invalid reference output");
         if (std::none_of(referenceW.begin(), referenceW.end(), [&](auto p) { return p.offset == uint32_t(offset) + 12; }))
@@ -252,12 +271,14 @@ void testHierarchyHelperCallers()
         0x18bc9c,0x1ac85c,0x1af120,0x1af148,0x1eb4d4,0x1eb58c,
         0x12d0b0,0x136ce8,0x13f814,0x13fe54,0x14037c,0x1e9778,
         0x1ed478,0x1ed4c4,0x1ed4dc,0x1ed544,0x1ed55c,0x1ed708,0x1ed754,0x1ed76c,0x1edf38,0x1ee07c,
-        0x126618,0x1267f0,0x1276a4,0x128704,0x128744,0x1287dc,0x12880c};
+        0x126618,0x1267f0,0x1276a4,0x128704,0x128744,0x1287dc,0x12880c,
+        0x11ad1c,0x11ada0,0x11b26c,0x11bba8,0x11bbe8,0x11c368};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138) || (kind >= 155 && kind <= 187) || (kind >= 189 && kind <= 200); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0; std::array<unsigned,2> aiShotPublications{};
     unsigned weaponJumpCases=0, lightingPublicationCases=0, rolloverPublicationCases=0;
     std::array<unsigned,4> finalPublications{};
     std::array<unsigned,4> driverPublications{};
+    std::array<unsigned,4> collisionPublications{}; unsigned collisionErrnoCases=0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
         {
@@ -1664,7 +1685,7 @@ void testHierarchyHelperCallers()
                     fp(12,scenario==0 ? 0.f : .125f);
                 }
             }
-            else
+            else if(kind<=217)
             {
                 constexpr uint32_t driver=0x18000, vehicle=0x1c000, target=0x20000, first=0x24000, second=0x25000, point=0x28000;
                 const unsigned scenario=(n%64)/8;
@@ -1743,20 +1764,94 @@ void testHierarchyHelperCallers()
                     if(kind==213) reg(5,scenario==5 ? target+0x1d0 : scenario==6 ? vehicle+0x1d0 : 0x29000);
                 }
             }
+            else
+            {
+                constexpr uint32_t vehicle=0x18000, other=0x1c000, cs=0x22000, otherCs=0x23000, info=0x24000, point=0x25000;
+                const unsigned scenario=(n%64)/8;
+                const auto f=[&](uint32_t at,float v) { uint32_t u; std::memcpy(&u,&v,4); word(at,u); };
+                const auto fp=[&](unsigned r,float v) { std::memcpy(&initial.fu[r],&v,4); };
+                const auto xyz=[&](uint32_t at,float x,float y,float z) { f(at,x); f(at+4,y); f(at+8,z); };
+                const auto basis=[&](uint32_t at,bool rotated) {
+                    xyz(at,rotated ? 0.f : 1.f,rotated ? 1.f : 0.f,0.f);
+                    xyz(at+0x10,rotated ? -1.f : 0.f,rotated ? 0.f : 1.f,0.f); xyz(at+0x20,0.f,0.f,1.f);
+                    word(at+12,bits()); word(at+28,bits()); word(at+44,bits());
+                };
+                for(auto v:{vehicle,other}) {
+                    basis(v+0xd0,n%4==0); basis(v+0x190,n%4==0); xyz(v+0x1d0,v==vehicle ? 0.f : 10.f,0.f,0.f);
+                    xyz(v+0xe0,0.f,1.f,0.f); xyz(v+0x1e0,scenario==2 ? 0.f : 1.f,scenario==2 ? 0.f : 2.f,0.f);
+                    xyz(v+0x220,0.f,0.f,0.f); word(v+0x20c8,scenario==4 ? 2 : 1); f(v+0x408,v==vehicle ? 1.f : 2.f);
+                    f(v+0x2c4,scenario&1 ? -3.f : 3.f); f(v+0x2c8,1.f); f(v+0x2d4,3.f); f(v+0x394,0.f);
+                    f(v+0x3b0,2.f); f(v+0x3b4,2.f); f(v+0x3b8,2.f); word(v+0x1a48,0); word(v+0x1a4c,1);
+                    word(v+0x20a8,0); word(v+0x23bc,0); word(v+0x588,0); word(v+0x474,0); word(v+0x580,0);
+                    for(unsigned i=0;i<4;++i) { xyz(v+0x600+i*0x30,1.f,1.f,0.f); xyz(v+0x660+i*0x30,-1.f,-1.f,0.f); }
+                }
+                basis(cs+0x20,n%4==0); basis(otherCs+0x20,false); xyz(cs+0x10,10.f,20.f,30.f); xyz(otherCs+0x10,10.f,21.f,30.f);
+                f(cs+0x68,0.f); word(vehicle+0x2018,address(cs)); word(other+0x2018,address(otherCs));
+                f(gp-0x47fc,.0001f); f(gp-0x481c,.0001f); f(gp-0x4818,0.f); f(gp-0x4814,.0001f);
+                word(gp-0x487c,0x40490fdb); word(gp-0x4878,0x49742400); word(gp-0x4874,0x3e22f983); word(gp-0x4870,0x40c90fdb);
+                word(gp-0x486c,0xc0490fdb); word(gp-0x4868,0xc9742400); word(gp-0x4864,0x40490fdb);
+                word(gp-0x4860,0x3e22f983); word(gp-0x485c,0x40c90fdb);
+                f(gp-0x7560,10.f); f(gp-0x755c,-10.f);
+                word(0x4f5da0,1); word(0x4e429c,address(0x17000)); word(0x17000,0); // retail libm mode and actual errno storage
+                uint32_t entry=0;
+                if(kind<=219) {
+                    continuation=resume_0x11ac30; entry=0x11ac30; services.stop=0x11b2e8;
+                    reg(18,vehicle); reg(19,other); reg(4,(kind==218 ? vehicle : other)+0x190); reg(5,sp); reg(6,(kind==218 ? vehicle : other)+0x1e0);
+                    xyz(sp,0.f,scenario==2 ? 0.f : scenario&1 ? -4.f : 4.f,0.f);
+                    const uint32_t chosen=kind==218 ? vehicle : other;
+                    word(chosen+0x20a8,0x1a0); word(chosen+0x23bc,1);
+                    f(gp-0x7598,4.f); f(gp-0x7594,-4.f); f(gp-0x7590,4.f); f(gp-0x758c,-4.f);
+                    f(gp-0x7588,.5f); f(gp-0x7584,.5f); f(gp-0x7580,100.f); f(gp-0x757c,100.f);
+                    f(gp-0x7578,-100000.f); f(gp-0x7574,-100000.f); returnAt(0xa0);
+                    if(n>=64) {
+                        if(scenario==1) word(chosen+0x23bc,0); if(scenario==2) word(chosen+0x20a8,0);
+                        if(scenario==3) f(chosen+0x2c4,-3.f); if(scenario==5) word(vehicle+0x1a48,1);
+                        if(scenario==6) word(other+0x1a48,1);
+                    }
+                } else if(kind==220) {
+                    continuation=resume_0x11b210; entry=0x11b210; reg(17,vehicle); reg(18,cs+0x20); reg(16,vehicle+0x1e0); reg(19,sp+0x10);
+                    reg(4,cs+0x20); reg(5,sp); reg(6,sp+0x10); xyz(sp,0.f,scenario==2 ? 0.f : scenario==3 ? 1e-30f : scenario&1 ? -4.f : 4.f,0.f);
+                    fp(20,scenario==1 ? 0.f : scenario==5 ? -1.f : .5f); returnAt(0x60);
+                } else if(kind<=222) {
+                    continuation=resume_0x11b7d0; entry=0x11ba50; services.stop=0x142d98;
+                    reg(17,vehicle); reg(19,other); reg(20,info); reg(23,point); setRegU32(&initial,4,2); setRegU32(&initial,18,2);
+                    reg(16,sp+0x10); reg(4,cs+0x20); reg(5,kind==221 ? sp+0x20 : sp+0x50); reg(6,sp+0x10);
+                    xyz(sp+0x20,1.f,2.f,3.f); xyz(sp+0x30,-1.f,-2.f,0.f); xyz(sp+0x40,3.f,-1.f,2.f); xyz(sp+0x50,-3.f,1.f,-2.f);
+                    for(unsigned i=0;i<4;++i) std::memcpy(ram+0x4e4e60+16*i,ram+sp+0x20+16*i,16);
+                    word(info,address(vehicle+0x1d0)); xyz(point,1.f,2.f,3.f); f(other+0x284,2.f); word(other+0x48d,0);
+                    word(other+0x20a8,0x1a0); word(other+0x23bc,1); word(vehicle+0x20a8,0x1e0);
+                    f(gp-0x7548,.5f); f(gp-0x7544,2.5f); f(gp-0x7540,-1.f); f(gp-0x753c,-2.f); f(gp-0x7538,.5f); f(gp-0x7534,2.5f);
+                    word(gp-0x44fc,8); word(gp-0x44f8,4); const double threshold=1.; std::memcpy(ram+0x4e4ea0,&threshold,8);
+                    if(kind==222) xyz(otherCs+0x10,11.f,20.f,30.f);
+                    if(kind==221 && scenario==4) xyz(otherCs+0x10,10.f,19.f,30.f);
+                    if(kind==221 && scenario==5) xyz(otherCs+0x10,9.f,20.f,30.f);
+                    if(n>=64) { if(scenario==1) word(other+0x23bc,0); if(scenario==2) word(vehicle+0x20a8,0); }
+                    returnAt(0xf0);
+                } else {
+                    continuation=resume_0x11c318; entry=0x11c318; reg(18,vehicle); reg(17,vehicle+0x190); reg(16,sp+0x10); fp(20,0.f);
+                    reg(4,vehicle+0x190); reg(5,sp); reg(6,sp+0x10); xyz(sp,0.f,scenario==2 ? 0.f : scenario&1 ? -3.f : 3.f,0.f); returnAt(0x60);
+                }
+                if(n>=64) {
+                    fromEntry=true; initial.pc=entry;
+                    if(kind<=220 || kind==223) { reg(4,vehicle); reg(5,kind==220 ? cs+0x20 : point); reg(6,other); setRegU32(&initial,31,0xbad0000); }
+                    if(kind==220) { fp(12,scenario==2 ? 0.f : scenario==3 ? 1e-30f : scenario&1 ? -4.f : 4.f); fp(13,scenario==1 ? 0.f : scenario==5 ? -1.f : .5f); }
+                    if(kind==221 || kind==222) setRegU32(&initial,4,scenario==3 ? 0 : 2);
+                }
+            }
             snapshot(input.get());
             const auto stopAt=services.stop;
             const auto run = [&](bool native, R5900Context &ctx) {
                 services.stop=stopAt; referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
-                services.spatialCalls.fill(0); auditedInverseCalls.fill(0); services.aiActions.fill(0); services.vehicleLightActions.fill(0); services.finalActions.fill(0); services.rigidActions.fill(0); rigidDirectionCalls.fill(0); driverDirectionCalls.fill(0); services.driverActions.fill(0); services.driverQueryEndpoints.fill(0);
+                services.spatialCalls.fill(0); auditedInverseCalls.fill(0); services.aiActions.fill(0); services.vehicleLightActions.fill(0); services.finalActions.fill(0); services.rigidActions.fill(0); rigidDirectionCalls.fill(0); driverDirectionCalls.fill(0); services.driverActions.fill(0); services.driverQueryEndpoints.fill(0); services.collisionActions.fill(0); services.collisionVelocities.fill(0); collisionDirectionCalls.fill(0);
                 rt->functions.setOverride(0x1da1e8, native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse);
-                rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : kind>=211 ? driverDirection : (kind>=201 && kind<=210) ? rigidDirection : direction) : referenceDirection);
+                rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : kind>=218 ? collisionDirection : (kind>=211 && kind<=217) ? driverDirection : (kind>=201 && kind<=210) ? rigidDirection : direction) : referenceDirection);
                 sawDirectionEntry=false; sawForceInverseEntry=false;
                 host.instruction=kind == 139 ? vehicleInstructions : nullptr;
                 if (kind == 141 && native) host.instruction=vehicleInstructions;
                 rt->functions.setOverride(0x1dcc08,kind == 139 ? matrix : nullptr);
                 rt->functions.setOverride(0x1da238,kind == 149 ? registry.find(0x1da238) : nullptr);
                 rt->functions.setOverride(0x1db0f0,kind == 149 ? registry.find(0x1db0f0) : nullptr);
-                auto helper = isInverse(kind) ? (native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse) : (native ? (kind>=211 ? driverDirection : (kind>=201 && kind<=210) ? rigidDirection : direction) : referenceDirection);
+                auto helper = isInverse(kind) ? (native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse) : (native ? (kind>=218 ? collisionDirection : (kind>=211 && kind<=217) ? driverDirection : (kind>=201 && kind<=210) ? rigidDirection : direction) : referenceDirection);
                 if (!fromEntry) { helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return"); }
                 try { continuation(ram, &ctx, rt.get()); }
                 catch (const SegmentEnd &) {
@@ -1792,7 +1887,7 @@ void testHierarchyHelperCallers()
             const auto refRandomCalls = services.randomCalls;
             const auto refWeatherPoints=services.weatherPoints, refWeatherIdentities=services.weatherIdentities;
             const auto refSpatialCalls=services.spatialCalls;
-            const auto refAuditedInverseCalls=auditedInverseCalls; const auto refAiActions=services.aiActions; const auto refVehicleLightActions=services.vehicleLightActions; const auto refFinalActions=services.finalActions; const auto refRigidActions=services.rigidActions; const auto refRigidDirections=rigidDirectionCalls; const auto refDriverDirections=driverDirectionCalls; const auto refDriverActions=services.driverActions; const auto refDriverEndpoints=services.driverQueryEndpoints;
+            const auto refAuditedInverseCalls=auditedInverseCalls; const auto refAiActions=services.aiActions; const auto refVehicleLightActions=services.vehicleLightActions; const auto refFinalActions=services.finalActions; const auto refRigidActions=services.rigidActions; const auto refRigidDirections=rigidDirectionCalls; const auto refDriverDirections=driverDirectionCalls; const auto refDriverActions=services.driverActions; const auto refDriverEndpoints=services.driverQueryEndpoints; const auto refCollisionActions=services.collisionActions; const auto refCollisionVelocities=services.collisionVelocities; const auto refCollisionDirections=collisionDirectionCalls;
             if(kind>=181 && kind<=182) aiShotPublications[kind-181]+=refAiActions[2]!=0;
             if(kind>=155 && kind<=187) {
                 const unsigned scenario=(n%64)/8;
@@ -1903,7 +1998,7 @@ void testHierarchyHelperCallers()
                     if(kind==210) vector(0x18040,rotated ? 8.f : 11.f,rotated ? 21.f : 22.f,33.f);
                 }
             }
-            if(kind>=211) {
+            if((kind>=211 && kind<=217)) {
                 const unsigned scenario=(n%64)/8;
                 const auto read=[&](uint32_t at) { uint32_t v; std::memcpy(&v,ram+at,4); return v; };
                 const auto vector=[&](uint32_t at,float x,float y,float z) {
@@ -1956,6 +2051,63 @@ void testHierarchyHelperCallers()
                     if(inversePair) require(refAuditedInverseCalls[30]==1 && refAuditedInverseCalls[31]==1,"driving LOS inverse consumers not executed");
                 }
             }
+            if(kind>=218) {
+                const unsigned scenario=(n%64)/8;
+                const auto read=[&](uint32_t at) { uint32_t v; std::memcpy(&v,ram+at,4); return v; };
+                const auto vector=[&](uint32_t at,float x,float y,float z) {
+                    const float expected[3]={x,y,z}; require(!std::memcmp(ram+at,expected,12),"collision known state publication differs");
+                };
+                std::array<unsigned,6> reached{};
+                const bool active=!fromEntry || (kind<=219 ? scenario!=1 && scenario!=2 : kind<=222 && kind>=221 ? scenario<1 || scenario>3 : true);
+                reached[kind-218]=active;
+                if(kind<=219) reached[2]=2; // actual coupled force applications, enabled by fixture thresholds
+                require(refCollisionDirections==reached,"collision forward producer reach differs");
+                const uint32_t frame=kind<=219 && fromEntry ? sp-0xb0 : (kind==220 || kind==223) && fromEntry ? sp-0x80 : sp;
+                const unsigned count=kind<=219 ? unsigned(active)+1 : kind==223 ? 0 : unsigned(active);
+                require(referenceW.size()==count,"collision forward output count differs");
+                for(auto patch:referenceW) {
+                    const bool allowed=kind<=219 ? patch.offset==frame-0x1b4 || (active && patch.offset==(kind==218 ? 0x181ec : 0x1c1ec)) :
+                        (kind>=220 && kind<=222) && patch.offset==frame+0x1c;
+                    require(allowed,"unexpected collision forward-W exclusion");
+                }
+                if(kind<=219) {
+                    require(refCollisionActions[0]==1 && refCollisionActions[1]==1 && refCollisionActions[2]==2,
+                        "collision relative-mass/force consumers not executed");
+                    require(refCollisionActions[3]==4 && refCollisionActions[4]==4 && refCollisionActions[5]==2,
+                        "collision normalization/matrix/rotation consumers not executed");
+                    require(refAuditedInverseCalls[7]==1 && refAuditedInverseCalls[8]==1,"collision force inverse consumers not executed");
+                    require(a.pc==0x11b2e8,"collision effect dispatch boundary differs");
+                    if(fromEntry && scenario==0) {
+                        const float expected[6]={n%4==0 ? -4.f : 0.f,n%4==0 ? 0.f : 4.f,0.f,4.f,4.f,4.f};
+                        require(!std::memcmp(refCollisionVelocities.data()+(kind==218 ? 0 : 6),expected,sizeof(expected)),
+                            "collision reconstructed velocity/speed not published before force consumers");
+                        ++collisionPublications[0];
+                    }
+                } else if(kind==220) {
+                    require(refCollisionActions[3]==1 && refCollisionActions[4]==1 && refCollisionActions[5]==1,
+                        "force normalization/matrix/rotation consumers not executed");
+                    require(ram[0x18474]==1,"force state flag not published");
+                    if(fromEntry && scenario==0) { vector(0x181e0,n%4==0 ? -3.5f : .5f,n%4==0 ? 1.f : 5.f,0.f); ++collisionPublications[1]; }
+                } else if(kind<=222) {
+                    require(a.pc==0x142d98,"impact hit-dispatch boundary differs");
+                    require(refCollisionActions[7]==unsigned(fromEntry && active) && refCollisionActions[8]==unsigned(fromEntry && active),
+                        "impact heading/angle producers not executed");
+                    require(read(0x24000)==(active ? getRegU32(&initial,29)+0x10 : (0x181d0u|(getRegU32(&initial,29)&0xa0000000u))),
+                        "impact take-hit point pointer not published");
+                    if(fromEntry && scenario==0) {
+                        const float local[2][3]={{1.f,2.f,3.f},{-3.f,1.f,-2.f}};
+                        const auto &v=local[kind-221]; vector(sp+0x10,10.f+(n%4==0 ? -v[1] : v[0]),20.f+(n%4==0 ? v[0] : v[1]),30.f+v[2]);
+                        ++collisionPublications[2];
+                    }
+                } else {
+                    require(refCollisionActions[6]==1 && refAuditedInverseCalls[10]==1 && refAuditedInverseCalls[11]==1,
+                        "morph inverse/hit-location consumers not executed");
+                    require(read(0x1828c)==read(0x1819c) && read(frame+0x1c)==read(0x180dc),"morph lost meaningful inverse W");
+                    require(read(0x1979c)>=1 && read(0x1979c)<=8 && read(0x197a0)==read(0x1979c),"morph hit classification not published");
+                    if(fromEntry) ++collisionPublications[3];
+                }
+                if(refCollisionActions[9]) { require(read(0x17000)==33,"actual libm domain errno was not retained"); ++collisionErrnoCases; }
+            }
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
             if (expectedSelection >= 0) require(getRegU32(&a,2) == uint32_t(expectedSelection), "original attractor boundary selection");
             // Tow-truck and attractor consumers need no forward-W exclusion.
@@ -2005,7 +2157,7 @@ void testHierarchyHelperCallers()
             const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : kind==195 && sawForceInverseEntry ? forceInverseEntry : initial;
             if(kind==195 && sawForceInverseEntry) require(vuUntouched(forceReferenceEntry,forceInverseEntry),"force-field original producer effects differ");
             if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls ||
-                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || services.aiActions != refAiActions || services.vehicleLightActions != refVehicleLightActions || services.finalActions != refFinalActions || services.rigidActions != refRigidActions || rigidDirectionCalls != refRigidDirections || driverDirectionCalls != refDriverDirections || services.driverActions != refDriverActions || services.driverQueryEndpoints != refDriverEndpoints || !dataEqual() ||
+                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || services.aiActions != refAiActions || services.vehicleLightActions != refVehicleLightActions || services.finalActions != refFinalActions || services.rigidActions != refRigidActions || rigidDirectionCalls != refRigidDirections || driverDirectionCalls != refDriverDirections || services.driverActions != refDriverActions || services.driverQueryEndpoints != refDriverEndpoints || services.collisionActions != refCollisionActions || services.collisionVelocities != refCollisionVelocities || collisionDirectionCalls != refCollisionDirections || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;
@@ -2018,6 +2170,8 @@ void testHierarchyHelperCallers()
     std::printf("Final inverse publication cases: force-field %u HUD packets %u nearest targets %u particle sorting %u\n",finalPublications[0],finalPublications[1],finalPublications[2],finalPublications[3]);
     require(std::all_of(driverPublications.begin(),driverPublications.end(),[](unsigned n) { return n!=0; }),"driver fixtures missed successful publication");
     std::printf("Driver forward publication cases: path probes %u lateral offsets %u lookahead %u LOS endpoints %u\n",driverPublications[0],driverPublications[1],driverPublications[2],driverPublications[3]);
+    require(std::all_of(collisionPublications.begin(),collisionPublications.end(),[](unsigned n) { return n!=0; }) && collisionErrnoCases,"collision fixtures missed publication/domain paths");
+    std::printf("Collision forward publication cases: velocities %u force %u impact points %u morph locations %u; real errno cases %u\n",collisionPublications[0],collisionPublications[1],collisionPublications[2],collisionPublications[3],collisionErrnoCases);
     host.enabled = false; unsigned historical = 0;
     for (unsigned kind = 4; kind < std::size(callers); ++kind) for (unsigned n = 0; n < 64; ++n)
     {

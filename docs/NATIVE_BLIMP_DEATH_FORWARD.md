@@ -1,5 +1,7 @@
 # Native sinking blimp forward transforms
 
+[Falling junk jet forwards](NATIVE_JET_DEATH_FORWARD.md) follow with six more environment sites.
+
 Two blimp death forward returns use native XYZ arithmetic after the
 [gas tank forwards](NATIVE_GASTANK_FORWARD.md). Known forward coverage grows from
 155 to 157 of 269 returns (112 remain). Known inverse coverage stays 134 of 134;

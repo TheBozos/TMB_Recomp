@@ -62,6 +62,9 @@ and skid-mark creation/stretch offsets, with complete positioning, list and vert
 [`NATIVE_COLLISION_DRIFT_INVERSES.md`](NATIVE_COLLISION_DRIFT_INVERSES.md) adds sixteen vehicle
 collision and drift inverse returns, with full XYZW checks and explicit generated-consumer boundaries.
 
+[`NATIVE_RIGID_BODY_INVERSES.md`](NATIVE_RIGID_BODY_INVERSES.md) adds seven rigid-body inverse
+returns, with complete impulse/collision entries and point-velocity consumers.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

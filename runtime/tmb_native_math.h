@@ -10,7 +10,7 @@
 namespace tmb::math
 {
     // Audited XYZ-only consumers: collision queries, vehicle spatial records and hierarchy lighting/attachments.
-    inline constexpr std::array<uint32_t, 146> directionReturns{
+    inline constexpr std::array<uint32_t, 148> directionReturns{
         0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc, 0x11708c, 0x1880e0, 0x1d4284, 0x1d42e8, 0x1cb19c,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, // height-test collision/BSP results
         0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804, // line-of-sight BSP/volume results
@@ -52,7 +52,8 @@ namespace tmb::math
         0x1b2fb0, 0x1b3118, // ricochet movement before its height test and after its reflection
         0x150efc, 0x1511ec, 0x1513f4, // Hearse, Minion and Tanker launcher turret aim points
         0x150094, 0x1502cc, // Cop SUV laser aim points (player-state and closest-car branches)
-        0x14d62c, 0x14d678}; // environment gun fire points passed to CreateStaticWeapon
+        0x14d62c, 0x14d678, // environment gun fire points passed to CreateStaticWeapon
+        0x12aad4, 0x169ed0}; // falling Ferris wheel car position and smasher hit camera position
 
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };

@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Final inverse returns](NATIVE_FINAL_INVERSES.md) completes all 134 known inverse sites,
+including force-field, health-stand, HUD/radar and particle visibility/sorting consumers.
+
 [Vehicle/light inverses](NATIVE_VEHICLE_LIGHT_INVERSES.md) adds six native inverse sites
 with complete tire/rollover/damage/light entries and state-publication checks.
 

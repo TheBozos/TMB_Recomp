@@ -65,6 +65,10 @@ collision and drift inverse returns, with full XYZW checks and explicit generate
 [`NATIVE_RIGID_BODY_INVERSES.md`](NATIVE_RIGID_BODY_INVERSES.md) adds seven rigid-body inverse
 returns, with complete impulse/collision entries and point-velocity consumers.
 
+[`NATIVE_FINAL_INVERSES.md`](NATIVE_FINAL_INVERSES.md) completes native coverage of all 134 known
+inverse-helper returns, with force-field/health-stand entries, HUD/radar consumers and
+particle visibility/sorting checks. Unknown and historical ABI support remains.
+
 [`NATIVE_VEHICLE_LIGHT_INVERSES.md`](NATIVE_VEHICLE_LIGHT_INVERSES.md) adds six tire, rollover,
 weapon-damage and object-light inverse returns, with complete generated owner entries
 and real scalar state-publication consumers.

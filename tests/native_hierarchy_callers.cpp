@@ -36,8 +36,8 @@ namespace
         unsigned yields = 0, randomCalls = 0, weatherPoints = 0, weatherIdentities = 0;
         std::array<unsigned,5> spatialCalls{};
         std::array<unsigned,3> aiActions{};
-        std::array<unsigned,5> vehicleLightActions{};
-        uint32_t stop = 0x1eeafc;
+        std::array<unsigned,5> vehicleLightActions{}, finalActions{};
+        uint32_t stop = 0x1eeafc, stop2 = 0xffffffff;
         // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
         void yield(uint8_t *, R5900Context *ctx, Runtime *) override
         {
@@ -52,7 +52,9 @@ namespace
             for(unsigned i=0;i<std::size(ai);++i) if(ctx->pc==ai[i]) ++aiActions[i];
             constexpr uint32_t vehicleLight[]={0x1dab78,0x1dbc60,0x1dbef0,0x18ad58,0x1da710};
             for(unsigned i=0;i<std::size(vehicleLight);++i) if(ctx->pc==vehicleLight[i]) ++vehicleLightActions[i];
-            if (ctx->pc == stop) throw SegmentEnd{};
+            constexpr uint32_t finalHelpers[]={0x1da778,0x1daef0,0x1fd1b0,0x1fd190,0x140808};
+            for(unsigned i=0;i<std::size(finalHelpers);++i) if(ctx->pc==finalHelpers[i]) ++finalActions[i];
+            if (ctx->pc == stop || ctx->pc == stop2) throw SegmentEnd{};
         }
         [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
         void unknownTarget(uint8_t *, R5900Context *ctx, Runtime *, uint32_t pc) override
@@ -78,8 +80,8 @@ namespace
     constexpr uint32_t debug = 0x7484f0, debugBytes = 0x220; // actual terrain line/GS-line producer records
     constexpr uint32_t towVectors = 0x23d060, towVectorBytes = 0x50, towMaterials = 0x190c20, towMaterialBytes = 0x100;
     constexpr std::pair<uint32_t,uint32_t> regions[] = {{base,bytes},{globals,globalBytes},{debug,debugBytes},{0x66fcc4,4},
-        {towVectors,towVectorBytes},{towMaterials,towMaterialBytes},{0x230010,64},{0x687680,0x130},{0x68ab80,0x8b80},{0x446560,0x80}};
-    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4 + towVectorBytes + towMaterialBytes + 64 + 0x130 + 0x8b80 + 0x80;
+        {towVectors,towVectorBytes},{towMaterials,towMaterialBytes},{0x230010,64},{0x687680,0x130},{0x687f00,0xb800},{0x446560,0x80},{0x235280,0x10},{0x239480,0x400},{0x742f80,0x20}};
+    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4 + towVectorBytes + towMaterialBytes + 64 + 0x130 + 0xb800 + 0x80 + 0x10 + 0x400 + 0x20;
     constexpr uint32_t gp = 0x40000, sp = 0x30000;
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
@@ -95,14 +97,17 @@ namespace
         0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030,
         0x1029f8,0x102c20,0x102d74,0x105c68,0x105eec,
         0x1265a8,0x1265d0,0x1288b0,0x1288c4,0x112118,
-        0x18bc9c,0x1ac85c,0x1af120,0x1af148,0x1eb4d4,0x1eb58c};
+        0x18bc9c,0x1ac85c,0x1af120,0x1af148,0x1eb4d4,0x1eb58c,
+        0x12d0b0,0x136ce8,0x13f814,0x13fe54,0x14037c,0x1e9778};
     std::array<unsigned,std::size(auditedInverseReturns)> auditedInverseCalls{};
     void countAuditedInverse(const R5900Context *ctx) {
         for(unsigned i=0;i<std::size(auditedInverseReturns);++i)
             if(getRegU32(ctx,31)==auditedInverseReturns[i]) ++auditedInverseCalls[i];
     }
+    R5900Context forceInverseEntry, forceReferenceEntry; bool sawForceInverseEntry=false;
     RecompiledFunction nativeInverseImplementation = nullptr;
     void auditedInverse(uint8_t *ram,R5900Context *ctx,Runtime *rt) {
+        if(getRegU32(ctx,31)==0x12d0b0) { forceInverseEntry=*ctx; sawForceInverseEntry=true; }
         countAuditedInverse(ctx); const auto before=*ctx;
         nativeInverseImplementation(ram,ctx,rt);
         require(vuUntouched(before,*ctx),"audited native inverse changed VU state");
@@ -144,6 +149,7 @@ namespace
     {
         const auto offset = bozo::GuestMemory::flatOffset(getRegU32(ctx, 6) & ~15u, 16);
         require(offset >= 0, "invalid inverse output");
+        if(getRegU32(ctx,31)==0x12d0b0) forceReferenceEntry=*ctx;
         countAuditedInverse(ctx);
         mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8(ram, ctx, rt);
         // An inverse may reuse a forward record, replacing opaque W with meaningful basis[0].W.
@@ -212,10 +218,12 @@ void testHierarchyHelperCallers()
         0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030,
         0x1029f8,0x102c20,0x102d74,0x105c68,0x105eec,
         0x1265a8,0x1265d0,0x1288b0,0x1288c4,0x112118,0x11112c,
-        0x18bc9c,0x1ac85c,0x1af120,0x1af148,0x1eb4d4,0x1eb58c};
+        0x18bc9c,0x1ac85c,0x1af120,0x1af148,0x1eb4d4,0x1eb58c,
+        0x12d0b0,0x136ce8,0x13f814,0x13fe54,0x14037c,0x1e9778};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138) || (kind >= 155 && kind <= 187) || kind >= 189; };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0; std::array<unsigned,2> aiShotPublications{};
     unsigned weaponJumpCases=0, lightingPublicationCases=0, rolloverPublicationCases=0;
+    std::array<unsigned,4> finalPublications{};
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
         {
@@ -234,7 +242,7 @@ void testHierarchyHelperCallers()
             word(0x14000, n & 1 ? 0x40000 | (n << 7) : 0); ram[0x14006] = uint8_t(n);
             // Arbitrary opaque payloads must survive native forward outputs without affecting XYZ consumers.
             word(0x1101c, bits()); word(sp + 0x1c, bits()); word(sp + 0x2c, bits()); word(sp + 0x4c, bits());
-            RecompiledFunction continuation; services.stop = 0xffffffff; bool fromEntry = false;
+            RecompiledFunction continuation; services.stop = services.stop2 = 0xffffffff; bool fromEntry = false;
             int expectedSelection = -1;
             if (kind < 2)
             {
@@ -1432,7 +1440,7 @@ void testHierarchyHelperCallers()
                     }
                 }
             }
-            else
+            else if(kind<=194)
             {
                 constexpr uint32_t vehicle=0x18000, basisAt=0x22000, point=0x24000;
                 const unsigned scenario=(n%64)/8;
@@ -1498,14 +1506,94 @@ void testHierarchyHelperCallers()
                     }
                 }
             }
+            else
+            {
+                constexpr uint32_t hud=0x18000, vehicle=0x1c000, basisAt=0x22000, point=0x24000;
+                const unsigned scenario=(n%64)/8;
+                const auto f=[&](uint32_t at,float v) { uint32_t u; std::memcpy(&u,&v,4); word(at,u); };
+                const auto fp=[&](unsigned r,float v) { std::memcpy(&initial.fu[r],&v,4); };
+                const auto xyz=[&](uint32_t at,float x,float y,float z) { f(at,x); f(at+4,y); f(at+8,z); };
+                const auto basis=[&](uint32_t at) {
+                    xyz(at,n%4 ? 1.f : 0.f,n%4 ? 0.f : 1.f,0.f);
+                    xyz(at+0x10,n%4 ? 0.f : -1.f,n%4 ? 1.f : 0.f,0.f); xyz(at+0x20,0.f,0.f,1.f);
+                    word(at+12,bits()); word(at+28,bits()); word(at+44,bits());
+                };
+                basis(basisAt);
+                if(kind==195) {
+                    continuation=resume_0x12d038; reg(17,0x500000); reg(16,0x4fc3a0);
+                    xyz(0x4fc390,2.f,3.f,4.f); xyz(0x4fc3a0,2.f,3.f,4.f); xyz(point,0.f,0.f,0.f);
+                    xyz(0x25000,0.f,0.f,0.f); f(0x25014,1.f); f(0x25018,1.f);
+                    xyz(0x26000,scenario&1 ? -2.f : 2.f,3.f,4.f);
+                    word(gp-0x44c4,n%4); for(unsigned i=0;i<4;++i) word(0x235280+4*i,4);
+                    word(gp-0x3114,scenario!=6); word(gp-0x3124,address(point)); word(gp-0x3128,address(basisAt));
+                    word(gp-0x3100,address(0x25000)); f(gp-0x310c,10.f);
+                    reg(4,basisAt); reg(5,0x4fc3a0); reg(6,0x4fc3a0); returnAt(0x30);
+                    if(n>=64) { fromEntry=true; initial.pc=0x12d038; reg(4,0x26000); if(scenario==7) setRegU32(&initial,4,0); setRegU32(&initial,31,0xbad0000); }
+                } else if(kind==196) {
+                    continuation=resume_0x136c70; const uint32_t slot=n%4;
+                    word(gp-0x4480,slot); xyz(point,10.f,20.f,30.f);
+                    for(unsigned i=0;i<4;++i) { xyz(0x239480+16*i,float(i+1),0.f,0.f); word(0x23948c+16*i,bits()); }
+                    reg(17,basisAt); reg(20,point); reg(19,0x2394c0); reg(18,0x239490); setRegU32(&initial,16,3); setRegU32(&initial,21,0x70);
+                    reg(4,basisAt); reg(5,0x239480); reg(6,sp); returnAt(0x70);
+                    if(n>=64) { fromEntry=true; initial.pc=0x136c70; reg(4,point); reg(5,basisAt); setRegU32(&initial,31,0xbad0000); }
+                } else if(kind<=198) {
+                    continuation=resume_0x13eb40;
+                    reg(17,hud); reg(16,vehicle); reg(23,sp+0x10); reg(18,0x28000); setRegU32(&initial,19,0); setRegU32(&initial,30,1);
+                    setRegU32(&initial,20,32); setRegU32(&initial,21,48); setRegU32(&initial,22,0);
+                    word(hud+0x5e0,address(0x20000)); basis(0x200d0); xyz(0x201d0,0.f,0.f,0.f);
+                    const float distance=scenario==1 ? 1000.f : scenario==2 ? 2500.f : scenario==3 ? 600.f : 100.f;
+                    xyz(vehicle+0x1d0,distance,0.f,0.f); xyz(sp+0x10,-distance,0.f,0.f);
+                    word(hud+4,0); word(hud+0x8d4,0xffffffff); word(hud+0x598,0x00403020); word(hud+0x59c,scenario==6 ? 0 : 0x80605001);
+                    word(vehicle+0x20a8,scenario==7 ? (kind==197 ? 0x200 : 0x1e0) : 1);
+                    word(vehicle+0x580,scenario==5 ? 2 : 1); word(vehicle+0x20b4,0); word(vehicle+0x480,0);
+                    word(sp+0x48,2); word(sp+0x4c,scenario==4 ? 10 : 3000); word(sp+0x50,0x100); word(sp+0x58,address(0x27000)); word(0x27000,1);
+                    word(sp+0x30,100); word(sp+0x34,100); word(sp+0x38,32); word(sp+0x3c,32);
+                    word(gp-0x4148,address(0x29000)); word(0x43360,1); word(0x2b354,0); word(gp-0x4154,address(0x34000)); word(0x3a650,0);
+                    const double constants[]={2000.,1400.,98.}; for(unsigned i=0;i<3;++i) std::memcpy(ram+0x4e6e70+8*i,&constants[i],8);
+                    services.stop=kind==197 ? 0x13f378 : 0x13fb10; services.stop2=kind==198 ? 0x141af0 : 0xffffffff;
+                    reg(4,0x200d0); reg(5,sp+0x10); reg(6,sp+0x20);
+                    if(n>=64) { fromEntry=true; initial.pc=kind==197 ? 0x13f7b0 : 0x13fd58; }
+                } else if(kind==199) {
+                    continuation=resume_0x1402a0; reg(17,hud); reg(18,point); reg(19,hud+0x534);
+                    setRegU32(&initial,21,1); setRegU32(&initial,20,scenario==2 || scenario==3 ? 2 : 1);
+                    fp(21,100.f); fp(22,100.f); fp(23,.5f);
+                    word(hud,scenario!=6); word(hud+0x14,100); word(hud+0x18,100); word(hud+0x1c,3); word(hud+0x5e0,address(vehicle));
+                    word(vehicle+0x20a8,scenario==7 ? 1 : 2); xyz(vehicle+0x1d0,0.f,0.f,0.f); basis(vehicle+0xd0);
+                    xyz(point,scenario<=3 ? (scenario&1 ? 2000.f : 100.f) : 0.f,scenario<=3 ? 100.f : 0.f,scenario==4 ? 100.f : 0.f);
+                    xyz(sp,scenario<=3 ? (scenario&1 ? 2000.f : 100.f) : 0.f,scenario<=3 ? 100.f : 0.f,scenario==4 ? 100.f : 0.f);
+                    word(hud+0x4d0+3,15); word(hud+0x46c,0x01010101); f(gp-0x6c90,3.14159274f); f(gp-0x6c8c,1.57079637f);
+                    reg(4,vehicle+0xd0); reg(5,sp); reg(6,sp+0x10); returnAt(0x80);
+                    if(n>=64) { fromEntry=true; initial.pc=0x1402a0; reg(4,hud); setRegU32(&initial,5,1); reg(6,point); setRegU32(&initial,7,scenario==2 || scenario==3 ? 2 : 1); fp(12,.5f); setRegU32(&initial,31,0xbad0000); }
+                } else {
+                    continuation=resume_0x1e9540;
+                    constexpr uint32_t particle=0x687f00, indices=0x26000, view=0x22000;
+                    xyz(view+0x10,0.f,0.f,0.f); basis(view+0x20); word(0x4dfcd0,address(view)); word(sp+0x230,0);
+                    word(gp-0x35c8,0); word(gp-0x35c4,0); word(gp-0x2f3c,address(0x28000));
+                    for(unsigned i=0;i<2;++i) {
+                        const auto at=particle+i*0x2e80;
+                        const float x=scenario==2 ? 1000.f : 0.f, y=scenario==3 || (scenario==1 && i==1) ? 0.f : i ? 10.f : 6.f;
+                        xyz(at+0x2c80,n%4 ? x : -y,n%4 ? y : x,scenario==4 ? 1000.f : 0.f);
+                        f(at+0x2c8c,.5f); word(at+0x2e54,2); word(at+0x2e40,scenario==5 ? 10 : scenario==7 ? 7 : 2); word(at+0x2e70,scenario==6 ? 0 : 1); word(at+0x2e5c,0);
+                        word(0x742f80+12*i+8,n>=64 && i==0 ? 1 : 0xffffffff);
+                    }
+                    reg(17,particle); setRegU32(&initial,18,0); reg(16,sp+0x210); reg(30,indices); setRegU32(&initial,23,n<64 && (n&4) ? 1 : 0);
+                    fp(20,1.f); fp(21,1.f); fp(22,1.f); fp(24,1.f);
+                    f(sp,12.f); word(indices,1);
+                    const float x=scenario==2 ? 1000.f : 0.f, y=scenario==3 ? 0.f : 6.f;
+                    xyz(sp+0x210,n%4 ? x : -y,n%4 ? y : x,scenario==4 ? 1000.f : 0.f);
+                    services.stop=0x1f91e8; services.stop2=0x203c18;
+                    reg(4,view+0x20); reg(5,sp+0x210); reg(6,sp+0x200);
+                    if(n>=64) { fromEntry=true; initial.pc=0x1e9700; setRegU32(&initial,2,0x2e80); }
+                }
+            }
             snapshot(input.get());
             const auto stopAt=services.stop;
             const auto run = [&](bool native, R5900Context &ctx) {
                 services.stop=stopAt; referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
-                services.spatialCalls.fill(0); auditedInverseCalls.fill(0); services.aiActions.fill(0); services.vehicleLightActions.fill(0);
+                services.spatialCalls.fill(0); auditedInverseCalls.fill(0); services.aiActions.fill(0); services.vehicleLightActions.fill(0); services.finalActions.fill(0);
                 rt->functions.setOverride(0x1da1e8, native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : direction) : referenceDirection);
-                sawDirectionEntry=false;
+                sawDirectionEntry=false; sawForceInverseEntry=false;
                 host.instruction=kind == 139 ? vehicleInstructions : nullptr;
                 if (kind == 141 && native) host.instruction=vehicleInstructions;
                 rt->functions.setOverride(0x1dcc08,kind == 139 ? matrix : nullptr);
@@ -1547,7 +1635,7 @@ void testHierarchyHelperCallers()
             const auto refRandomCalls = services.randomCalls;
             const auto refWeatherPoints=services.weatherPoints, refWeatherIdentities=services.weatherIdentities;
             const auto refSpatialCalls=services.spatialCalls;
-            const auto refAuditedInverseCalls=auditedInverseCalls; const auto refAiActions=services.aiActions; const auto refVehicleLightActions=services.vehicleLightActions;
+            const auto refAuditedInverseCalls=auditedInverseCalls; const auto refAiActions=services.aiActions; const auto refVehicleLightActions=services.vehicleLightActions; const auto refFinalActions=services.finalActions;
             if(kind>=181 && kind<=182) aiShotPublications[kind-181]+=refAiActions[2]!=0;
             if(kind>=155 && kind<=187) {
                 const unsigned scenario=(n%64)/8;
@@ -1556,7 +1644,7 @@ void testHierarchyHelperCallers()
                         kind==183 || kind==184 ? scenario>=2 : kind==185 || kind==186 ? scenario>=2 && scenario<=4 : false));
                 require(refAuditedInverseCalls[kind-155]==unsigned(!rejected),"audited inverse producer reach");
             }
-            if(kind>=189) {
+            if(kind>=189 && kind<=194) {
                 const unsigned scenario=(n%64)/8;
                 const unsigned reached=!fromEntry ? 1 : kind<=192 ? unsigned(scenario!=7) :
                     scenario==1 || scenario==2 ? 4 : scenario==0 || (kind==193 && scenario==3) ? 1 : 0;
@@ -1577,6 +1665,48 @@ void testHierarchyHelperCallers()
                     require(published==unsigned(illuminated),"object-light publication branch not reached");
                     lightingPublicationCases+=published!=0;
                     if(scenario==1) require(refVehicleLightActions[4]==4,"four-light scalar dot consumers not executed");
+                }
+            }
+            if(kind>=195) {
+                const unsigned scenario=(n%64)/8;
+                const auto read=[&](uint32_t at) { uint32_t v; std::memcpy(&v,ram+at,4); return v; };
+                const unsigned reached=!fromEntry ? (kind==196 ? 4 : 1) : kind==195 ? unsigned(scenario<6) : kind==196 ? 4 :
+                    kind==197 ? unsigned(scenario<6) : kind==198 ? unsigned(scenario!=6) : kind==199 ? unsigned(scenario<6) : scenario<=4 ? 2 : 0;
+                require(refAuditedInverseCalls[kind-156]==reached,"final inverse producer reach");
+                if(kind==195) {
+                    require(read(gp-0x3118)==unsigned(reached!=0),"force-field hit flag not published");
+                    if(reached) {
+                        require(refFinalActions[0]==1,"force-field normalize consumer not executed");
+                        require(read(0x4fc3ac)==read(0x2200c),"force-field lost meaningful inverse W");
+                        ++finalPublications[0];
+                    }
+                }
+                if(kind==196) {
+                    require(refFinalActions[1]==4 && read(gp-0x4480)==n%4+1,"health-stand loop did not publish four vertices");
+                    for(unsigned i=0;i<4;++i) {
+                        const float expected[3]={n%4 ? 11.f+float(i) : 10.f,n%4 ? 20.f : 19.f-float(i),30.f};
+                        require(!std::memcmp(ram+0x2394c0+(n%4)*0x70+i*16,expected,12),"health-stand transformed vertex differs");
+                    }
+                }
+                if(kind==197) {
+                    const bool packet=!fromEntry || scenario!=6;
+                    require(read(0x18004)==(packet ? 5u : 0u),"HUD distance packet not published");
+                    if(packet) { require(read(0x2801c)==(scenario==1 ? 100u : scenario==2 ? 30u : 128u),"HUD distance alpha differs"); ++finalPublications[1]; }
+                }
+                if(kind==198 && reached && scenario!=4 && scenario!=1 && scenario!=2 && scenario!=3) {
+                    require(read(0x188d4)==0,"HUD nearest target not published"); ++finalPublications[2];
+                }
+                if(kind==199) require(read(0x1801c)==(reached ? 4u : 3u),"radar signal count not published");
+                if(kind==200 && fromEntry) {
+                    const unsigned visible=scenario==0 ? 2 : scenario==1 ? 1 : 0;
+                    require(getRegU32(&a,23)==visible,"particle visibility/sort count differs");
+                    if(visible==2) {
+                        require(read(0x26000)==1 && read(0x26004)==0,"particle depth order not published");
+                        const float depths[]={8.f,4.f}; require(!std::memcmp(ram+sp,depths,8),"particle sorted depths differ");
+                        ++finalPublications[3];
+                    }
+                    if(visible==1) require(read(0x26000)==0,"single visible particle not published");
+                    require(refFinalActions[2]==reached && refFinalActions[3]==reached,"particle camera getters not executed");
                 }
             }
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
@@ -1625,9 +1755,10 @@ void testHierarchyHelperCallers()
             snapshot(expected.get()); if (wholeCase) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
             restore(); _mm_setcsr(control); run(true, b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
             // Full rear-view entries retain the original rotation producer's identity-helper VU writes.
-            const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : initial;
+            const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : kind==195 && sawForceInverseEntry ? forceInverseEntry : initial;
+            if(kind==195 && sawForceInverseEntry) require(vuUntouched(forceReferenceEntry,forceInverseEntry),"force-field original producer effects differ");
             if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls ||
-                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || services.aiActions != refAiActions || services.vehicleLightActions != refVehicleLightActions || !dataEqual() ||
+                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || services.aiActions != refAiActions || services.vehicleLightActions != refVehicleLightActions || services.finalActions != refFinalActions || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;
@@ -1636,6 +1767,8 @@ void testHierarchyHelperCallers()
     std::printf("AI attack publication cases: front %u rear %u\n",aiShotPublications[0],aiShotPublications[1]);
     require(weaponJumpCases && lightingPublicationCases && rolloverPublicationCases,"vehicle/light fixtures missed successful publication");
     std::printf("Vehicle/light publication cases: tire jumps %u lighting %u rollover %u\n",weaponJumpCases,lightingPublicationCases,rolloverPublicationCases);
+    require(std::all_of(finalPublications.begin(),finalPublications.end(),[](unsigned n) { return n!=0; }),"final inverse fixtures missed successful publication");
+    std::printf("Final inverse publication cases: force-field %u HUD packets %u nearest targets %u particle sorting %u\n",finalPublications[0],finalPublications[1],finalPublications[2],finalPublications[3]);
     host.enabled = false; unsigned historical = 0;
     for (unsigned kind = 4; kind < std::size(callers); ++kind) for (unsigned n = 0; n < 64; ++n)
     {

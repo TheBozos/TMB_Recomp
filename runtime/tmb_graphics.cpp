@@ -15,6 +15,7 @@
 namespace tmb::math { bool hudInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
 namespace tmb::math { bool vehicleInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
 namespace tmb::math { bool contactInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
+namespace tmb::math { bool cameraInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
 
 namespace tmb::graphics
 {
@@ -74,6 +75,7 @@ namespace tmb::graphics
             if (tmb::math::hudInstruction(ram, ctx, rt, pc)) return true;
             if (tmb::math::vehicleInstruction(ram, ctx, rt, pc)) return true;
             if (tmb::math::contactInstruction(ram, ctx, rt, pc)) return true;
+            if (tmb::math::cameraInstruction(ram, ctx, rt, pc)) return true;
             if (!std::binary_search(kSortedGraphicsOutput.begin(), kSortedGraphicsOutput.end(), pc))
                 return false;
             if (pc == 0x001c18b0u || pc == 0x001c1a78u)

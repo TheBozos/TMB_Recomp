@@ -15,6 +15,11 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_MINION_FORWARD.md`](NATIVE_MINION_FORWARD.md) adds seven Minion shield-hit
+forwards, with actual distance, health, HUD and hierarchy-switch consumers.
+Coverage is 131/269 known forward returns (138 remain), with 134/134 known
+inverse returns native.
+
 [`NATIVE_ATTACHMENT_FORWARD.md`](NATIVE_ATTACHMENT_FORWARD.md) adds five helicopter,
 cable and weapon movement forwards. Coverage is 124/269 known forward returns
 (145 remain), with 134/134 known inverse returns native.

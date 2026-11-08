@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Minion shield forwards](NATIVE_MINION_FORWARD.md) adds seven hit-point sites with
+actual distance, health, HUD and hierarchy-switch publication consumers.
+
 [Attachment/environment forwards](NATIVE_ATTACHMENT_FORWARD.md) adds five helicopter,
 cable, gascan, saw-blade and taxi-spike sites with actual grid/query/publication consumers.
 

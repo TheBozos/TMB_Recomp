@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Rigid-body forward transforms](NATIVE_RIGID_BODY_FORWARD.md) adds ten sites for local
+forces/torques/impulses, integration and world-point publication.
+
 [Final inverse returns](NATIVE_FINAL_INVERSES.md) completes all 134 known inverse sites,
 including force-field, health-stand, HUD/radar and particle visibility/sorting consumers.
 

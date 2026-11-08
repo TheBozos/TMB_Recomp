@@ -10,7 +10,7 @@
 namespace tmb::math
 {
     // Audited XYZ-only consumers: collision queries, vehicle spatial records and hierarchy lighting/attachments.
-    inline constexpr std::array<uint32_t, 95> directionReturns{
+    inline constexpr std::array<uint32_t, 96> directionReturns{
         0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc, 0x11708c, 0x1880e0, 0x1d4284, 0x1d42e8, 0x1cb19c,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, // height-test collision/BSP results
         0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804, // line-of-sight BSP/volume results
@@ -35,7 +35,8 @@ namespace tmb::math
         0x1fdd3c, // camera positioning, collision-probe offsets and rear-view publication
         0x1e8a34, // weather viewport centre, consumed as XYZ by placement/grid/projection setup
         0x1b28cc, 0x1b28e8, // weapon-local / coordinate-system translation offsets
-        0x168ca0, 0x1691b0, 0x169378}; // skid-mark half-width and stationary/moving stretch offsets
+        0x168ca0, 0x1691b0, 0x169378, // skid-mark half-width and stationary/moving stretch offsets
+        0x11112c}; // final-boss captured vehicle position, consumed as XYZ
 
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };

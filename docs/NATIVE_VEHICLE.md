@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Driver/boss inverses](NATIVE_DRIVER_BOSS_INVERSES.md) adds five native inverse sites
+and the coupled boss forward publication, with actual driver and attachment consumers.
+
 [AI inverses](NATIVE_AI_INVERSES.md) adds five native inverse call sites with steering,
 attack-range and front/rear shot-policy comparisons.
 

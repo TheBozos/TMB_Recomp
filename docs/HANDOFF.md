@@ -65,6 +65,10 @@ collision and drift inverse returns, with full XYZW checks and explicit generate
 [`NATIVE_RIGID_BODY_INVERSES.md`](NATIVE_RIGID_BODY_INVERSES.md) adds seven rigid-body inverse
 returns, with complete impulse/collision entries and point-velocity consumers.
 
+[`NATIVE_DRIVER_BOSS_INVERSES.md`](NATIVE_DRIVER_BOSS_INVERSES.md) adds five driver/boss inverse
+returns and their coupled boss forward publication, with complete/bounded generated consumers
+and gameplay/loading/movie qualification.
+
 [`NATIVE_AI_INVERSES.md`](NATIVE_AI_INVERSES.md) adds five AI inverse returns,
 with steering, attack-range and shot-policy consumers plus real attack-state publication.
 

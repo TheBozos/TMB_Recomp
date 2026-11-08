@@ -103,6 +103,7 @@ namespace
                 if(ctx->pc==0x1dbe18) capture(5,weaponTargets);
                 if(ctx->pc==0x1cec90) capture(4,weaponTargets);
                 if(launcherFixture && ctx->pc==0x1dbd58) capture(5,weaponTargets);
+                if(launcherFixture && ctx->pc==0x1b7590) capture(8,weaponTargets); // CreateStaticWeapon's position
             }
             if (ctx->pc == stop || ctx->pc == stop2) throw SegmentEnd{};
         }
@@ -226,7 +227,7 @@ namespace
         countMinionDirection(ctx); const auto before=*ctx; nativeDirectionImplementation(ram,ctx,rt);
         require(vuUntouched(before,*ctx),"Minion forward leaf changed VU state");
     }
-    constexpr uint32_t weaponDirectionReturns[]={0x1b1700,0x1b1bbc,0x1b339c,0x1b3634,0x1b371c,0x1b3ef8,0x1b2fb0,0x1b3118,0x150efc,0x1511ec,0x1513f4,0x150094,0x1502cc};
+    constexpr uint32_t weaponDirectionReturns[]={0x1b1700,0x1b1bbc,0x1b339c,0x1b3634,0x1b371c,0x1b3ef8,0x1b2fb0,0x1b3118,0x150efc,0x1511ec,0x1513f4,0x150094,0x1502cc,0x14d62c,0x14d678};
     std::array<unsigned,std::size(weaponDirectionReturns)> weaponDirectionCalls{};
     void countWeaponDirection(const R5900Context *ctx) {
         for(unsigned i=0;i<std::size(weaponDirectionReturns);++i) if(getRegU32(ctx,31)==weaponDirectionReturns[i]) ++weaponDirectionCalls[i];
@@ -347,7 +348,7 @@ void testHierarchyHelperCallers()
         0x129e58,0x137cac,0x1b2d1c,0x1b3d30,0x1b3e00,
         0x1ada84,0x1adb8c,0x1adba0,0x1adca8,0x1adcbc,0x1addc4,0x1addd8,
         0x1b1700,0x1b1bbc,0x1b339c,0x1b3634,0x1b371c,0x1b3ef8,0x1b2fb0,0x1b3118,
-        0x150efc,0x1511ec,0x1513f4,0x150094,0x1502cc};
+        0x150efc,0x1511ec,0x1513f4,0x150094,0x1502cc,0x14d62c,0x14d678};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138) || (kind >= 155 && kind <= 187) || (kind >= 189 && kind <= 200); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0; std::array<unsigned,2> aiShotPublications{};
     unsigned weaponJumpCases=0, lightingPublicationCases=0, rolloverPublicationCases=0;
@@ -356,7 +357,7 @@ void testHierarchyHelperCallers()
     std::array<unsigned,4> collisionPublications{}; unsigned collisionErrnoCases=0;
     std::array<unsigned,5> attachmentPublications{}; unsigned gridRemovals=0;
     std::array<unsigned,4> minionPublications{}, minionDestructions{}; unsigned minionBoundaries=0;
-    std::array<unsigned,13> weaponPublications{};
+    std::array<unsigned,15> weaponPublications{};
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
         {
@@ -1964,9 +1965,9 @@ void testHierarchyHelperCallers()
                     // Weapon lock-on, look-ahead, skill-satellite, rock and ricochet transforms through their real owners.
                     const unsigned site=kind-236;
                     const auto fp=[&](unsigned r,float v) { std::memcpy(&initial.fu[r],&v,4); };
-                    constexpr uint32_t owners[]={0x1b16a8,0x1b1ae0,0x1b3350,0x1b3350,0x1b3350,0x1b3e28,0x1b2ee0,0x1b2ee0,0x150e68,0x151060,0x151358,0x14ff58,0x14ff58};
-                    constexpr RecompiledFunction resumes[]={resume_0x1b16a8,resume_0x1b1ae0,resume_0x1b3350,resume_0x1b3350,resume_0x1b3350,resume_0x1b3e28,resume_0x1b2ee0,resume_0x1b2ee0,resume_0x150e68,resume_0x151060,resume_0x151358,resume_0x14ff58,resume_0x14ff58};
-                    continuation=resumes[site]; entry=owners[site]; returnAt(site<2 ? 0x70 : site==8 ? 0x70 : site>=11 ? 0x80 : site>=9 ? 0xd0 : site>=6 ? 0xb0 : 0x30);
+                    constexpr uint32_t owners[]={0x1b16a8,0x1b1ae0,0x1b3350,0x1b3350,0x1b3350,0x1b3e28,0x1b2ee0,0x1b2ee0,0x150e68,0x151060,0x151358,0x14ff58,0x14ff58,0x14d3a0,0x14d3a0};
+                    constexpr RecompiledFunction resumes[]={resume_0x1b16a8,resume_0x1b1ae0,resume_0x1b3350,resume_0x1b3350,resume_0x1b3350,resume_0x1b3e28,resume_0x1b2ee0,resume_0x1b2ee0,resume_0x150e68,resume_0x151060,resume_0x151358,resume_0x14ff58,resume_0x14ff58,resume_0x14d3a0,resume_0x14d3a0};
+                    continuation=resumes[site]; entry=owners[site]; returnAt(site<2 ? 0x70 : site==8 ? 0x70 : site>=13 ? 0xd0 : site>=11 ? 0x80 : site>=9 ? 0xd0 : site>=6 ? 0xb0 : 0x30);
                     word(object+0x130,address(cs)); word(object+0x110,address(vehicle)); word(object+0x114,scenario==2 && n>=64 ? 0 : address(vehicle)); // no target only gates full entries
                     word(object+4,scenario==1 ? 4 : 9); word(object+0x34,scenario==3 ? 0 : 1); word(object+0x3c,n&1); word(object+0x40,0);
                     f(object+0x54,0.f); word(object+0x14,0); f(object+0x70,2.f); f(object+0x94,-5.f); f(object+0x98,scenario==4 ? .5f : 6.f);
@@ -1991,14 +1992,26 @@ void testHierarchyHelperCallers()
                         word(car+0x580,1); if(site>=11) xyz(car+0x1d0,250.f,350.f,450.f); else xyz(car+0x1d0,500.f,600.f,700.f); word(car+0x2018,address(carCs)); xyz(carCs+0x10,500.f,600.f,700.f); // Cop SUV laser range is 600
                         for(uint32_t at:{0x61e8u,0x61e4u,0x61e0u,0x61f8u,0x61f4u}) f(gp-at,.5f); // bounded turret angle smoothing
                         const uint32_t out=sp+0x10, matrix=sp+0x30;
-                        if(site==8 || site>=11) { reg(16,out); reg(17,launcher); reg(18,vehicle); reg(19,vehicle+0x1d0); reg(4,cs+0x20); reg(5,out); xyz(out,2.f,-3.f,4.5f); }
+                        if(site==8 || site==11 || site==12) { reg(16,out); reg(17,launcher); reg(18,vehicle); reg(19,vehicle+0x1d0); reg(4,cs+0x20); reg(5,out); xyz(out,2.f,-3.f,4.5f); }
+                        else if(site>=13) {
+                            // Environment gun (UpdateEnvWeapon): the game-mode jump table selects the turret case; every tenth
+                            // update fires from one of two offset tables, toggled at +f0, and passes the world point to
+                            // CreateStaticWeapon. The fixture stops there; the no-fire scenario returns normally.
+                            word(scene+0x1b3db0,1); word(0x4e71c4,0x14d448); word(scene+0x1b2a3c,address(cs));
+                            word(launcher+0x264,n>=64 && scenario==1 ? 12 : 11); word(launcher+0xf0,site==13 ? 1 : 0);
+                            xyz(0x23d240,2.f,-3.f,4.5f); xyz(0x23d250,-1.5f,6.f,-2.f); xyz(cs+0x60,.25f,0.f,.5f);
+                            for(uint32_t at:{0x6340u,0x6338u,0x6334u}) f(gp-at,.5f); f(gp-0x633c,-1e6f); // aim limits and smoothing
+                            ram[vehicle+0x475]=0; reg(20,launcher); reg(30,vehicle); setRegU32(&initial,16,0x1b0000); // no special-weapon handoff in the epilogue
+                            reg(4,cs+0x20); reg(5,site==13 ? 0x23d240 : 0x23d250); reg(6,sp);
+                            if(!(n>=64 && scenario==1)) services.stop=0x1b7590;
+                        }
                         else {
                             basis(matrix,n%4==0); reg(16,out); reg(17,matrix); reg(20,vehicle+0x1d0); reg(4,matrix); reg(6,out);
                             if(site==9) { reg(18,launcher); reg(19,vehicle); reg(5,launcher+0x3a0); }
                             else { reg(18,vehicle); reg(19,launcher); reg(5,0x23d1f0); }
                         }
-                        if(site==8 || site>=11) reg(6,out);
-                        if(site>=11) {
+                        if(site==8 || site==11 || site==12) reg(6,out);
+                        if(site==11 || site==12) {
                             // Cop SUV: mode 0x14 with a live player state takes the first aim branch, otherwise the second.
                             // Both branches end in the laser-sound start/stop calls into the sound driver: the fixture stops there,
                             // after the aim point has been consumed.
@@ -2444,9 +2457,10 @@ void testHierarchyHelperCallers()
                 const unsigned site=kind-236, scenario=(n%64)/8;
                 const auto read=[&](uint32_t at) { uint32_t v; std::memcpy(&v,ram+at,4); return v; };
                 const bool active=!fromEntry || site>=2 || (scenario!=1 && scenario!=2 && scenario!=3);
-                std::array<unsigned,13> reached{};
+                std::array<unsigned,15> reached{};
                 std::vector<unsigned> order; // reached sites in execution order
                 if(site>=8) { const bool aim=!fromEntry || scenario!=1 || site==11; reached[site]=aim; if(aim) order.push_back(site); }
+                // (Environment gun: scenario 1 is the no-fire update count, which skips its transform as well.)
                 else if(site<6) { reached[site]=active; if(active) order.push_back(site); }
                 else {
                     // Ricochet: the first transform always runs from the entry; the reflection branch then reaches the second.
@@ -2454,15 +2468,15 @@ void testHierarchyHelperCallers()
                     if(!fromEntry || scenario!=4) { reached[7]=1; order.push_back(7); }
                 }
                 require(refWeaponDirections==reached,"weapon forward producer reach differs");
-                const uint32_t frame=fromEntry ? sp-(site<2 ? 0x90u : site==5 ? 0x60u : site==8 ? 0xa0u : site>=11 ? 0xb0u : site==9 ? 0x100u : site==10 ? 0xf0u : site>=6 ? 0xd0u : 0x50u) : sp;
-                const uint32_t wAt=frame+(site>=8 ? 0x1cu : 0xcu);
+                const uint32_t frame=fromEntry ? sp-(site<2 ? 0x90u : site==5 ? 0x60u : site==8 ? 0xa0u : site>=13 ? 0x110u : site>=11 ? 0xb0u : site==9 ? 0x100u : site==10 ? 0xf0u : site>=6 ? 0xd0u : 0x50u) : sp;
+                const uint32_t wAt=frame+(site>=8 && site<13 ? 0x1cu : 0xcu);
                 require(referenceW.size()==unsigned(!order.empty()) && (order.empty() || referenceW[0].offset==wAt),"unexpected weapon forward-W exclusion");
                 require(refWeaponInputs.size()==order.size() && refWeaponOutputs.size()==order.size(),"weapon transform consumer not executed");
                 for(size_t k=0;k<order.size();++k) {
                     // Independent quarter-turn/identity result where the basis is fixture-known, then the actual XYZ
                     // publication through mathfAddVector. Ricochet's second basis is rebuilt by the owner after its first.
                     const unsigned at=order[k];
-                    const bool known=at==9 || at==10 ? !fromEntry : at!=7 || (site==7 && !fromEntry); // Minion/Tanker entries build their aim basis
+                    const bool known=at==9 || at==10 || at>=13 ? !fromEntry : at!=7 || (site==7 && !fromEntry); // Minion/Tanker entries build their aim basis
                     const bool rotated=at==2 || (at>=5 && at<=7) ? n%4==1 : (at==3 || at==4) && fromEntry ? false : n%4==0;
                     float in[3], out[3]; std::memcpy(in,refWeaponInputs[k].data(),12); std::memcpy(out,refWeaponOutputs[k].data(),12);
                     if(known) require(out[0]==(rotated ? -in[1] : in[0]) && out[1]==(rotated ? in[0] : in[1]) && out[2]==in[2],"weapon independent transform differs");
@@ -2472,7 +2486,8 @@ void testHierarchyHelperCallers()
                         // The aim point is consumed by the real mathfRotationFromPointToPoint toward the chosen car.
                         require(refWeaponTargets.size()==1 && refWeaponTargets[0]==sum,"launcher aim point differs");
                         if((at==8 || at==12) && fromEntry) require(read(0x3624bc)==1,"launcher target flag not published"); // set before the transform
-                        if(at>=11) require(a.pc==0x17baf0 || a.pc==0x17bba0,"Cop SUV laser-sound boundary not reached");
+                        if(at==11 || at==12) require(a.pc==0x17baf0 || a.pc==0x17bba0,"Cop SUV laser-sound boundary not reached");
+                        if(at>=13) require(a.pc==0x1b7590 && (!fromEntry || read(0x18000+0xf0)==(at==13 ? 0u : 1u)),"environment gun fire/toggle publication differs");
                     } else if(at==6) {
                         require(refAttachmentActions[6]==1 && refWeaponTargets.size()==1 && refWeaponTargets[0][0]==sum[0] && refWeaponTargets[0][1]==sum[1],
                             "ricochet height-test position differs");
@@ -2560,7 +2575,7 @@ void testHierarchyHelperCallers()
         std::all_of(minionDestructions.begin(),minionDestructions.end(),[](unsigned n) { return n!=0; }) && minionBoundaries,"Minion fixtures missed damage/destruction/distance boundaries");
     std::printf("Minion forward publication cases: damage %u/%u/%u/%u destruction %u/%u/%u/%u exact distance boundaries %u\n",minionPublications[0],minionPublications[1],minionPublications[2],minionPublications[3],minionDestructions[0],minionDestructions[1],minionDestructions[2],minionDestructions[3],minionBoundaries);
     require(std::all_of(weaponPublications.begin(),weaponPublications.end(),[](unsigned n) { return n!=0; }),"weapon fixtures missed transform publication");
-    std::printf("Weapon forward publication cases: lock-on %u look-ahead %u skill-satellite %u/%u/%u rock %u ricochet %u/%u launcher aim hearse %u minion %u tanker %u cop SUV %u/%u\n",weaponPublications[0],weaponPublications[1],weaponPublications[2],weaponPublications[3],weaponPublications[4],weaponPublications[5],weaponPublications[6],weaponPublications[7],weaponPublications[8],weaponPublications[9],weaponPublications[10],weaponPublications[11],weaponPublications[12]);
+    std::printf("Weapon forward publication cases: lock-on %u look-ahead %u skill-satellite %u/%u/%u rock %u ricochet %u/%u launcher aim hearse %u minion %u tanker %u cop SUV %u/%u environment gun %u/%u\n",weaponPublications[0],weaponPublications[1],weaponPublications[2],weaponPublications[3],weaponPublications[4],weaponPublications[5],weaponPublications[6],weaponPublications[7],weaponPublications[8],weaponPublications[9],weaponPublications[10],weaponPublications[11],weaponPublications[12],weaponPublications[13],weaponPublications[14]);
     host.enabled = false; unsigned historical = 0;
     for (unsigned kind = 4; kind < std::size(callers); ++kind) for (unsigned n = 0; n < 64; ++n)
     {

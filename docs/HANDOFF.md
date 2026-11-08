@@ -15,6 +15,10 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_ENVWEAPON_FORWARD.md`](NATIVE_ENVWEAPON_FORWARD.md) adds the two environment gun fire-point
+forwards. Coverage is 146/269 known forward returns (123 remain), with 134/134 known inverse
+returns native.
+
 [`NATIVE_COPSUV_AIM_FORWARD.md`](NATIVE_COPSUV_AIM_FORWARD.md) adds the two Cop SUV laser-aim
 forwards. Coverage is 144/269 known forward returns (125 remain), with 134/134 known inverse
 returns native.

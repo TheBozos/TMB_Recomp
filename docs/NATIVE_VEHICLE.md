@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Collision forward transforms](NATIVE_COLLISION_FORWARD.md) adds six velocity,
+force, impact-offset and morph-placement sites with actual state consumers.
+
 [Driver forward transforms](NATIVE_DRIVER_FORWARD.md) adds seven path-offset,
 lookahead and driving-LOS sites with complete generated owners and real queries.
 

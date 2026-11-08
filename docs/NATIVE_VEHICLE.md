@@ -78,3 +78,7 @@ and one inverse site, with complete generated positioning, smoothing and orienta
 [Native peel-out transform](NATIVE_PEEL_OUT.md) subsequently adds the vehicle's
 visual-offset forward transform, checked through the full producer and the real
 coordinate-system consumer, including matrix aliases and the opaque source W boundary.
+
+[Native weapon/skid transforms](NATIVE_WEAPON_SKID_TRANSFORMS.md) subsequently add
+weapon translation and skid creation/stretch offsets, including complete scalar
+vertex publication, material/list bookkeeping and stationary/moving entry checks.

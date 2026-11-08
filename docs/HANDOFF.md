@@ -56,6 +56,9 @@ forward transforms, rear-view positioning and the coupled inline XYZW position p
 [`NATIVE_WEATHER_VIEWPORT.md`](NATIVE_WEATHER_VIEWPORT.md) adds the weather viewport's
 forward transform, checked through full entry, fade/fog updates, grid alignment and projection.
 
+[`NATIVE_WEAPON_SKID_TRANSFORMS.md`](NATIVE_WEAPON_SKID_TRANSFORMS.md) adds weapon translation
+and skid-mark creation/stretch offsets, with complete positioning, list and vertex consumers.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

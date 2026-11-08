@@ -34,6 +34,7 @@ namespace
     struct Services : bozo::RuntimeServices
     {
         unsigned yields = 0, randomCalls = 0, weatherPoints = 0, weatherIdentities = 0;
+        std::array<unsigned,5> spatialCalls{};
         uint32_t stop = 0x1eeafc;
         // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
         void yield(uint8_t *, R5900Context *ctx, Runtime *) override
@@ -42,6 +43,9 @@ namespace
             if (ctx->pc == 0x21d228) ++randomCalls;
             if (ctx->pc == 0x1da238) ++weatherPoints;
             if (ctx->pc == 0x1db0f0) ++weatherIdentities;
+            constexpr uint32_t spatial[]={0x1b28cc,0x1b28e8,0x168ca0,0x1691b0,0x169378};
+            if (ctx->pc == 0x1da298) for (unsigned i=0;i<std::size(spatial);++i)
+                if (getRegU32(ctx,31)==spatial[i]) ++spatialCalls[i];
             if (ctx->pc == stop) throw SegmentEnd{};
         }
         [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
@@ -68,8 +72,8 @@ namespace
     constexpr uint32_t debug = 0x7484f0, debugBytes = 0x220; // actual terrain line/GS-line producer records
     constexpr uint32_t towVectors = 0x23d060, towVectorBytes = 0x50, towMaterials = 0x190c20, towMaterialBytes = 0x100;
     constexpr std::pair<uint32_t,uint32_t> regions[] = {{base,bytes},{globals,globalBytes},{debug,debugBytes},{0x66fcc4,4},
-        {towVectors,towVectorBytes},{towMaterials,towMaterialBytes},{0x230010,64},{0x687680,0x130},{0x68ab80,0x8b80}};
-    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4 + towVectorBytes + towMaterialBytes + 64 + 0x130 + 0x8b80;
+        {towVectors,towVectorBytes},{towMaterials,towMaterialBytes},{0x230010,64},{0x687680,0x130},{0x68ab80,0x8b80},{0x446560,0x80}};
+    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4 + towVectorBytes + towMaterialBytes + 64 + 0x130 + 0x8b80 + 0x80;
     constexpr uint32_t gp = 0x40000, sp = 0x30000;
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
@@ -177,7 +181,8 @@ void testHierarchyHelperCallers()
         0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8,
         0x15e1b8, 0x1b42c8, 0x1b430c, 0x1b43a8, 0x1b4434, 0x1b44c0,
         0x150bc8, 0x150cc0, 0x150d2c, 0x150d98, 0x108d6c, 0x109870, 0x1099a0, 0x1abd60,
-        0x1137cc, 0x11398c, 0x113a78, 0x113b28, 0x113c2c, 0x113f28, 0x1142d8, 0x114394, 0x1fdd3c, 0x1e8a34};
+        0x1137cc, 0x11398c, 0x113a78, 0x113b28, 0x113c2c, 0x113f28, 0x1142d8, 0x114394, 0x1fdd3c, 0x1e8a34,
+        0x1b28cc, 0x1b28e8, 0x168ca0, 0x1691b0, 0x169378};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
@@ -1042,7 +1047,7 @@ void testHierarchyHelperCallers()
                     }
                 }
             }
-            else
+            else if (kind == 149)
             {
                 // Complete weather viewport: real view accessors, fade/fog producers, grid placement and projection.
                 constexpr uint32_t cs=0x1b000;
@@ -1078,9 +1083,78 @@ void testHierarchyHelperCallers()
                     if (scenario==0) word(gp-0x34b8,0xffffffff);
                 }
             }
+            else
+            {
+                constexpr uint32_t vehicle=0x18000, weapon=0x15000, cs=0x1b000, scene=0x360000;
+                const unsigned wheel=n%4, mark=(n/4)%4, scenario=(n%64)/8;
+                const uint32_t tire=vehicle+0x1a90+wheel*0xf0, vertices=scene+0x163570+mark*64;
+                word(gp-0x4154,scene); word(vehicle+0x2018,address(cs));
+                word(vehicle+0x3c0,n&4 ? 0x40800000 : 0x40000000);
+                word(vehicle+0x2c4,n&1 ? 0xbf800000 : 0x3f800000);
+                word(vehicle+0x530,scenario&1 ? 0xbe800000 : 0x3e800000);
+                word(tire+0xa4,mark); const uint16_t material=uint16_t(wheel);
+                std::memcpy(ram+tire+0xa0,&material,2);
+                word(tire+0xb8,0); word(tire+0xd4,0); word(tire+0xd8,0); word(tire+0xdc,scenario&1);
+                for (uint32_t at:{0x4ef4a4u,0x4edd34u,0x4eae48u,0x4e3918u,0x4e67f8u,0x4e5088u,0x4e7f68u}) word(at+mark*4,0);
+                word(0x4eae48+mark*4,material); word(gp-0x5f7c,0x3f800000);
+                for (unsigned j=0;j<3;++j) {
+                    word(tire+0x30+j*4,0); word(tire+0x40+j*4,0x3f800000);
+                    for (unsigned v=0;v<4;++v) word(vertices+16*v+4*j,0);
+                }
+                for (unsigned v=0;v<4;++v) word(vertices+16*v+12,bits());
+                word(cs+0x60,0); word(cs+0x68,0); word(cs+0x1c,bits());
+                if (kind <= 151) {
+                    continuation=resume_0x1b25b8; reg(16,weapon); reg(4,kind==150 ? weapon+0xd0 : cs+0x20);
+                    reg(5,sp); reg(6,sp); returnAt(0x30);
+                    word(weapon+0x130,address(cs)); word(weapon+0x14,scenario%4);
+                    word(weapon+0x3c,kind==150); word(weapon+0x38,0);
+                    word(weapon+0x70,0x3e800000); word(weapon+0x50,0x3e000000);
+                    word(weapon+0x90,0x3e000000); word(weapon+0x94,scenario&1 ? 0x3e800000 : 0);
+                    word(weapon+0x98,0xbe000000); word(gp-0x2ef8,1+(scenario%3));
+                    word(gp-0x4ae8,0x3f800000); word(gp-0x4ae4,0x3e000000); word(gp-0x4ae0,0x3e800000);
+                    if (n>=64) { fromEntry=true; initial.pc=0x1b25b8; reg(4,weapon); setRegU32(&initial,31,0xbad0000); }
+                } else if (kind == 152) {
+                    continuation=resume_0x168a98; reg(19,vehicle); reg(22,tire); reg(23,tire+0x30); reg(21,tire+0x40);
+                    reg(18,sp+0x10); reg(4,vehicle+0x190); reg(5,sp); reg(6,sp+0x10);
+                    setRegU32(&initial,17,mark); setRegU32(&initial,20,mark*4); setRegU32(&initial,30,0x188000); returnAt(0xb0);
+                    word(vehicle+0x2110,scenario==0 ? 0 : 1); word(vehicle+0x20a8,0);
+                    word(tire+0xa4,0xffffffff); word(gp-0x2ed0,scenario==3 ? 0x40000000 : 0);
+                    word(gp-0x5f80,0x3f800000); word(tire+0xb8,scenario==2);
+                    if (scenario==1) { const uint16_t invalid=29; std::memcpy(ram+tire+0xa0,&invalid,2); }
+                    word(scene+0x18dd2c,scenario==7 ? 0xffffffff : mark);
+                    word(scene+0x18dd28,scenario==7 ? mark : 0xffffffff);
+                    word(scene+0x17f2c0+mark*12,1); word(scene+0x17f2c4+mark*12,0xffffffff); word(scene+0x17f2c8+mark*12,0xffffffff);
+                    word(scene+0x17ac70+mark*12,scenario==7 ? 1 : 0);
+                    word(scene+0x17ac74+mark*12,0xffffffff); word(scene+0x17ac78+mark*12,0xffffffff);
+                    word(scene+0x18c5b8+mark*4,20);
+                    initial.fu[1]=0x40000000;
+                    if (n>=64) { fromEntry=true; initial.pc=0x168a98; reg(4,vehicle); setRegU32(&initial,5,wheel); setRegU32(&initial,31,0xbad0000); }
+                } else {
+                    continuation=resume_0x168ef0; reg(20,vehicle); reg(18,tire); reg(17,tire+0x30); reg(19,sp+0x20);
+                    setRegU32(&initial,21,1); initial.fu[20]=0;
+                    reg(4,kind==153 ? cs+0x20 : vehicle+0x190); reg(5,sp); reg(6,sp+0x20); returnAt(0x90);
+                    if (kind==153) {
+                        word(vehicle+0x2c4,0); word(0x4ef4a4+mark*4,scenario==0 ? 0 : 1);
+                        word(vehicle+0x530,scenario&1 ? 0x3e800000 : 0xbe800000);
+                        if (scenario==7) word(vehicle+0x530,0xbe800000);
+                        word(tire+0xd4,scenario==4 || scenario==5); word(tire+0xd8,scenario==3 || scenario==5);
+                        const uint32_t distance=scenario==6 ? 0x41a00000 : 0x3f800000;
+                        word(vertices+0x10,distance); word(vertices+0x30,distance);
+                    } else {
+                        word(0x4eae48+mark*4,scenario==0 ? material+1 : material);
+                        word(0x4ef4a4+mark*4,scenario==4);
+                        word(0x4edd34+mark*4,scenario==5 ? n&1 : !(n&1));
+                        const uint32_t distance=scenario==3 ? 0x41800000 : scenario==2 || scenario==6 ? 0x40a00000 : 0x3f800000;
+                        word(vertices+0x10,distance); word(vertices+0x30,distance);
+                        if (scenario==6) word(cs+0x68,0x40000000);
+                    }
+                    if (n>=64) { fromEntry=true; initial.pc=0x168ef0; reg(4,vehicle); reg(5,tire); setRegU32(&initial,31,0xbad0000); }
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
                 referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
+                services.spatialCalls.fill(0);
                 rt->functions.setOverride(0x1da1e8, native ? inverse : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : direction) : referenceDirection);
                 sawDirectionEntry=false;
@@ -1107,6 +1181,7 @@ void testHierarchyHelperCallers()
             const auto refControl = _mm_getcsr(); const auto refYields = services.yields;
             const auto refRandomCalls = services.randomCalls;
             const auto refWeatherPoints=services.weatherPoints, refWeatherIdentities=services.weatherIdentities;
+            const auto refSpatialCalls=services.spatialCalls;
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
             if (expectedSelection >= 0) require(getRegU32(&a,2) == uint32_t(expectedSelection), "original attractor boundary selection");
             // Tow-truck and attractor consumers need no forward-W exclusion.
@@ -1120,16 +1195,31 @@ void testHierarchyHelperCallers()
                 require(refWeatherPoints==unsigned(!disabled && (scenario&1)) &&
                         refWeatherIdentities==unsigned(!disabled && !(scenario&1)),"weather publication branch not reached");
             }
+            if (kind >= 150 && fromEntry) {
+                const unsigned scenario=(n%64)/8;
+                const bool reached=kind<=151 || (kind==152 ? scenario>=4 : kind==153 ? scenario!=0 && scenario!=5 && scenario!=6 :
+                    scenario!=0 && scenario!=3 && scenario!=4 && scenario!=5 && scenario!=6);
+                if (refSpatialCalls[kind-150]!=unsigned(reached))
+                    std::fprintf(stderr,"producer reach kind %u case %u scenario %u: %u expected %u\n",kind,n,scenario,refSpatialCalls[kind-150],unsigned(reached));
+                require(refSpatialCalls[kind-150]==unsigned(reached),"weapon/skid producer transform reach");
+            }
+            if (kind>=150) for (auto patch:referenceW) {
+                const uint32_t tire=0x18000+0x1a90+(n%4)*0xf0;
+                const bool allowed=kind<=151 ? patch.offset==sp+0xc || patch.offset==sp-0x60+0xc :
+                    kind==152 ? patch.offset==tire+0x3c || patch.offset==sp+0x1c || patch.offset==sp-0xc0+0x1c :
+                    patch.offset==sp+0x2c || patch.offset==sp-0xb0+0x2c;
+                require(allowed,"unexpected weapon/skid W exclusion");
+            }
             // Normalize only forward-output W after all real consumers have run, exposing any W-dependent result.
             for (auto patch : referenceW) std::memcpy(ram + patch.offset, &patch.value, 4);
             // Weather's full-entry sample covers active fog updates and aliased projection output, not its disabled gate.
-            const bool wholeCase=n < 4 || (fromEntry && (kind == 149 ? n>=92 && n<96 : n<68));
+            const bool wholeCase=n < 4 || (fromEntry && (kind == 149 ? n>=92 && n<96 : kind==152 ? n>=96 && n<100 : kind>=153 ? n>=72 && n<76 : n<68));
             snapshot(expected.get()); if (wholeCase) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
             restore(); _mm_setcsr(control); run(true, b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
             // Full rear-view entries retain the original rotation producer's identity-helper VU writes.
             const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : initial;
             if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls ||
-                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || !dataEqual() ||
+                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;

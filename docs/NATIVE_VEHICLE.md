@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Vehicle/light inverses](NATIVE_VEHICLE_LIGHT_INVERSES.md) adds six native inverse sites
+with complete tire/rollover/damage/light entries and state-publication checks.
+
 [Driver/boss inverses](NATIVE_DRIVER_BOSS_INVERSES.md) adds five native inverse sites
 and the coupled boss forward publication, with actual driver and attachment consumers.
 

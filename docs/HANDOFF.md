@@ -65,6 +65,10 @@ collision and drift inverse returns, with full XYZW checks and explicit generate
 [`NATIVE_RIGID_BODY_INVERSES.md`](NATIVE_RIGID_BODY_INVERSES.md) adds seven rigid-body inverse
 returns, with complete impulse/collision entries and point-velocity consumers.
 
+[`NATIVE_VEHICLE_LIGHT_INVERSES.md`](NATIVE_VEHICLE_LIGHT_INVERSES.md) adds six tire, rollover,
+weapon-damage and object-light inverse returns, with complete generated owner entries
+and real scalar state-publication consumers.
+
 [`NATIVE_DRIVER_BOSS_INVERSES.md`](NATIVE_DRIVER_BOSS_INVERSES.md) adds five driver/boss inverse
 returns and their coupled boss forward publication, with complete/bounded generated consumers
 and gameplay/loading/movie qualification.

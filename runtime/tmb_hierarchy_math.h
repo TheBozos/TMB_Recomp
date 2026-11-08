@@ -56,6 +56,9 @@ namespace tmb::hierarchy
         0x1265a8, 0x1265d0, // driver path-point local offsets
         0x1288b0, 0x1288c4, // driver driving-LOS local directions
         0x112118, // final-boss collision attachment offset
+        0x18bc9c, 0x1ac85c, // tire rotation delta and rollover impulse
+        0x1af120, 0x1af148, // weapon-damage directions for upright/other vehicles
+        0x1eb4d4, 0x1eb58c, // object lighting position and direction
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

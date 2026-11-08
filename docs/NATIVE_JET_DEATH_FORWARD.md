@@ -1,5 +1,7 @@
 # Native falling junk jet forward transforms
 
+[Helicopter gun and walking pedestrian forwards](NATIVE_ENVHELI_PED_FORWARD.md) follow with two single-site owners.
+
 Six junk jet death forward returns use native XYZ arithmetic after the
 [sinking blimp forwards](NATIVE_BLIMP_DEATH_FORWARD.md). Known forward coverage
 grows from 157 to 163 of 269 returns (106 remain). Known inverse coverage stays 134

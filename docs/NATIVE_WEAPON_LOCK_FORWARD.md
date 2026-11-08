@@ -1,5 +1,7 @@
 # Native weapon lock-on, satellite and rock forward transforms
 
+[Ricochet forwards](NATIVE_RICOCHET_FORWARD.md) follow with two more weapon sites.
+
 Six weapon forward returns use native XYZ arithmetic after the
 [Minion shield forwards](NATIVE_MINION_FORWARD.md). Known forward coverage grows
 from 131 to 137 of 269 returns (132 remain). Known inverse coverage stays 134 of

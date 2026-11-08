@@ -1,5 +1,7 @@
 # Native junk jet and blimp flight forward transforms
 
+[Gas tank forwards](NATIVE_GASTANK_FORWARD.md) follow with three more environment sites.
+
 Two waypoint-flyer forward returns use native XYZ arithmetic after the
 [falling helicopter forwards](NATIVE_HELI_DEATH_FORWARD.md). Known forward coverage
 grows from 150 to 152 of 269 returns (117 remain). Known inverse coverage stays 134

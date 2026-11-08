@@ -1,5 +1,7 @@
 # Native Cop SUV laser-aim forward transforms
 
+[Environment gun forwards](NATIVE_ENVWEAPON_FORWARD.md) follow with two more launcher sites.
+
 The two `Launcher::UpdateCopSUV` (`14ff58`) forward returns use native XYZ
 arithmetic after the [launcher turret-aim forwards](NATIVE_LAUNCHER_AIM_FORWARD.md).
 Known forward coverage grows from 142 to 144 of 269 returns (125 remain). Known

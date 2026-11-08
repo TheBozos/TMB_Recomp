@@ -15,6 +15,9 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_HELI_DEATH_FORWARD.md`](NATIVE_HELI_DEATH_FORWARD.md) adds the two falling-helicopter forwards.
+Coverage is 150/269 known forward returns (119 remain), with 134/134 known inverse returns native.
+
 [`NATIVE_FERRIS_SMASHER_FORWARD.md`](NATIVE_FERRIS_SMASHER_FORWARD.md) adds the falling Ferris wheel car and
 smasher hit-camera forwards. Coverage is 148/269 known forward returns (121 remain), with 134/134
 known inverse returns native.

@@ -1,5 +1,7 @@
 # Native Ferris wheel fall and smasher camera forward transforms
 
+[Falling helicopter forwards](NATIVE_HELI_DEATH_FORWARD.md) follow with two more environment sites.
+
 Two environment forward returns use native XYZ arithmetic after the
 [environment gun forwards](NATIVE_ENVWEAPON_FORWARD.md). Known forward coverage
 grows from 146 to 148 of 269 returns (121 remain). Known inverse coverage stays 134

@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Attachment/environment forwards](NATIVE_ATTACHMENT_FORWARD.md) adds five helicopter,
+cable, gascan, saw-blade and taxi-spike sites with actual grid/query/publication consumers.
+
 [Collision forward transforms](NATIVE_COLLISION_FORWARD.md) adds six velocity,
 force, impact-offset and morph-placement sites with actual state consumers.
 

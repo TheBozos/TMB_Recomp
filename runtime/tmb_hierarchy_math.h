@@ -51,6 +51,8 @@ namespace tmb::hierarchy
         0x1ed8ec, 0x1ed92c, // two-body collision response
         0x1edaec, 0x1edc04, 0x1edd94, // fixed/moving surface collision response
         0x1ee030, // rigid-body auxiliary angular velocity
+        0x1029f8, 0x102c20, 0x102d74, // AI navigation, two-stage steering and attack range
+        0x105c68, 0x105eec, // AI front/rear shot eligibility
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

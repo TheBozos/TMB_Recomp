@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[AI inverses](NATIVE_AI_INVERSES.md) adds five native inverse call sites with steering,
+attack-range and front/rear shot-policy comparisons.
+
 [Rigid-body inverses](NATIVE_RIGID_BODY_INVERSES.md) adds seven native inverse call sites
 with complete collision/impulse entries and downstream point-velocity checks.
 

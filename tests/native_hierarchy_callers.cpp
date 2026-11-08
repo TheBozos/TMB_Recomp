@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <vector>
 #include <algorithm>
+#include <numeric>
 namespace tmb::math { void install(Registry &); }
 namespace tmb::hierarchy { void install(Registry &); }
 namespace tmb::graphics { void install(Registry &); }
@@ -38,9 +39,11 @@ namespace
         std::array<unsigned,3> aiActions{};
         std::array<unsigned,5> vehicleLightActions{}, finalActions{};
         std::array<unsigned,9> rigidActions{};
+        std::array<unsigned,5> driverActions{};
+        std::array<uint32_t,6> driverQueryEndpoints{};
         uint32_t stop = 0x1eeafc, stop2 = 0xffffffff;
         // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
-        void yield(uint8_t *, R5900Context *ctx, Runtime *) override
+        void yield(uint8_t *ram, R5900Context *ctx, Runtime *) override
         {
             require(++yields < 4096, "caller did not reach segment end");
             if (ctx->pc == 0x21d228) ++randomCalls;
@@ -57,6 +60,12 @@ namespace
             for(unsigned i=0;i<std::size(finalHelpers);++i) if(ctx->pc==finalHelpers[i]) ++finalActions[i];
             constexpr uint32_t rigidHelpers[]={0x1ed3d0,0x1ed3e0,0x1ed598,0x1ed608,0x1ed650,0x1edf78,0x1ee0a0,0x1ee150,0x1dc030};
             for(unsigned i=0;i<std::size(rigidHelpers);++i) if(ctx->pc==rigidHelpers[i]) ++rigidActions[i];
+            if(ctx->pc==0x1d02b8) for(unsigned i=0;i<2;++i) {
+                const auto at=bozo::GuestMemory::flatOffset(getRegU32(ctx,4+i),12);
+                require(at>=0,"invalid driver query endpoint"); std::memcpy(driverQueryEndpoints.data()+3*i,ram+at,12);
+            }
+            constexpr uint32_t driverHelpers[]={0x1d02b8,0x1f2140,0x1d0538,0x1db230,0x18b6b8};
+            for(unsigned i=0;i<std::size(driverHelpers);++i) if(ctx->pc==driverHelpers[i]) ++driverActions[i];
             if (ctx->pc == stop || ctx->pc == stop2) throw SegmentEnd{};
         }
         [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
@@ -143,11 +152,20 @@ namespace
         countRigidDirection(ctx); const auto before=*ctx; nativeDirectionImplementation(ram,ctx,rt);
         require(vuUntouched(before,*ctx),"rigid-body forward leaf changed VU state");
     }
+    constexpr uint32_t driverDirectionReturns[]={0x126618,0x1267f0,0x1276a4,0x128704,0x128744,0x1287dc,0x12880c};
+    std::array<unsigned,std::size(driverDirectionReturns)> driverDirectionCalls{};
+    void countDriverDirection(const R5900Context *ctx) {
+        for(unsigned i=0;i<std::size(driverDirectionReturns);++i) if(getRegU32(ctx,31)==driverDirectionReturns[i]) ++driverDirectionCalls[i];
+    }
+    void driverDirection(uint8_t *ram,R5900Context *ctx,Runtime *rt) {
+        countDriverDirection(ctx); const auto before=*ctx; nativeDirectionImplementation(ram,ctx,rt);
+        require(vuUntouched(before,*ctx),"driver forward leaf changed VU state");
+    }
     struct SavedW { uint32_t offset, value; };
     std::vector<SavedW> referenceW;
     void referenceDirection(uint8_t *ram, R5900Context *ctx, Runtime *rt)
     {
-        countRigidDirection(ctx);
+        countRigidDirection(ctx); countDriverDirection(ctx);
         const auto offset = bozo::GuestMemory::flatOffset(getRegU32(ctx, 6) & ~15u, 16);
         require(offset >= 0, "invalid reference output");
         if (std::none_of(referenceW.begin(), referenceW.end(), [&](auto p) { return p.offset == uint32_t(offset) + 12; }))
@@ -233,11 +251,13 @@ void testHierarchyHelperCallers()
         0x1265a8,0x1265d0,0x1288b0,0x1288c4,0x112118,0x11112c,
         0x18bc9c,0x1ac85c,0x1af120,0x1af148,0x1eb4d4,0x1eb58c,
         0x12d0b0,0x136ce8,0x13f814,0x13fe54,0x14037c,0x1e9778,
-        0x1ed478,0x1ed4c4,0x1ed4dc,0x1ed544,0x1ed55c,0x1ed708,0x1ed754,0x1ed76c,0x1edf38,0x1ee07c};
+        0x1ed478,0x1ed4c4,0x1ed4dc,0x1ed544,0x1ed55c,0x1ed708,0x1ed754,0x1ed76c,0x1edf38,0x1ee07c,
+        0x126618,0x1267f0,0x1276a4,0x128704,0x128744,0x1287dc,0x12880c};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138) || (kind >= 155 && kind <= 187) || (kind >= 189 && kind <= 200); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0; std::array<unsigned,2> aiShotPublications{};
     unsigned weaponJumpCases=0, lightingPublicationCases=0, rolloverPublicationCases=0;
     std::array<unsigned,4> finalPublications{};
+    std::array<unsigned,4> driverPublications{};
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
         {
@@ -1600,7 +1620,7 @@ void testHierarchyHelperCallers()
                     if(n>=64) { fromEntry=true; initial.pc=0x1e9700; setRegU32(&initial,2,0x2e80); }
                 }
             }
-            else
+            else if(kind<=210)
             {
                 constexpr uint32_t body=0x18000, force=0x19000, point=0x19040, cs=0x22000;
                 const unsigned scenario=(n%64)/8;
@@ -1644,20 +1664,99 @@ void testHierarchyHelperCallers()
                     fp(12,scenario==0 ? 0.f : .125f);
                 }
             }
+            else
+            {
+                constexpr uint32_t driver=0x18000, vehicle=0x1c000, target=0x20000, first=0x24000, second=0x25000, point=0x28000;
+                const unsigned scenario=(n%64)/8;
+                const auto f=[&](uint32_t at,float v) { uint32_t u; std::memcpy(&u,&v,4); word(at,u); };
+                const auto fp=[&](unsigned r,float v) { std::memcpy(&initial.fu[r],&v,4); };
+                const auto xyz=[&](uint32_t at,float x,float y,float z) { f(at,x); f(at+4,y); f(at+8,z); };
+                const auto basis=[&](uint32_t at,bool rotated) {
+                    xyz(at,rotated ? 0.f : 1.f,rotated ? 1.f : 0.f,0.f);
+                    xyz(at+0x10,rotated ? -1.f : 0.f,rotated ? 0.f : 1.f,0.f); xyz(at+0x20,0.f,0.f,1.f);
+                    word(at+12,bits()); word(at+28,bits()); word(at+44,bits());
+                };
+                word(driver+0xb0,address(vehicle)); word(driver+0xb4,address(target));
+                word(driver+0x170,address(first)); word(driver+0x174,address(second));
+                basis(first+0x20,false); basis(vehicle+0xd0,n%4==0); basis(target+0x190,n%4==0);
+                xyz(first+0x10,10.f,20.f,30.f); xyz(second+0x10,10.f,22.f,30.f);
+                xyz(vehicle+0x1d0,10.f,20.f,30.f); xyz(target+0x1d0,2010.f,20.f,30.f);
+                xyz(vehicle+0x1e0,0.f,0.f,0.f); f(vehicle+0x2c4,scenario==3 ? 0.f : scenario==7 ? -5.f : 5.f); f(vehicle+0x2d4,20.f);
+                f(vehicle+0x394,2.f); f(vehicle+0x3b0,4.f); f(target+0x2d4,10.f); f(target+0x2c4,scenario==7 ? -8.f : 8.f);
+                word(driver+0xb8,address(0x27000)); word(0x27000,address(point)); word(driver+0x200,0); word(driver+0x208,0);
+                xyz(point,11.f,21.f,30.f); ram[point+0x1c]=2; ram[point+0x1f]=1;
+                word(driver+0x270,1); word(driver+0x2a8,1); word(driver+4,5); word(driver+8,4);
+                f(driver+0x1f4,0.f); f(driver+0x40,0.f); f(driver+0x44,0.f); f(driver+0x58,0.f); f(driver+0x5c,0.f);
+                f(gp-0x7230,-3.1415927f); f(gp-0x722c,1.5707964f); f(gp-0x7228,3.1415927f);
+                word(gp-0x487c,0x40490fdb); word(gp-0x4878,0x49742400); word(gp-0x4874,0x3e22f983); word(gp-0x4870,0x40c90fdb);
+                word(gp-0x486c,0xc0490fdb); word(gp-0x4868,0xc9742400); word(gp-0x4864,0x40490fdb);
+                word(gp-0x4860,0x3e22f983); word(gp-0x485c,0x40c90fdb);
+                // Actual empty terrain and a query outside the collision-grid X bounds. No query overrides.
+                word(gp-0x33c0,0); word(gp-0x33c4,0); word(gp-0x3620,address(0x26000));
+                f(0x2600c,10000.f); f(0x26014,11000.f); f(gp-0x4844,1000000.f); f(gp-0x4840,1e20f);
+                f(0x4fb898,0.f); f(0x4fb89c,1.f); f(gp-0x4678,1e20f); f(gp-0x59e8,.5f);
+                f(gp-0x47fc,.0001f); f(gp-0x481c,.0001f); f(gp-0x4818,0.f); f(gp-0x4814,.0001f);
+                word(0x4e429c,address(0x17000)); word(0x17058,bits());
+                uint32_t entry=0;
+                if(kind<=212) {
+                    continuation=resume_0x126500; entry=0x126500;
+                    reg(17,driver); reg(20,point); reg(19,sp+0x50); setRegU32(&initial,21,1); returnAt(0x160);
+                    if(kind==211) {
+                        reg(18,sp+0xa0); reg(4,first+0x20); reg(5,sp+0x90); reg(6,sp+0xa0); xyz(sp+0x90,0.f,150.f,0.f);
+                        if(n>=64) {
+                            if(scenario==1) xyz(second+0x10,10.f,170.f,30.f);
+                            if(scenario==2) word(driver+0x270,0); if(scenario==3) word(driver+0x2a8,0);
+                            if(scenario==4) word(driver+0x170,0); if(scenario==5) word(driver+0x174,0);
+                            if(scenario==6) word(driver+4,0); if(scenario==7) word(driver+8,0);
+                        }
+                    } else {
+                        word(driver+0x270,0); f(driver+0x40,scenario&1 ? -2.f : 2.f);
+                        if(scenario==1) f(driver+0x40,0.f); if(scenario==2) ram[point+0x1f]=0;
+                        if(scenario==3) f(driver+0x1f4,.5f);
+                        f(driver+0x58,scenario>=4 ? .25f : 0.f); f(driver+0x5c,scenario>=4 ? -.5f : 0.f);
+                        basis(sp,n%4==0); reg(18,sp+0x40); reg(4,sp); reg(5,sp+0x40); reg(6,sp+0x50);
+                        xyz(sp+0x40,scenario==2 ? 0.f : scenario==3 ? 1e-30f : 2.f,scenario==2 ? 0.f : -1.f,0.f);
+                    }
+                } else if(kind==213) {
+                    continuation=resume_0x1275e8; entry=0x1275e8; reg(17,driver); reg(16,sp+0x10);
+                    const uint32_t output=scenario==5 ? target+0x1d0 : scenario==6 ? vehicle+0x1d0 : 0x29000;
+                    reg(18,output); returnAt(0x50); reg(4,target+0x190); reg(5,sp); reg(6,sp+0x10); xyz(sp,0.f,200.f,0.f);
+                    if(n>=64) {
+                        if(scenario==1) word(driver+0xb4,0); if(scenario==2) f(target+0x2d4,0.f);
+                        if(scenario==3) xyz(target+0x1d0,1010.f,20.f,30.f); if(scenario==4) f(target+0x2c4,0.f);
+                    }
+                } else {
+                    continuation=resume_0x128638; entry=0x128638;
+                    const bool special=kind==214 || kind==216;
+                    const unsigned counter=special ? 4 : scenario==7 ? 0 : 1+n%3;
+                    word(driver+0x238,counter); word(driver+0x23c,scenario==4 ? 1 : 0); word(driver+0x298,scenario==5 ? 1 : 0);
+                    word(driver+0x16c,address(point)); xyz(point,10.f,scenario==6 ? 30.f : 1020.f,30.f);
+                    f(driver+0x178,-2.f); f(driver+0x17c,2.f); f(driver+0x180,6.f); f(driver+0x184,-6.f); f(driver+0x1d0,.5f);
+                    basis(driver+0x60,n%4==0); xyz(driver+0x110,1.f,1.f,0.f); xyz(driver+0x140,-1.f,-1.f,0.f);
+                    xyz(sp,2.f,4.f,3.f); xyz(sp+0x10,12.f,24.f,35.f);
+                    reg(16,driver); reg(19,sp+0x10); reg(18,sp+0x20); fp(20,scenario==6 ? 10.f : 1000.f);
+                    reg(4,special ? driver+0x60 : vehicle+0xd0); reg(5,sp); reg(6,kind<=215 ? sp+0x10 : sp+0x20); returnAt(0xc0);
+                    if(n>=64) word(driver+0x238,special ? 3 : counter==0 ? 4 : counter-1);
+                }
+                if(n>=64) {
+                    fromEntry=true; initial.pc=entry; reg(4,driver); setRegU32(&initial,31,0xbad0000);
+                    if(kind==213) reg(5,scenario==5 ? target+0x1d0 : scenario==6 ? vehicle+0x1d0 : 0x29000);
+                }
+            }
             snapshot(input.get());
             const auto stopAt=services.stop;
             const auto run = [&](bool native, R5900Context &ctx) {
                 services.stop=stopAt; referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
-                services.spatialCalls.fill(0); auditedInverseCalls.fill(0); services.aiActions.fill(0); services.vehicleLightActions.fill(0); services.finalActions.fill(0); services.rigidActions.fill(0); rigidDirectionCalls.fill(0);
+                services.spatialCalls.fill(0); auditedInverseCalls.fill(0); services.aiActions.fill(0); services.vehicleLightActions.fill(0); services.finalActions.fill(0); services.rigidActions.fill(0); rigidDirectionCalls.fill(0); driverDirectionCalls.fill(0); services.driverActions.fill(0); services.driverQueryEndpoints.fill(0);
                 rt->functions.setOverride(0x1da1e8, native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse);
-                rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : kind>=201 ? rigidDirection : direction) : referenceDirection);
+                rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : kind>=211 ? driverDirection : (kind>=201 && kind<=210) ? rigidDirection : direction) : referenceDirection);
                 sawDirectionEntry=false; sawForceInverseEntry=false;
                 host.instruction=kind == 139 ? vehicleInstructions : nullptr;
                 if (kind == 141 && native) host.instruction=vehicleInstructions;
                 rt->functions.setOverride(0x1dcc08,kind == 139 ? matrix : nullptr);
                 rt->functions.setOverride(0x1da238,kind == 149 ? registry.find(0x1da238) : nullptr);
                 rt->functions.setOverride(0x1db0f0,kind == 149 ? registry.find(0x1db0f0) : nullptr);
-                auto helper = isInverse(kind) ? (native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse) : (native ? (kind>=201 ? rigidDirection : direction) : referenceDirection);
+                auto helper = isInverse(kind) ? (native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse) : (native ? (kind>=211 ? driverDirection : (kind>=201 && kind<=210) ? rigidDirection : direction) : referenceDirection);
                 if (!fromEntry) { helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return"); }
                 try { continuation(ram, &ctx, rt.get()); }
                 catch (const SegmentEnd &) {
@@ -1672,7 +1771,7 @@ void testHierarchyHelperCallers()
                     return;
                 }
                 require(services.stop == 0xffffffff && ctx.pc == 0xbad0000, "hierarchy consumer returned early");
-                if (kind == 171 || kind == 177 || kind>=201) {
+                if (kind == 171 || kind == 177 || (kind>=201 && kind<=210)) {
                     // Read the published angular velocity through the real point-velocity consumer.
                     setRegU32(&ctx,4,address(0x18000)); setRegU32(&ctx,5,address(0x190c0));
                     setRegU32(&ctx,6,address(0x19000)); setRegU32(&ctx,31,0xbad0000); ctx.pc=0x1ee0a0;
@@ -1693,7 +1792,7 @@ void testHierarchyHelperCallers()
             const auto refRandomCalls = services.randomCalls;
             const auto refWeatherPoints=services.weatherPoints, refWeatherIdentities=services.weatherIdentities;
             const auto refSpatialCalls=services.spatialCalls;
-            const auto refAuditedInverseCalls=auditedInverseCalls; const auto refAiActions=services.aiActions; const auto refVehicleLightActions=services.vehicleLightActions; const auto refFinalActions=services.finalActions; const auto refRigidActions=services.rigidActions; const auto refRigidDirections=rigidDirectionCalls;
+            const auto refAuditedInverseCalls=auditedInverseCalls; const auto refAiActions=services.aiActions; const auto refVehicleLightActions=services.vehicleLightActions; const auto refFinalActions=services.finalActions; const auto refRigidActions=services.rigidActions; const auto refRigidDirections=rigidDirectionCalls; const auto refDriverDirections=driverDirectionCalls; const auto refDriverActions=services.driverActions; const auto refDriverEndpoints=services.driverQueryEndpoints;
             if(kind>=181 && kind<=182) aiShotPublications[kind-181]+=refAiActions[2]!=0;
             if(kind>=155 && kind<=187) {
                 const unsigned scenario=(n%64)/8;
@@ -1767,7 +1866,7 @@ void testHierarchyHelperCallers()
                     require(refFinalActions[2]==reached && refFinalActions[3]==reached,"particle camera getters not executed");
                 }
             }
-            if(kind>=201) {
+            if((kind>=201 && kind<=210)) {
                 require(refRigidDirections[kind-201]==1,"rigid forward site not reached");
                 const bool pair=kind==202 || kind==203 || kind==204 || kind==205 || kind==207 || kind==208;
                 const bool second=kind==203 || kind==205 || kind==208;
@@ -1802,6 +1901,59 @@ void testHierarchyHelperCallers()
                     }
                     if(kind==209) { vector(0x18050,.25f,-.5f,.75f); vector(0x18060,.5f,-.25f,.125f); }
                     if(kind==210) vector(0x18040,rotated ? 8.f : 11.f,rotated ? 21.f : 22.f,33.f);
+                }
+            }
+            if(kind>=211) {
+                const unsigned scenario=(n%64)/8;
+                const auto read=[&](uint32_t at) { uint32_t v; std::memcpy(&v,ram+at,4); return v; };
+                const auto vector=[&](uint32_t at,float x,float y,float z) {
+                    const float expected[3]={x,y,z}; require(!std::memcmp(ram+at,expected,12),"driver known state publication differs");
+                };
+                std::array<unsigned,7> reached{};
+                if(kind==211) reached[0]=!fromEntry || scenario<=1;
+                else if(kind==212) reached[1]=!fromEntry || (scenario!=1 && scenario!=2);
+                else if(kind==213) reached[2]=!fromEntry || scenario==0 || scenario>=4;
+                else if(kind==214 || kind==216) {
+                    reached[3]=fromEntry || kind==214;
+                    reached[5]=kind==216 && !fromEntry ? 1 : scenario!=6;
+                } else { reached[4]=fromEntry || kind==215; reached[6]=1; }
+                require(refDriverDirections==reached,"driver forward producer reach differs");
+                const bool inversePair=(kind==214 || kind==216) && scenario==4;
+                const unsigned outputCount=inversePair ? 0 : std::accumulate(reached.begin(),reached.end(),0u);
+                require(referenceW.size()==outputCount,"driver forward output count differs");
+                const uint32_t frame=fromEntry ? sp-(kind<=212 ? 0x180u : kind==213 ? 0x70u : 0xe0u) : sp;
+                for(auto patch:referenceW) {
+                    const bool allowed=kind==211 ? patch.offset==frame+0xac : kind==212 ? patch.offset==frame+0x5c :
+                        kind==213 ? patch.offset==frame+0x1c : patch.offset==frame+0x1c || patch.offset==frame+0x2c;
+                    require(allowed,"unexpected driver forward-W exclusion");
+                }
+                const unsigned queries=kind==211 ? unsigned(!fromEntry || scenario==0) : kind>=214 ? 1 : 0;
+                require(refDriverActions[0]==queries && refDriverActions[1]==queries && refDriverActions[2]==queries,
+                    "driver did not execute actual LOS/terrain/grid consumers");
+                require(refDriverActions[3]==unsigned(kind==212 && fromEntry && reached[1]),"driver lateral rotation producer reach");
+                require(refDriverActions[4]==0,"empty-world LOS must take its actual clear path");
+                if(kind<=212 && fromEntry) {
+                    if(kind==211 && scenario==0) { vector(0x18010,10.f,170.f,33.f); require(read(0x182a8)==0,"clear path probe flag not published"); ++driverPublications[0]; }
+                    if(kind==211 && scenario==1) { vector(0x18010,11.f,21.f,30.f); require(read(0x182a8)==1,"near probe gate not retained"); }
+                    if(kind==212 && scenario==0) { vector(0x18010,13.f,21.f,30.f); ++driverPublications[1]; }
+                    if(kind==212 && (scenario==1 || scenario==2)) vector(0x18010,11.f,21.f,30.f);
+                }
+                if(kind==213 && fromEntry) {
+                    if(scenario>=1 && scenario<=3) vector(0x29000,10.f,20.f,30.f);
+                    if(scenario==0) { vector(0x29000,n%4==0 ? 1810.f : 2010.f,n%4==0 ? 20.f : 220.f,30.f); ++driverPublications[2]; }
+                }
+                if(kind>=214) {
+                    const bool special=kind==214 || kind==216;
+                    const unsigned counter=special ? 4 : scenario==7 ? 0 : 1+n%3;
+                    require(read(0x18238)==counter,"driving LOS counter/wrap not retained");
+                    if(special) require(read(0x18240)==1,"clear driving LOS state not published");
+                    else require(read(0x1823c)==((scenario==4 ? 1u : 0u)&~(1u<<counter)),"clear driving LOS mask not published");
+                    if(fromEntry && scenario==0 && special) {
+                        const float expected[6]={10.f,24.f,35.f,10.f,64.f,35.f};
+                        require(!std::memcmp(refDriverEndpoints.data(),expected,sizeof(expected)),"driving LOS known endpoints differ");
+                        ++driverPublications[3];
+                    }
+                    if(inversePair) require(refAuditedInverseCalls[30]==1 && refAuditedInverseCalls[31]==1,"driving LOS inverse consumers not executed");
                 }
             }
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
@@ -1853,7 +2005,7 @@ void testHierarchyHelperCallers()
             const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : kind==195 && sawForceInverseEntry ? forceInverseEntry : initial;
             if(kind==195 && sawForceInverseEntry) require(vuUntouched(forceReferenceEntry,forceInverseEntry),"force-field original producer effects differ");
             if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls ||
-                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || services.aiActions != refAiActions || services.vehicleLightActions != refVehicleLightActions || services.finalActions != refFinalActions || services.rigidActions != refRigidActions || rigidDirectionCalls != refRigidDirections || !dataEqual() ||
+                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || services.aiActions != refAiActions || services.vehicleLightActions != refVehicleLightActions || services.finalActions != refFinalActions || services.rigidActions != refRigidActions || rigidDirectionCalls != refRigidDirections || driverDirectionCalls != refDriverDirections || services.driverActions != refDriverActions || services.driverQueryEndpoints != refDriverEndpoints || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;
@@ -1864,6 +2016,8 @@ void testHierarchyHelperCallers()
     std::printf("Vehicle/light publication cases: tire jumps %u lighting %u rollover %u\n",weaponJumpCases,lightingPublicationCases,rolloverPublicationCases);
     require(std::all_of(finalPublications.begin(),finalPublications.end(),[](unsigned n) { return n!=0; }),"final inverse fixtures missed successful publication");
     std::printf("Final inverse publication cases: force-field %u HUD packets %u nearest targets %u particle sorting %u\n",finalPublications[0],finalPublications[1],finalPublications[2],finalPublications[3]);
+    require(std::all_of(driverPublications.begin(),driverPublications.end(),[](unsigned n) { return n!=0; }),"driver fixtures missed successful publication");
+    std::printf("Driver forward publication cases: path probes %u lateral offsets %u lookahead %u LOS endpoints %u\n",driverPublications[0],driverPublications[1],driverPublications[2],driverPublications[3]);
     host.enabled = false; unsigned historical = 0;
     for (unsigned kind = 4; kind < std::size(callers); ++kind) for (unsigned n = 0; n < 64; ++n)
     {

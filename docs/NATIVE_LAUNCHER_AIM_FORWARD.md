@@ -1,5 +1,7 @@
 # Native launcher turret aim forward transforms
 
+[Cop SUV laser-aim forwards](NATIVE_COPSUV_AIM_FORWARD.md) follow with two more launcher sites.
+
 Three launcher turret-aim forward returns use native XYZ arithmetic after the
 [ricochet forwards](NATIVE_RICOCHET_FORWARD.md). Known forward coverage grows from
 139 to 142 of 269 returns (127 remain). Known inverse coverage stays 134 of 134;
@@ -51,10 +53,11 @@ outside Git.
   addition. Each site publishes in 480 cases.
 - The VU rule from the earlier weapon increments applies. Only forward scratch W
   at frame `+1c` is normalized for test comparison, after every real consumer.
-- The new snapshot region changes the shared random fill sequence, so two
-  data-dependent counts in earlier suites moved (vehicle tire jumps 711 → 704,
-  real libm errno cases 825 → 833). All scenario-defined counts and assertions are
-  unchanged.
+- New fixture regions and new caller kinds both change the shared random fill
+  sequence that later cases see (the loop runs every kind within each rounding
+  mode), so two data-dependent counts in earlier fixtures moved (vehicle tire jumps
+  711 → 704, real libm errno cases 825 → 833). All scenario-defined counts and
+  assertions are unchanged.
 - Aggregate caller coverage is 126,464 generated sequences / 5,888 whole-memory
   comparisons. Historical forward ABI coverage is 8,512 / 532; inverse remains
   8,576 / 134.

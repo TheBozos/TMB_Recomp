@@ -1,5 +1,7 @@
 # Native helicopter gun and walking pedestrian forward transforms
 
+[Machine-gun muzzle forwards](NATIVE_MACHINE_GUN_FORWARD.md) follow with the two weapon-initialization sites.
+
 Two single-site forward returns use native XYZ arithmetic after the
 [falling junk jet forwards](NATIVE_JET_DEATH_FORWARD.md). Known forward coverage
 grows from 163 to 165 of 269 returns (104 remain). Known inverse coverage stays 134

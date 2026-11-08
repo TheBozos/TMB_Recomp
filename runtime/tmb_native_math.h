@@ -10,7 +10,7 @@
 namespace tmb::math
 {
     // Audited XYZ-only consumers: collision queries, vehicle spatial records and hierarchy lighting/attachments.
-    inline constexpr std::array<uint32_t, 165> directionReturns{
+    inline constexpr std::array<uint32_t, 167> directionReturns{
         0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc, 0x11708c, 0x1880e0, 0x1d4284, 0x1d42e8, 0x1cb19c,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, // height-test collision/BSP results
         0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804, // line-of-sight BSP/volume results
@@ -60,7 +60,8 @@ namespace tmb::math
         0x10eee0, 0x10efa0, // sinking blimp drift and explosion point
         0x143864, 0x143940, 0x1439bc, 0x143a18, 0x143b0c, 0x143b60, // falling junk jet: drift, explosion and crash points
         0x129c48, // environment helicopter gun origin passed to CreateStaticWeapon
-        0x10cc7c}; // walking attract-mode pedestrian step
+        0x10cc7c, // walking attract-mode pedestrian step
+        0x1b79f8, 0x1b7a14}; // machine-gun weapon muzzle positions (alternating barrels)
 
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };

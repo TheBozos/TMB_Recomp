@@ -15,12 +15,13 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_MACHINE_GUN_FORWARD.md`](NATIVE_MACHINE_GUN_FORWARD.md) adds the two machine-gun muzzle forwards.
 [`NATIVE_ENVHELI_PED_FORWARD.md`](NATIVE_ENVHELI_PED_FORWARD.md) adds the helicopter gun and walking pedestrian forwards.
 [`NATIVE_JET_DEATH_FORWARD.md`](NATIVE_JET_DEATH_FORWARD.md) adds the six falling junk jet forwards.
 [`NATIVE_BLIMP_DEATH_FORWARD.md`](NATIVE_BLIMP_DEATH_FORWARD.md) adds the sinking blimp drift and explosion forwards.
 [`NATIVE_GASTANK_FORWARD.md`](NATIVE_GASTANK_FORWARD.md) adds the rolling and falling gas tank forwards.
 [`NATIVE_FLYER_FORWARD.md`](NATIVE_FLYER_FORWARD.md) adds the junk jet and blimp flight forwards.
-Coverage is 165/269 known forward returns (104 remain), with 134/134 known inverse returns native.
+Coverage is 167/269 known forward returns (102 remain), with 134/134 known inverse returns native.
 
 [`NATIVE_HELI_DEATH_FORWARD.md`](NATIVE_HELI_DEATH_FORWARD.md) adds the two falling-helicopter forwards.
 Coverage is 150/269 known forward returns (119 remain), with 134/134 known inverse returns native.

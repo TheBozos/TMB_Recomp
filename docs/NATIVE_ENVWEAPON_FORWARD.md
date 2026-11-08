@@ -62,8 +62,7 @@ frames. Every recording field matches parent `aadc76b`: raw RAM, scratchpad,
 calls, draws, sound, thread state and EE timing/counts. Sampled 32 MiB RAM images
 are identical. Strict/default recordings and snapshots are byte exact; strict
 comparisons report no mismatch. Both environment-gun sites are cold on these
-routes (neither level has that gun), so the generated owner suite above is their
-qualification. The Cop SUV site `1502cc` still runs natively 1,638 times (one-player)
+routes, so the generated owner suite above is their qualification. The Cop SUV site `1502cc` still runs natively 1,638 times (one-player)
 and 845 times (four-player), exact.
 
 Fresh isolated window runs complete 6,500 one-player, 6,500 actual four-player

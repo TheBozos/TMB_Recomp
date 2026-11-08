@@ -47,6 +47,9 @@ with complete positioning, smoothing, normalization, orientation and material-pu
 [`NATIVE_ATTRACTOR_GROUPS.md`](NATIVE_ATTRACTOR_GROUPS.md) adds group-selection, center and random-position
 inverse transforms, with complete consumers, seeded generated producers and an audited peel-out W boundary.
 
+[`NATIVE_PEEL_OUT.md`](NATIVE_PEEL_OUT.md) retires that peel-out forward transform,
+with complete producer-to-pose checks and a fresh audit of the four opaque W fields.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

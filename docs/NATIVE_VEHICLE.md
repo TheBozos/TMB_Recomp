@@ -74,3 +74,7 @@ and height-query staging comparisons.
 
 [Native tow-truck launcher transforms](NATIVE_TOW_TRUCK.md) subsequently add three forward
 and one inverse site, with complete generated positioning, smoothing and orientation consumers.
+
+[Native peel-out transform](NATIVE_PEEL_OUT.md) subsequently adds the vehicle's
+visual-offset forward transform, checked through the full producer and the real
+coordinate-system consumer, including matrix aliases and the opaque source W boundary.

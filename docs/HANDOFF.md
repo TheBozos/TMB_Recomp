@@ -53,6 +53,9 @@ with complete producer-to-pose checks and a fresh audit of the four opaque W fie
 [`NATIVE_CAMERA_TRANSFORMS.md`](NATIVE_CAMERA_TRANSFORMS.md) adds all eight camera-update
 forward transforms, rear-view positioning and the coupled inline XYZW position publication.
 
+[`NATIVE_WEATHER_VIEWPORT.md`](NATIVE_WEATHER_VIEWPORT.md) adds the weather viewport's
+forward transform, checked through full entry, fade/fog updates, grid alignment and projection.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

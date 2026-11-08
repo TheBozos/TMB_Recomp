@@ -62,3 +62,7 @@ and the consumed output remain identical. No artificial VF16 or padding restorat
 This evidence bounds the checked snapshots/dataflow, not all possible campaign consumers. Other VU
 macro helper callers, scalar packet builders and legacy graphics buffers/extents remain separate work.
 The published player release and engine pin are not changed by this source increment.
+
+[`NATIVE_WEATHER_VIEWPORT.md`](NATIVE_WEATHER_VIEWPORT.md) subsequently retires the
+viewport's forward transform and qualifies complete entries through its existing
+native identity/projection branches, including fade/fog and grid-placement consumers.

@@ -33,13 +33,15 @@ namespace
     struct SegmentEnd {};
     struct Services : bozo::RuntimeServices
     {
-        unsigned yields = 0, randomCalls = 0;
+        unsigned yields = 0, randomCalls = 0, weatherPoints = 0, weatherIdentities = 0;
         uint32_t stop = 0x1eeafc;
         // Keep checkpoints enabled; stop at the chosen boundary or let a complete continuation return.
         void yield(uint8_t *, R5900Context *ctx, Runtime *) override
         {
             require(++yields < 4096, "caller did not reach segment end");
             if (ctx->pc == 0x21d228) ++randomCalls;
+            if (ctx->pc == 0x1da238) ++weatherPoints;
+            if (ctx->pc == 0x1db0f0) ++weatherIdentities;
             if (ctx->pc == stop) throw SegmentEnd{};
         }
         [[noreturn]] static void unexpected() { throw std::runtime_error("unexpected hierarchy caller service"); }
@@ -66,8 +68,8 @@ namespace
     constexpr uint32_t debug = 0x7484f0, debugBytes = 0x220; // actual terrain line/GS-line producer records
     constexpr uint32_t towVectors = 0x23d060, towVectorBytes = 0x50, towMaterials = 0x190c20, towMaterialBytes = 0x100;
     constexpr std::pair<uint32_t,uint32_t> regions[] = {{base,bytes},{globals,globalBytes},{debug,debugBytes},{0x66fcc4,4},
-        {towVectors,towVectorBytes},{towMaterials,towMaterialBytes}};
-    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4 + towVectorBytes + towMaterialBytes;
+        {towVectors,towVectorBytes},{towMaterials,towMaterialBytes},{0x230010,64},{0x687680,0x130},{0x68ab80,0x8b80}};
+    constexpr size_t fixtureBytes = bytes + globalBytes + debugBytes + 4 + towVectorBytes + towMaterialBytes + 64 + 0x130 + 0x8b80;
     constexpr uint32_t gp = 0x40000, sp = 0x30000;
     constexpr size_t vuAt = offsetof(R5900Context, vu0_vf), vuBytes = offsetof(R5900Context, cycles) - vuAt;
     bool cpuEqual(R5900Context a, R5900Context b)
@@ -175,7 +177,7 @@ void testHierarchyHelperCallers()
         0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8,
         0x15e1b8, 0x1b42c8, 0x1b430c, 0x1b43a8, 0x1b4434, 0x1b44c0,
         0x150bc8, 0x150cc0, 0x150d2c, 0x150d98, 0x108d6c, 0x109870, 0x1099a0, 0x1abd60,
-        0x1137cc, 0x11398c, 0x113a78, 0x113b28, 0x113c2c, 0x113f28, 0x1142d8, 0x114394, 0x1fdd3c};
+        0x1137cc, 0x11398c, 0x113a78, 0x113b28, 0x113c2c, 0x113f28, 0x1142d8, 0x114394, 0x1fdd3c, 0x1e8a34};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
@@ -976,7 +978,7 @@ void testHierarchyHelperCallers()
                     word(gp-0x46a8,0x3fc90fdb); word(gp-0x46a4,0xbfc90fdb); word(gp-0x46a0,0xbfc90fdb);
                 }
             }
-            else
+            else if (kind <= 148)
             {
                 // Real camera producers and consumers through pose publication or the next actual query boundary.
                 constexpr uint32_t camera=0x10000, vehicle=0x18000, cs=0x1c000;
@@ -1040,15 +1042,53 @@ void testHierarchyHelperCallers()
                     }
                 }
             }
+            else
+            {
+                // Complete weather viewport: real view accessors, fade/fog producers, grid placement and projection.
+                constexpr uint32_t cs=0x1b000;
+                const unsigned view=n%4, scenario=(n%64)/4, effect=scenario%3;
+                const uint32_t projection=n&8 ? cs+0x20 : 0x1d000;
+                continuation=resume_0x1e87a0;
+                reg(4,cs+0x20); reg(5,sp+0x10); reg(6,sp+0x20); reg(16,sp+0x20);
+                setRegU32(&initial,17,view); setRegU32(&initial,18,0x2e80);
+                setRegU32(&initial,19,scenario&1 ? address(cs) : 0); initial.fu[20]=0x3f800000;
+                returnAt(0x120); word(gp-0x34b8,effect); word(gp-0x34b4,address(0x1a180));
+                word(gp-0x34b0,0x41a00000); word(gp-0x34a8,n*17);
+                word(gp-0x2f58,address(0x1a040)); word(gp-0x2f54,address(0x1a100));
+                word(gp-0x2f50,address(0x1a120)); word(gp-0x2f48,address(projection));
+                word(0x4dfcd0+view*16,address(cs)); word(gp-0x2ef8,1+(n&1));
+                word(gp-0x4728,0x3c4ccccd); word(gp-0x472c,0x442f0000);
+                constexpr uint32_t counter[]={0,1,20,21,0xffffffff,2,0,21,1,0,20,21,1,2,21,0};
+                word(0x687780+view*4,0x3f800000);
+                word(0x687790+view*4,counter[scenario]); word(0x6877a0+view*4,counter[(scenario+5)%16]);
+                word(gp-0x3684,0x43c80000); word(gp-0x3680,0x44480000);
+                word(gp-0x367c,0x3f800000); word(gp-0x3678,0x3e800000);
+                word(gp-0x366c,32); word(gp-0x3668,64); word(gp-0x3664,96);
+                word(sp+0x2c,bits()); word(cs+0x1c,bits());
+                if (n<16) {
+                    // Exact cell boundaries and signed subnormal inputs retain the game's original quantization order.
+                    constexpr uint32_t edge[]={0,0x80000000,1,0x80000001,0x421fffff,0x42200000,0x42200001,0xc2200000};
+                    for (unsigned j=0;j<3;++j) for (unsigned i=0;i<4;++i) word(cs+0x20+16*j+4*i,i==j ? 0x3f800000 : 0);
+                    for (unsigned j=0;j<3;++j) word(sp+0x10+4*j,edge[(n+j)%8]);
+                }
+                if (n>=64) {
+                    fromEntry=true; initial.pc=0x1e87a0; setRegU32(&initial,4,view);
+                    setRegU32(&initial,5,scenario&1 ? address(cs) : 0); setRegU32(&initial,6,scenario>=4);
+                    setRegU32(&initial,31,0xbad0000);
+                    if (scenario==0) word(gp-0x34b8,0xffffffff);
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
-                referenceW.clear(); services.yields = services.randomCalls = 0;
+                referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
                 rt->functions.setOverride(0x1da1e8, native ? inverse : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : direction) : referenceDirection);
                 sawDirectionEntry=false;
                 host.instruction=kind == 139 ? vehicleInstructions : nullptr;
                 if (kind == 141 && native) host.instruction=vehicleInstructions;
                 rt->functions.setOverride(0x1dcc08,kind == 139 ? matrix : nullptr);
+                rt->functions.setOverride(0x1da238,kind == 149 ? registry.find(0x1da238) : nullptr);
+                rt->functions.setOverride(0x1db0f0,kind == 149 ? registry.find(0x1db0f0) : nullptr);
                 auto helper = isInverse(kind) ? (native ? inverse : referenceInverse) : (native ? direction : referenceDirection);
                 if (!fromEntry) { helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return"); }
                 try { continuation(ram, &ctx, rt.get()); }
@@ -1066,19 +1106,30 @@ void testHierarchyHelperCallers()
             catch (...) { std::fprintf(stderr, "hierarchy original kind %u case %u\n", kind, n); throw; }
             const auto refControl = _mm_getcsr(); const auto refYields = services.yields;
             const auto refRandomCalls = services.randomCalls;
+            const auto refWeatherPoints=services.weatherPoints, refWeatherIdentities=services.weatherIdentities;
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
             if (expectedSelection >= 0) require(getRegU32(&a,2) == uint32_t(expectedSelection), "original attractor boundary selection");
             // Tow-truck and attractor consumers need no forward-W exclusion.
             if (kind >= 132 && kind <= 138) require(referenceW.empty(), "complete consumer left opaque forward W unconsumed");
             if (kind == 139) for (auto patch:referenceW) require(patch.offset==0x1852c,"unexpected peel-out W exclusion");
+            if (kind == 149) for (auto patch:referenceW)
+                require(patch.offset==sp+0x2c || patch.offset==sp-0x140+0x2c,"unexpected weather W exclusion");
+            if (kind == 149) {
+                const unsigned scenario=(n%64)/4; const bool disabled=fromEntry && scenario==0;
+                require(referenceW.size()==(disabled ? 0u : 1u),"weather producer did not reach its transform");
+                require(refWeatherPoints==unsigned(!disabled && (scenario&1)) &&
+                        refWeatherIdentities==unsigned(!disabled && !(scenario&1)),"weather publication branch not reached");
+            }
             // Normalize only forward-output W after all real consumers have run, exposing any W-dependent result.
             for (auto patch : referenceW) std::memcpy(ram + patch.offset, &patch.value, 4);
-            const bool wholeCase=n < 4 || (fromEntry && n < 68);
+            // Weather's full-entry sample covers active fog updates and aliased projection output, not its disabled gate.
+            const bool wholeCase=n < 4 || (fromEntry && (kind == 149 ? n>=92 && n<96 : n<68));
             snapshot(expected.get()); if (wholeCase) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
             restore(); _mm_setcsr(control); run(true, b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
             // Full rear-view entries retain the original rotation producer's identity-helper VU writes.
             const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : initial;
-            if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls || !dataEqual() ||
+            if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls ||
+                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;

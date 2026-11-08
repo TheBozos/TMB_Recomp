@@ -15,9 +15,10 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_BLIMP_DEATH_FORWARD.md`](NATIVE_BLIMP_DEATH_FORWARD.md) adds the sinking blimp drift and explosion forwards.
 [`NATIVE_GASTANK_FORWARD.md`](NATIVE_GASTANK_FORWARD.md) adds the rolling and falling gas tank forwards.
 [`NATIVE_FLYER_FORWARD.md`](NATIVE_FLYER_FORWARD.md) adds the junk jet and blimp flight forwards.
-Coverage is 155/269 known forward returns (114 remain), with 134/134 known inverse returns native.
+Coverage is 157/269 known forward returns (112 remain), with 134/134 known inverse returns native.
 
 [`NATIVE_HELI_DEATH_FORWARD.md`](NATIVE_HELI_DEATH_FORWARD.md) adds the two falling-helicopter forwards.
 Coverage is 150/269 known forward returns (119 remain), with 134/134 known inverse returns native.

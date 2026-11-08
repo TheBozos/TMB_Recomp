@@ -1,5 +1,7 @@
 # Native ricochet forward transforms
 
+[Launcher turret-aim forwards](NATIVE_LAUNCHER_AIM_FORWARD.md) follow with three launcher sites.
+
 Two `Weapon::UpdateRicoTrans` (`1b2ee0`) forward returns use native XYZ
 arithmetic after the [weapon lock-on, satellite and rock forwards](NATIVE_WEAPON_LOCK_FORWARD.md).
 Known forward coverage grows from 137 to 139 of 269 returns (130 remain). Known

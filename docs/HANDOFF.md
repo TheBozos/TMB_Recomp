@@ -15,6 +15,10 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_RICOCHET_FORWARD.md`](NATIVE_RICOCHET_FORWARD.md) adds the two ricochet movement
+forwards, before its height test and after its reflection. Coverage is 139/269 known forward
+returns (130 remain), with 134/134 known inverse returns native.
+
 [`NATIVE_WEAPON_LOCK_FORWARD.md`](NATIVE_WEAPON_LOCK_FORWARD.md) adds six weapon lock-on,
 look-ahead, skill-satellite and rock forwards, with actual aim, position and height-test consumers.
 Coverage is 137/269 known forward returns (132 remain), with 134/134 known

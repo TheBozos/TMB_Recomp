@@ -15,6 +15,11 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_WEAPON_LOCK_FORWARD.md`](NATIVE_WEAPON_LOCK_FORWARD.md) adds six weapon lock-on,
+look-ahead, skill-satellite and rock forwards, with actual aim, position and height-test consumers.
+Coverage is 137/269 known forward returns (132 remain), with 134/134 known
+inverse returns native.
+
 [`NATIVE_MINION_FORWARD.md`](NATIVE_MINION_FORWARD.md) adds seven Minion shield-hit
 forwards, with actual distance, health, HUD and hierarchy-switch consumers.
 Coverage is 131/269 known forward returns (138 remain), with 134/134 known

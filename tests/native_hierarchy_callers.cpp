@@ -90,7 +90,8 @@ namespace
     constexpr uint32_t auditedInverseReturns[]={0x1161f4,0x116618,0x119090,0x11927c,0x11985c,0x119870,0x119e64,
         0x11afb0,0x11b018,0x11b9a8,0x11c38c,0x11c3c0,0x11c540,0x1ab558,0x1ab8f4,0x1abad4,
         0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030,
-        0x1029f8,0x102c20,0x102d74,0x105c68,0x105eec};
+        0x1029f8,0x102c20,0x102d74,0x105c68,0x105eec,
+        0x1265a8,0x1265d0,0x1288b0,0x1288c4,0x112118};
     std::array<unsigned,std::size(auditedInverseReturns)> auditedInverseCalls{};
     void countAuditedInverse(const R5900Context *ctx) {
         for(unsigned i=0;i<std::size(auditedInverseReturns);++i)
@@ -205,8 +206,9 @@ void testHierarchyHelperCallers()
         0x1161f4,0x116618,0x119090,0x11927c,0x11985c,0x119870,0x119e64,
         0x11afb0,0x11b018,0x11b9a8,0x11c38c,0x11c3c0,0x11c540,0x1ab558,0x1ab8f4,0x1abad4,
         0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030,
-        0x1029f8,0x102c20,0x102d74,0x105c68,0x105eec};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138) || kind >= 155; };
+        0x1029f8,0x102c20,0x102d74,0x105c68,0x105eec,
+        0x1265a8,0x1265d0,0x1288b0,0x1288c4,0x112118,0x11112c};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138) || (kind >= 155 && kind <= 187); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0; std::array<unsigned,2> aiShotPublications{};
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -1307,7 +1309,7 @@ void testHierarchyHelperCallers()
                     }
                 }
             }
-            else
+            else if (kind <= 182)
             {
                 constexpr uint32_t vehicle=0x18000, info=0x1c000, driver=0x20000, cs=0x22000, target=0x24000;
                 const unsigned scenario=(n%64)/8;
@@ -1367,9 +1369,67 @@ void testHierarchyHelperCallers()
                     fp(12,scenario==7 ? 200.f : 10.f); fp(13,scenario==6 ? 1.f : .5f);
                 }
             }
+            else
+            {
+                constexpr uint32_t driver=0x18000, vehicle=0x1c000, first=0x22000, second=0x24000, point=0x28000;
+                const unsigned scenario=(n%64)/8;
+                const auto f=[&](uint32_t at,float v) { uint32_t u; std::memcpy(&u,&v,4); word(at,u); };
+                const auto fp=[&](unsigned r,float v) { std::memcpy(&initial.fu[r],&v,4); };
+                const auto xyz=[&](uint32_t at,float x,float y,float z) { f(at,x); f(at+4,y); f(at+8,z); };
+                const auto basis=[&](uint32_t at,bool rotated) {
+                    xyz(at,rotated ? 0.f : 1.f,rotated ? 1.f : 0.f,0.f);
+                    xyz(at+0x10,rotated ? -1.f : 0.f,rotated ? 0.f : 1.f,0.f); xyz(at+0x20,0.f,0.f,1.f);
+                    word(at+12,bits());
+                };
+                word(0x4e429c,address(0x17000)); word(0x17058,bits()); // actual generated rand state
+                if(kind<=184) {
+                    continuation=resume_0x126500; reg(17,driver); reg(20,point); reg(16,sp+0x60); reg(19,sp+0x50); setRegU32(&initial,21,1);
+                    word(driver+0xb8,address(0x27000)); word(0x27000,address(point)); word(driver+0x200,0); word(driver+0x208,0);
+                    word(driver+0x270,1); word(driver+0x2a8,1); word(driver+0x170,address(first)); word(driver+0x174,address(second));
+                    word(driver+4,5); word(driver+8,4); f(driver+0x40,0.f); f(driver+0x1f4,0.f);
+                    basis(first+0x20,false); xyz(first+0x10,0.f,0.f,0.f); xyz(second+0x10,0.f,2.f,0.f);
+                    xyz(point,1.f,scenario==1 ? 1.f : 3.f,0.f); xyz(sp+0x60,kind==183 ? 0.f : 1.f,kind==183 ? 2.f : (scenario==1 ? 1.f : 3.f),0.f);
+                    f(sp+0x74,2.f); reg(4,first+0x20); reg(5,sp+0x60); reg(6,kind==183 ? sp+0x70 : sp+0x80); returnAt(0x160);
+                    if(scenario==1) services.stop=0x1da298; // scalar comparison and 150-unit probe staging, before unrelated LOS
+                    if(n>=64) {
+                        fromEntry=true; initial.pc=0x126500; reg(4,driver); setRegU32(&initial,31,0xbad0000);
+                        if(scenario==2) word(driver+0x270,0); if(scenario==3) word(driver+0x2a8,0);
+                        if(scenario==4) word(driver+0x170,0); if(scenario==5) word(driver+0x174,0);
+                        if(scenario==6) word(driver+4,0); if(scenario==7) word(driver+8,0);
+                    }
+                } else if(kind<=186) {
+                    continuation=resume_0x128638; reg(16,driver); reg(18,sp+0x20); reg(19,sp+0x10); setRegU32(&initial,17,scenario==7 ? 0 : 1);
+                    word(driver+0xb0,address(vehicle)); basis(vehicle+0xd0,n%4==0);
+                    xyz(driver+0x110,scenario==6 ? 0.f : 1.f,scenario==6 ? 0.f : 1.f,0.f);
+                    xyz(driver+0x140,scenario==1 ? 1.f : -1.f,scenario==1 ? 1.f : -1.f,0.f);
+                    xyz(sp+0x10,scenario==6 ? 0.f : 1.f,1.f,0.f);
+                    uint32_t flags=scenario==5 ? 8 : scenario==2 ? 0 : scenario==4 ? 2 : 1;
+                    word(driver+0x23c,flags); word(driver+0x298,scenario==2 || scenario==3 ? 1 : 0); setRegU32(&initial,3,flags);
+                    reg(4,vehicle+0xd0); reg(5,driver+(kind==185 ? 0x110 : 0x140)); reg(6,kind==185 ? sp+0x10 : sp+0x20); returnAt(0xc0);
+                    if(n>=64) { fromEntry=true; initial.pc=0x128880; }
+                } else {
+                    constexpr uint32_t boss=0x18000, victim=0x24000;
+                    basis(first+0x20,n%4==0); xyz(first+0x10,10.f,20.f,30.f);
+                    const float dy=n%2 ? -2.f : 2.f; xyz(victim+0x1d0,13.f,20.f+dy,31.f);
+                    word(boss+0xe0,address(first)); word(boss+0xe8,address(victim)); word(boss+0x38,1);
+                    word(victim+0x588,0); word(victim+0x58c,n%2 ? 0x100 : 0);
+                    reg(16,boss); reg(20,boss+0x70); fp(21,-10.f); fp(20,10.f); fp(22,0.f); fp(23,1.f);
+                    if(kind==187) {
+                        continuation=resume_0x111f80; services.stop=0x1e6610;
+                        xyz(boss+0x70,3.f,dy,1.f); reg(4,first+0x20); reg(5,boss+0x70); reg(6,boss+0x70);
+                        if(n>=64) { fromEntry=true; initial.pc=0x1120ec; }
+                    } else {
+                        continuation=resume_0x10f7c0; services.stop=0x111f80;
+                        xyz(boss+0x70,n%4 ? 3.f : dy,n%4 ? dy : -3.f,1.f);
+                        reg(17,boss); reg(16,sp+0x10); reg(4,first+0x20); reg(5,boss+0x70); reg(6,sp+0x10);
+                        if(n>=64) { fromEntry=true; initial.pc=0x11110c; }
+                    }
+                }
+            }
             snapshot(input.get());
+            const auto stopAt=services.stop;
             const auto run = [&](bool native, R5900Context &ctx) {
-                referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
+                services.stop=stopAt; referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
                 services.spatialCalls.fill(0); auditedInverseCalls.fill(0); services.aiActions.fill(0);
                 rt->functions.setOverride(0x1da1e8, native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : direction) : referenceDirection);
@@ -1382,7 +1442,17 @@ void testHierarchyHelperCallers()
                 auto helper = isInverse(kind) ? (native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse) : (native ? direction : referenceDirection);
                 if (!fromEntry) { helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return"); }
                 try { continuation(ram, &ctx, rt.get()); }
-                catch (const SegmentEnd &) { require(services.stop != 0xffffffff, "unexpected segment end"); return; }
+                catch (const SegmentEnd &) {
+                    require(services.stop != 0xffffffff,"unexpected segment end");
+                    if(kind==187) {
+                        require(services.stop==0x1e6610,"boss effect staging boundary");
+                        // Consume the published local offset in the actual boss position-publication segment.
+                        services.stop=0x111f80; setRegU32(&ctx,17,address(0x18000)); ctx.pc=0x11110c;
+                        try { resume_0x10f7c0(ram,&ctx,rt.get()); require(false,"boss consumer did not reach collision boundary"); }
+                        catch(const SegmentEnd &) { require(ctx.pc==0x111f80,"wrong boss publication boundary"); }
+                    }
+                    return;
+                }
                 require(services.stop == 0xffffffff && ctx.pc == 0xbad0000, "hierarchy consumer returned early");
                 if (kind == 171 || kind == 177) {
                     // Read the published angular velocity through the real point-velocity consumer.
@@ -1406,11 +1476,12 @@ void testHierarchyHelperCallers()
             const auto refWeatherPoints=services.weatherPoints, refWeatherIdentities=services.weatherIdentities;
             const auto refSpatialCalls=services.spatialCalls;
             const auto refAuditedInverseCalls=auditedInverseCalls; const auto refAiActions=services.aiActions;
-            if(kind>=181) aiShotPublications[kind-181]+=refAiActions[2]!=0;
-            if(kind>=155) {
+            if(kind>=181 && kind<=182) aiShotPublications[kind-181]+=refAiActions[2]!=0;
+            if(kind>=155 && kind<=187) {
                 const unsigned scenario=(n%64)/8;
                 const bool rejected=(kind>=172 && kind<=176 && fromEntry && n>=112) ||
-                    (fromEntry && (kind==178 ? scenario!=0 : kind==180 || kind==181 ? scenario==1 || scenario==2 : kind==182 ? scenario==1 : false));
+                    (fromEntry && (kind==178 ? scenario!=0 : kind==180 || kind==181 ? scenario==1 || scenario==2 : kind==182 ? scenario==1 :
+                        kind==183 || kind==184 ? scenario>=2 : kind==185 || kind==186 ? scenario>=2 && scenario<=4 : false));
                 require(refAuditedInverseCalls[kind-155]==unsigned(!rejected),"audited inverse producer reach");
             }
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
@@ -1441,7 +1512,14 @@ void testHierarchyHelperCallers()
                     patch.offset==sp+0x2c || patch.offset==sp-0xb0+0x2c;
                 require(allowed,"unexpected weapon/skid W exclusion");
             }
-            if (kind>=155 && !referenceW.empty()) {
+            if(kind==187 || kind==188) {
+                require(referenceW.size()==1 && referenceW[0].offset==sp+0x1c,"unexpected boss forward-W exclusion");
+                if(kind==187) require(refRandomCalls==3,"boss effect producer must use three actual rand calls");
+                uint32_t actual[3]; std::memcpy(actual,ram+0x241d0,12);
+                const float expected[3]={13.f,20.f+(n%2 ? -2.f : 2.f),31.f};
+                require(!std::memcmp(actual,expected,12),"boss inverse-to-publication round trip");
+            }
+            if (kind>=155 && kind<=186 && !referenceW.empty()) {
                 std::fprintf(stderr,"unexpected forward W kind %u case %u offset %x\n",kind,n,referenceW.front().offset);
                 require(false,"collision/drift inverse must compare full W");
             }

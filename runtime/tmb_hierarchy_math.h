@@ -53,6 +53,9 @@ namespace tmb::hierarchy
         0x1ee030, // rigid-body auxiliary angular velocity
         0x1029f8, 0x102c20, 0x102d74, // AI navigation, two-stage steering and attack range
         0x105c68, 0x105eec, // AI front/rear shot eligibility
+        0x1265a8, 0x1265d0, // driver path-point local offsets
+        0x1288b0, 0x1288c4, // driver driving-LOS local directions
+        0x112118, // final-boss collision attachment offset
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

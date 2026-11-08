@@ -12,6 +12,7 @@
 #include <algorithm>
 namespace tmb::math { void install(Registry &); }
 namespace tmb::hierarchy { void install(Registry &); }
+namespace tmb::graphics { void install(Registry &); }
 namespace
 {
     void require(bool ok, const char *why) { if (!ok) throw std::runtime_error(why); }
@@ -21,6 +22,9 @@ namespace
     {
         bozo::libs::Libraries libs;
         bool enabled = true;
+        bozo::port::InstructionHandler instruction = nullptr;
+        bool nativeInstruction(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t pc) override
+        { return enabled && instruction && instruction(ram, ctx, rt, pc); }
         bozo::libs::Libraries &libraries() override { return libs; }
         bool nativeGraphics() const override { return enabled; }
         void frameEnd(Runtime *, R5900Context *) override { throw std::runtime_error("unexpected frame"); }
@@ -118,6 +122,9 @@ void testHierarchyHelperCallers()
     tmb::Registry registry; tmb::math::install(registry); tmb::hierarchy::install(registry);
     const auto inverse = registry.find(0x1da1e8), direction = registry.find(0x1da298);
     require(inverse && direction, "missing hierarchy leaves");
+    tmb::Registry graphics; tmb::graphics::install(graphics);
+    const auto vehicleInstructions=graphics.instructionHandler(); const auto matrix=registry.find(0x1dcc08);
+    require(vehicleInstructions && matrix,"missing coordinate-system consumer handlers");
     auto *ram = rt->memory.flat();
     auto input = std::make_unique<uint8_t[]>(fixtureBytes), expected = std::make_unique<uint8_t[]>(fixtureBytes);
     auto whole = std::make_unique<uint8_t[]>(bozo::kFlatBytes);
@@ -157,8 +164,8 @@ void testHierarchyHelperCallers()
         0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904,
         0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8,
         0x15e1b8, 0x1b42c8, 0x1b430c, 0x1b43a8, 0x1b4434, 0x1b44c0,
-        0x150bc8, 0x150cc0, 0x150d2c, 0x150d98, 0x108d6c, 0x109870, 0x1099a0};
-    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || kind >= 135; };
+        0x150bc8, 0x150cc0, 0x150d2c, 0x150d98, 0x108d6c, 0x109870, 0x1099a0, 0x1abd60};
+    const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
         for (unsigned n = 0; n < 128; ++n)
@@ -856,7 +863,7 @@ void testHierarchyHelperCallers()
                     else { initial.pc=0x150d14; initial.fu[0]=tilt[n%4]; } // Actual final smoothed-Z publication.
                 }
             }
-            else
+            else if (kind <= 138)
             {
                 // Attractor selection and world positions through their complete real consumers and producer entry calls.
                 constexpr uint32_t object=0x18000, point=0x1b000, output=0x1d000, group=0x1a000;
@@ -920,16 +927,61 @@ void testHierarchyHelperCallers()
                     }
                 }
             }
+            else
+            {
+                // Complete peel-out producer/tail, followed by the real production-native coordinate-system consumer.
+                constexpr uint32_t vehicle=0x18000;
+                continuation=resume_0x1abb18; reg(16,vehicle); reg(4,vehicle+0xd0); reg(5,sp); reg(6,vehicle+0x520);
+                returnAt(0x20); word(vehicle+0x52c,bits()); word(vehicle+0x1dc,bits());
+                word(vehicle+0x2018,address(n%3 == 0 ? 0x1c000 : vehicle+(n%3 == 1 ? 0x480 : 0x4c0)));
+                word(vehicle+0x574,0x7fffffffu+(n&1)); word(vehicle+0x20c8,1+(n&1));
+                constexpr uint32_t input[]={0,0x80000000,1,0x80000001,0x3f800000,0xbf800000,0x3e800000,0xbe800000};
+                word(sp,input[n%8]); word(sp+4,0); word(sp+8,0);
+                if (n >= 64) {
+                    fromEntry=true; initial.pc=0x1abb18; reg(4,vehicle); setRegU32(&initial,31,0xbad0000);
+                    const unsigned scenario=(n-64)%16;
+                    setRegU32(&initial,5,scenario>=8 ? 1 : 0);
+                    ram[vehicle+0x48f]=uint8_t(scenario>=4 && scenario!=14);
+                    ram[vehicle+0x491]=uint8_t(scenario==7 || scenario==10 || scenario==11 || scenario==15);
+                    word(vehicle+0x2c4,scenario>=6 && scenario<=11 || scenario==15 ? 0 : 0x3f800000);
+                    word(vehicle+0x318,0x3f800000); word(vehicle+0x1f8,scenario&1 ? 0xbf800000 : 0x3f800000);
+                    word(vehicle+0x364,0x3f000000); word(vehicle+0x2cc,0x3e800000); word(vehicle+0x3b0,n&4 ? 0x40000000 : 0xbf800000);
+                    word(vehicle+0x530,scenario==0 || scenario==4 || scenario==12 ? 0 : scenario&1 ? 0x3f000000 : 0xbf000000);
+                    if (scenario==3) word(vehicle+0x530,0x3c23d70a);
+                    if (scenario==14) word(vehicle+0x530,1);
+                    word(vehicle+0x534,scenario==8 ? 0x3f000000 : scenario==9 ? 0xbf000000 : 0x3e000000);
+                    word(vehicle+0x538,scenario==9 ? 0xbf000000 : 0x3e000000);
+                    word(vehicle+0x53c,scenario==9 ? 0xbf800000 : 0x3f800000);
+                    word(vehicle+0x540,scenario==10 ? 0x3f800000 : 0x3e800000);
+                    word(vehicle+0x1ef8,scenario==1 ? 1 : 0); word(gp-0x2ef0,(n/16)&1);
+                    for (uint32_t at=0x4db8;at>=0x4d74;at-=4) word(gp-at,0x3e800000);
+                    word(gp-0x4db4,0xbe800000); word(gp-0x4dac,0xbe800000);
+                    for (uint32_t at:{0x4da4u,0x4d9cu,0x4d94u,0x4d80u,0x4d78u}) word(gp-at,0x3c23d70a);
+                    word(gp-0x4d8c,0xbe800000); word(gp-0x4d88,0x3f000000);
+                    // Bound-angle and smoothing constants; these fixtures keep trigonometric inputs below half a radian.
+                    word(gp-0x487c,0x40490fdb); word(gp-0x4878,0x49742400); word(gp-0x4874,0x3e22f983); word(gp-0x4870,0x40c90fdb);
+                    word(gp-0x486c,0xc0490fdb); word(gp-0x4868,0xc9742400); word(gp-0x4864,0x40490fdb);
+                    word(gp-0x4860,0x3e22f983); word(gp-0x485c,0x40c90fdb);
+                    word(gp-0x46a8,0x3fc90fdb); word(gp-0x46a4,0xbfc90fdb); word(gp-0x46a0,0xbfc90fdb);
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
                 referenceW.clear(); services.yields = services.randomCalls = 0;
                 rt->functions.setOverride(0x1da1e8, native ? inverse : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? direction : referenceDirection);
+                host.instruction=kind == 139 ? vehicleInstructions : nullptr;
+                rt->functions.setOverride(0x1dcc08,kind == 139 ? matrix : nullptr);
                 auto helper = isInverse(kind) ? (native ? inverse : referenceInverse) : (native ? direction : referenceDirection);
                 if (!fromEntry) { helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return"); }
                 try { continuation(ram, &ctx, rt.get()); }
                 catch (const SegmentEnd &) { require(services.stop != 0xffffffff, "unexpected segment end"); return; }
                 require(services.stop == 0xffffffff && ctx.pc == 0xbad0000, "hierarchy consumer returned early");
+                if (kind == 139) {
+                    setRegU32(&ctx,4,address(0x18000)); ctx.pc=0x1ab250;
+                    vehicleSetCsMat__7Vehicle_0x1ab250(ram,&ctx,rt.get());
+                    require(ctx.pc==0xbad0000,"peel-out coordinate-system consumer returned early");
+                }
             };
             const unsigned control = ((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u);
             auto a = initial, b = initial; _mm_setcsr(control);
@@ -940,7 +992,8 @@ void testHierarchyHelperCallers()
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
             if (expectedSelection >= 0) require(getRegU32(&a,2) == uint32_t(expectedSelection), "original attractor boundary selection");
             // Tow-truck and attractor consumers need no forward-W exclusion.
-            if (kind >= 132) require(referenceW.empty(), "complete consumer left opaque forward W unconsumed");
+            if (kind >= 132 && kind <= 138) require(referenceW.empty(), "complete consumer left opaque forward W unconsumed");
+            if (kind == 139) for (auto patch:referenceW) require(patch.offset==0x1852c,"unexpected peel-out W exclusion");
             // Normalize only forward-output W after all real consumers have run, exposing any W-dependent result.
             for (auto patch : referenceW) std::memcpy(ram + patch.offset, &patch.value, 4);
             const bool wholeCase=n < 4 || (fromEntry && n < 68);

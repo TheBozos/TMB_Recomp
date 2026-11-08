@@ -59,6 +59,9 @@ namespace tmb::hierarchy
         0x18bc9c, 0x1ac85c, // tire rotation delta and rollover impulse
         0x1af120, 0x1af148, // weapon-damage directions for upright/other vehicles
         0x1eb4d4, 0x1eb58c, // object lighting position and direction
+        0x12d0b0, 0x136ce8, // force-field hit and health-stand vertices
+        0x13f814, 0x13fe54, 0x14037c, // HUD radar distance and signal placement
+        0x1e9778, // particle visibility and depth sorting
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

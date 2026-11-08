@@ -1,4 +1,4 @@
-# TMB on BozoEngine — 2026-11-05
+# TMB on BozoEngine â€” 2026-11-05
 
 **Release update, 2026-11-06:** [v0.4.0 is published](https://github.com/TheBozos/TMB_Recomp/releases/tag/v0.4.0),
 tagged at `eea175219b1e46a9c1699f640744279650c65a14`, with BozoEngine `9361960`.
@@ -68,6 +68,11 @@ returns, with complete impulse/collision entries and point-velocity consumers.
 [`NATIVE_RIGID_BODY_FORWARD.md`](NATIVE_RIGID_BODY_FORWARD.md) adds ten rigid-body forward
 returns with complete force, torque, impulse and integration entries plus actual
 point-velocity consumers and audited destination-W lifetimes.
+
+[`NATIVE_DRIVER_FORWARD.md`](NATIVE_DRIVER_FORWARD.md) adds seven driver path-offset,
+lookahead and driving-LOS forwards. Coverage is 113/269 known forward returns
+(156 remain), with 134/134 known inverse returns native. Complete generated owners
+retain actual collision queries, scalar state consumers and meaningful inverse W.
 
 [`NATIVE_FINAL_INVERSES.md`](NATIVE_FINAL_INVERSES.md) completes native coverage of all 134 known
 inverse-helper returns, with force-field/health-stand entries, HUD/radar consumers and
@@ -174,7 +179,7 @@ no upload tag at the audited calls; game texture-manager bookkeeping and other p
 reader state and TMB's old packet-based flare adapter, independent/combined tests and unsupported readback limits.
 
 - One submodule: `BozoEngine`. No PS2Recomp gitlink, legacy CMake branch, import fallback, IOP recompilation or old runner scripts.
-- `tools/tmb_build.py`: verify → extract → configure → native tools → recompile → packs → compile → stage.
+- `tools/tmb_build.py`: verify â†’ extract â†’ configure â†’ native tools â†’ recompile â†’ packs â†’ compile â†’ stage.
 - `scripts/build_runtime.sh` and the other retained shortcuts use that same pipeline.
 - Native frame pacing is unconditional. A legacy `TMB_NATIVE_FRAMES=0` environment setting cannot bypass it.
 - Heat haze defaults on, as requested. `BOZO_HEAT_HAZE=0` is the comparison switch.
@@ -184,7 +189,7 @@ reader state and TMB's old packet-based flare adapter, independent/combined test
 
 - Engine: all 5 local CTest checks pass, including the corrected FMAC overflow case and its new boundary cases.
 - Whole-function replay: **9,232/9,232 samples, 1,518/1,518 functions**, bit-exact.
-- Real-time menu/movie diagnostic: EE/PC **1.0001**, **576,005 ticks/s**, **59.97 fields/s**; movies **29.93–30.00 pictures/s**.
+- Real-time menu/movie diagnostic: EE/PC **1.0001**, **576,005 ticks/s**, **59.97 fields/s**; movies **29.93â€“30.00 pictures/s**.
   The owner also said the freshly launched build no longer felt too fast. This measurement used the handoff build's existing clock fixes;
   the continuation adds a regression guard and removes the unpaced legacy frame switch.
 - Native story run without a call log: **26,000 frames**, stage progression, card files written, no fault.
@@ -202,12 +207,12 @@ reader state and TMB's old packet-based flare adapter, independent/combined test
 
 - Candidate `0.4.0-test.20261105.3`, code `b9c42cb`, engine `9361960`: both player ZIPs pass the archive audit and SHA-256 checks.
   All **7,750 files** have identical contents between the two installation layouts. The corresponding-source ZIP's hash passes too.
-- Built and played from `D:\BozoScratch\finish\Jérôme Jeux\TMB_Recomp_Bozo`, using only the bundled kit.
+- Built and played from `D:\BozoScratch\finish\JÃ©rÃ´me Jeux\TMB_Recomp_Bozo`, using only the bundled kit.
   The final packaged launcher stopped the build at 40%, resumed it, staged the native executable and launched it.
   The complete preparation took 126 seconds on this development PC; this is not a clean-OS performance promise.
 - The launcher self-test completed normal Play/shutdown (exit 0), English/French settings screenshots,
   and an intentional child crash with a usable report. Failure paths now fail the self-test instead of returning a false success.
-- Final packaged menu/movie log: **1.0000** EE/PC, **575,964 ticks/s**, **59.97 fields/s**, movies **29.94–30.00 pictures/s**.
+- Final packaged menu/movie log: **1.0000** EE/PC, **575,964 ticks/s**, **59.97 fields/s**, movies **29.94â€“30.00 pictures/s**.
   `tools/check_timing.py` passes with `TMB_NATIVE_FRAMES=0`. The fresh 2,400-frame accent-path run also passes.
 - The **actual v0.3.2 updater** installed the unsuffixed migration ZIP. The subsequent new build removed the retired
   `source/PS2Recomp` marker, preserved player-data sentinels, rebuilt, and started BozoEngine.
@@ -227,16 +232,16 @@ These figures measure **game-thread work**, not the interval between displayed p
 | Effects-heavy story level 20, after 125 s | 4,098 | 2.72 ms | 3.54 ms | 11.2 ms | 0 |
 
 - 1P and level 20 each completed 12,000 frames; four-player completed 9,000. Gameplay intervals hold about 60
-  updates/presents per second. Whole-run averages including loading are 59.7–59.9 updates/s. Occasional presentation
+  updates/presents per second. Whole-run averages including loading are 59.7â€“59.9 updates/s. Occasional presentation
   intervals over 20 ms still occur; do not describe this as zero hitches on all hardware.
 - Repeated the handoff's exact 7,500-frame four-pad command, including captures at 6,000 and 7,000. Its old script
   actually stays on opponent selection in this real-time build. The previous 42-present/s dip did not recur on that
-  same screen: frames 7,000–7,300 remained at 60 presents/s.
+  same screen: frames 7,000â€“7,300 remained at 60 presents/s.
 - For the real split-screen run, omitted player 1's initial `1292:CROSS/18` from the local `p1_frames.txt` input;
   the native build has already reached the main menu there, so that old intro-skip press selects ONE PLAYER.
   Kept all other four-pad events unchanged. Captures at 6,000 and 8,000 show all four views, driving and firing.
   AI suppression was off; the four-human deathmatch itself has four human vehicles. Bot coverage comes from 1P.
-- One further historical 1P timing pair (125–195 s) measured 3.77 ms native versus 5.49 ms on the previous runtime,
+- One further historical 1P timing pair (125â€“195 s) measured 3.77 ms native versus 5.49 ms on the previous runtime,
   with no game-work frames over budget in either. This is a limited local comparison, not a cross-hardware speedup claim.
 - Completed the previously unwritten raw-profile output and fixed `hitch.py`'s imported `__file__` namespace in the local
   profiling tools. A 20-second sample contains 20,475 raw thread samples. Its game-thread pacer segmentation labels

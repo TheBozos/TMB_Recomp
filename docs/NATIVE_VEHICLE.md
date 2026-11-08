@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Driver forward transforms](NATIVE_DRIVER_FORWARD.md) adds seven path-offset,
+lookahead and driving-LOS sites with complete generated owners and real queries.
+
 [Rigid-body forward transforms](NATIVE_RIGID_BODY_FORWARD.md) adds ten sites for local
 forces/torques/impulses, integration and world-point publication.
 

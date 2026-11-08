@@ -15,6 +15,10 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_LAUNCHER_AIM_FORWARD.md`](NATIVE_LAUNCHER_AIM_FORWARD.md) adds the Hearse, Minion and
+Tanker launcher turret-aim forwards. Coverage is 142/269 known forward returns (127 remain),
+with 134/134 known inverse returns native.
+
 [`NATIVE_RICOCHET_FORWARD.md`](NATIVE_RICOCHET_FORWARD.md) adds the two ricochet movement
 forwards, before its height test and after its reflection. Coverage is 139/269 known forward
 returns (130 remain), with 134/134 known inverse returns native.

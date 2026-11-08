@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Collision/drift inverses](NATIVE_COLLISION_DRIFT_INVERSES.md) adds sixteen native inverse call sites,
+including drift velocity publication and collision-force coordinates, with full XYZW comparisons.
+
 The player runtime now calculates the vehicle basis product (`vu0MulMatrix3x3`, `1dcc08`) directly over
 matrix records. Its three calls are in `vehicleUpdatePosition` and `vehicleSetCsMat`. All four output
 components and the final identity column retain the original ordered arithmetic and alias behavior.

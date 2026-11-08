@@ -40,6 +40,13 @@ namespace tmb::hierarchy
         0x1e435c, 0x1e43b4, 0x1e43c8, // relative emitter position and direction
         0x150d98, // tow-truck launcher local direction before normalization/orientation construction
         0x108d6c, 0x109870, 0x1099a0, // attractor-group selection, center and random position
+        0x1161f4, 0x116618, // vehicle hit-point axis selection
+        0x119090, 0x11927c, // averaged environment contact and slope response
+        0x11985c, 0x119870, 0x119e64, // collision reflection and local velocity
+        0x11afb0, 0x11b018, // car-to-car force coordinates
+        0x11b9a8, // car-to-car collision velocity publication
+        0x11c38c, 0x11c3c0, 0x11c540, // morph hit location and drivable slope
+        0x1ab558, 0x1ab8f4, 0x1abad4, // drift exit, direction decision and velocity publication
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

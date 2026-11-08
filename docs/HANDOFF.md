@@ -59,6 +59,9 @@ forward transform, checked through full entry, fade/fog updates, grid alignment 
 [`NATIVE_WEAPON_SKID_TRANSFORMS.md`](NATIVE_WEAPON_SKID_TRANSFORMS.md) adds weapon translation
 and skid-mark creation/stretch offsets, with complete positioning, list and vertex consumers.
 
+[`NATIVE_COLLISION_DRIFT_INVERSES.md`](NATIVE_COLLISION_DRIFT_INVERSES.md) adds sixteen vehicle
+collision and drift inverse returns, with full XYZW checks and explicit generated-consumer boundaries.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

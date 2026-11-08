@@ -1,5 +1,8 @@
 # Native weapon translation and skid-mark transforms
 
+[Weapon lock-on, satellite and rock forwards](NATIVE_WEAPON_LOCK_FORWARD.md) later add six more
+weapon owners: lock-on/look-ahead aim points and skill-satellite/rock movement.
+
 Five forward-transform returns now use native record arithmetic, extending the
 [weather viewport increment](NATIVE_WEATHER_VIEWPORT.md). Forward coverage grows
 from 90 to 95 sites; inverse coverage stays at 89. BozoEngine stays at `4a8f70a`.

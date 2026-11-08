@@ -47,6 +47,10 @@ namespace tmb::hierarchy
         0x11b9a8, // car-to-car collision velocity publication
         0x11c38c, 0x11c3c0, 0x11c540, // morph hit location and drivable slope
         0x1ab558, 0x1ab8f4, 0x1abad4, // drift exit, direction decision and velocity publication
+        0x1ed6c4, // rigid-body world-impulse angular velocity
+        0x1ed8ec, 0x1ed92c, // two-body collision response
+        0x1edaec, 0x1edc04, 0x1edd94, // fixed/moving surface collision response
+        0x1ee030, // rigid-body auxiliary angular velocity
     };
 
     inline math::Vector inverseDirection(const math::Matrix &basis, const math::Vector &input)

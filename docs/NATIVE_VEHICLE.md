@@ -1,5 +1,8 @@
 # Native vehicle spatial calculations
 
+[Rigid-body inverses](NATIVE_RIGID_BODY_INVERSES.md) adds seven native inverse call sites
+with complete collision/impulse entries and downstream point-velocity checks.
+
 [Collision/drift inverses](NATIVE_COLLISION_DRIFT_INVERSES.md) adds sixteen native inverse call sites,
 including drift velocity publication and collision-force coordinates, with full XYZW comparisons.
 

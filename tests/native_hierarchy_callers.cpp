@@ -84,18 +84,19 @@ namespace
     }
     bool vuUntouched(const R5900Context &initial, const R5900Context &after)
     { return !std::memcmp(reinterpret_cast<const uint8_t *>(&initial) + vuAt, reinterpret_cast<const uint8_t *>(&after) + vuAt, vuBytes); }
-    constexpr uint32_t collisionDriftReturns[]={0x1161f4,0x116618,0x119090,0x11927c,0x11985c,0x119870,0x119e64,
-        0x11afb0,0x11b018,0x11b9a8,0x11c38c,0x11c3c0,0x11c540,0x1ab558,0x1ab8f4,0x1abad4};
-    std::array<unsigned,std::size(collisionDriftReturns)> collisionDriftCalls{};
-    void countCollisionDrift(const R5900Context *ctx) {
-        for(unsigned i=0;i<std::size(collisionDriftReturns);++i)
-            if(getRegU32(ctx,31)==collisionDriftReturns[i]) ++collisionDriftCalls[i];
+    constexpr uint32_t auditedInverseReturns[]={0x1161f4,0x116618,0x119090,0x11927c,0x11985c,0x119870,0x119e64,
+        0x11afb0,0x11b018,0x11b9a8,0x11c38c,0x11c3c0,0x11c540,0x1ab558,0x1ab8f4,0x1abad4,
+        0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030};
+    std::array<unsigned,std::size(auditedInverseReturns)> auditedInverseCalls{};
+    void countAuditedInverse(const R5900Context *ctx) {
+        for(unsigned i=0;i<std::size(auditedInverseReturns);++i)
+            if(getRegU32(ctx,31)==auditedInverseReturns[i]) ++auditedInverseCalls[i];
     }
     RecompiledFunction nativeInverseImplementation = nullptr;
-    void collisionDriftInverse(uint8_t *ram,R5900Context *ctx,Runtime *rt) {
-        countCollisionDrift(ctx); const auto before=*ctx;
+    void auditedInverse(uint8_t *ram,R5900Context *ctx,Runtime *rt) {
+        countAuditedInverse(ctx); const auto before=*ctx;
         nativeInverseImplementation(ram,ctx,rt);
-        require(vuUntouched(before,*ctx),"collision/drift native inverse changed VU state");
+        require(vuUntouched(before,*ctx),"audited native inverse changed VU state");
     }
     RecompiledFunction nativeDirectionImplementation = nullptr;
     R5900Context directionEntry;
@@ -134,7 +135,7 @@ namespace
     {
         const auto offset = bozo::GuestMemory::flatOffset(getRegU32(ctx, 6) & ~15u, 16);
         require(offset >= 0, "invalid inverse output");
-        countCollisionDrift(ctx);
+        countAuditedInverse(ctx);
         mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8(ram, ctx, rt);
         // An inverse may reuse a forward record, replacing opaque W with meaningful basis[0].W.
         // Its full later write must be compared exactly, without the earlier forward-W exclusion.
@@ -198,7 +199,8 @@ void testHierarchyHelperCallers()
         0x1137cc, 0x11398c, 0x113a78, 0x113b28, 0x113c2c, 0x113f28, 0x1142d8, 0x114394, 0x1fdd3c, 0x1e8a34,
         0x1b28cc, 0x1b28e8, 0x168ca0, 0x1691b0, 0x169378,
         0x1161f4,0x116618,0x119090,0x11927c,0x11985c,0x119870,0x119e64,
-        0x11afb0,0x11b018,0x11b9a8,0x11c38c,0x11c3c0,0x11c540,0x1ab558,0x1ab8f4,0x1abad4};
+        0x11afb0,0x11b018,0x11b9a8,0x11c38c,0x11c3c0,0x11c540,0x1ab558,0x1ab8f4,0x1abad4,
+        0x1ed6c4,0x1ed8ec,0x1ed92c,0x1edaec,0x1edc04,0x1edd94,0x1ee030};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138) || kind >= 155; };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
@@ -1167,7 +1169,7 @@ void testHierarchyHelperCallers()
                     if (n>=64) { fromEntry=true; initial.pc=0x168ef0; reg(4,vehicle); reg(5,tire); setRegU32(&initial,31,0xbad0000); }
                 }
             }
-            else
+            else if (kind <= 170)
             {
                 // Collision/drift inverses publish full XYZW, including meaningful first-basis W.
                 // Resume actual producers for half the cases; never reconstruct VU state.
@@ -1243,11 +1245,68 @@ void testHierarchyHelperCallers()
                 require(basis>=0,"invalid collision/drift basis"); word(uint32_t(basis)+12,bits());
                 if(n>=64 && !fromEntry) { fromEntry=true; initial.pc=prefix; }
             }
+            else
+            {
+                // Complete rigid-body entries retain real cross/dot products, friction and impulse application.
+                constexpr uint32_t body=0x18000, other=0x1c000, point=0x19000, normal=0x19040, velocity=0x19080, cs=0x22000;
+                const auto f=[&](uint32_t at,float v) { uint32_t u; std::memcpy(&u,&v,4); word(at,u); };
+                const auto fp=[&](unsigned r,float v) { std::memcpy(&initial.fu[r],&v,4); };
+                const auto xyz=[&](uint32_t at,float x,float y,float z) { f(at,x); f(at+4,y); f(at+8,z); };
+                for(auto b:{body,other}) {
+                    f(b,.5f); word(b+0x30,address(cs)); xyz(b+0x20,1.f,2.f,3.f);
+                    xyz(b+0x40,0.f,0.f,0.f); xyz(b+0x60,0.f,0.f,0.f); xyz(b+0xc0,0.f,0.f,0.f);
+                    xyz(b+0x70,1.f,0.f,0.f); xyz(b+0x80,0.f,2.f,0.f); xyz(b+0x90,0.f,0.f,3.f);
+                    word(b+0x7c,bits());
+                }
+                xyz(cs+0x20,0.f,1.f,0.f); xyz(cs+0x30,-1.f,0.f,0.f); xyz(cs+0x40,0.f,0.f,1.f);
+                xyz(body+0xb0,n%8 ? -2.f : 0.f,n%8 ? (n%3 ? 1.f : 8.f) : 0.f,0.f);
+                xyz(other+0xb0,0.f,0.f,0.f); xyz(other+0x40,1.f,0.f,0.f);
+                xyz(point,.5f,1.f,n%2 ? .25f : 0.f); xyz(normal,1.f,0.f,0.f); xyz(velocity,0.f,0.f,0.f);
+                for(unsigned o:{0x46c0u,0x46bcu,0x46b8u,0x46b4u,0x46b0u,0x46acu}) f(gp-o,0.f);
+                fp(20,-.5f); fp(21,1.f); fp(22,.5f); fp(23,-1.f); fp(24,.25f); fp(25,.75f); fp(26,1.f);
+                uint32_t entry=0;
+                if(kind==171) {
+                    continuation=resume_0x1ed650; entry=0x1ed650; reg(17,body); reg(18,body+0x60);
+                    reg(4,body+0x70); reg(5,body+0x60); reg(6,body+0xc0); returnAt(0x70);
+                } else if(kind<=173) {
+                    continuation=resume_0x1ed7a8; entry=0x1ed7a8;
+                    reg(21,body); reg(22,other); reg(23,point); reg(19,normal); reg(20,sp+0x20); reg(18,sp+0x40); reg(16,sp+0x50);
+                    reg(4,(kind==172 ? body : other)+0x70); reg(5,sp+0x40); reg(6,sp+0x50); returnAt(0xe0);
+                } else if(kind<=175) {
+                    continuation=resume_0x1ed9c8; entry=0x1ed9c8;
+                    reg(20,body); reg(21,point); reg(22,body+0x40); reg(23,body+0xc0); reg(30,body+0xb0);
+                    word(sp+0x60,address(body+0x70)); reg(18,sp+0x30); reg(19,sp+0x20); reg(17,normal); reg(16,sp+0x10);
+                    reg(4,body+0x70); reg(5,sp+0x20); reg(6,sp+0x30); returnAt(0x100);
+                    if(kind==175) { reg(17,sp+0x40); reg(16,sp+0x50); reg(5,sp+0x40); reg(6,sp+0x50); }
+                } else if(kind==176) {
+                    continuation=resume_0x1edc98; entry=0x1edc98; reg(19,body); reg(21,point); reg(20,normal);
+                    reg(17,velocity); reg(18,sp+0x20); reg(16,sp+0x30);
+                    reg(4,body+0x70); reg(5,sp+0x20); reg(6,sp+0x30); returnAt(0xa0);
+                } else {
+                    continuation=resume_0x1edf78; entry=0x1edf78; reg(16,body); reg(17,cs+0x20); reg(18,body+0x70); reg(19,body+0x60); reg(20,body+0xc0);
+                    reg(4,body+0x70); reg(5,body+0x60); reg(6,body+0xc0); returnAt(0x90);
+                }
+                if(n>=64) {
+                    fromEntry=true; initial.pc=entry; setRegU32(&initial,31,0xbad0000); reg(4,body);
+                    fp(12,float(n%3)*.5f); fp(13,.25f); fp(14,.75f);
+                    if(kind==171) { reg(5,n%4 ? normal : body+0x60); reg(6,point); }
+                    else if(kind<=173) { reg(5,other); reg(6,point); reg(7,normal); }
+                    else if(kind<=175) { reg(5,point); reg(6,normal); }
+                    else if(kind==176) { reg(5,n%4 ? velocity : body+0xb0); reg(6,point); reg(7,normal); }
+                    // Separate separating-contact and small-speed gates from reached arithmetic paths.
+                    if(kind>=172 && kind<=176 && n>=112) {
+                        const unsigned offset=kind<=173 ? 0x46c0 : kind<=175 ? 0x46b8 : 0x46b0;
+                        xyz(body+0xb0,n>=120 ? -.01f : 2.f,0.f,0.f);
+                        if(kind==176) reg(5,velocity);
+                        if(n>=120) f(gp-offset+4,-.1f);
+                    }
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
                 referenceW.clear(); services.yields = services.randomCalls = services.weatherPoints = services.weatherIdentities = 0;
-                services.spatialCalls.fill(0); collisionDriftCalls.fill(0);
-                rt->functions.setOverride(0x1da1e8, native ? (kind>=155 ? collisionDriftInverse : inverse) : referenceInverse);
+                services.spatialCalls.fill(0); auditedInverseCalls.fill(0);
+                rt->functions.setOverride(0x1da1e8, native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse);
                 rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : direction) : referenceDirection);
                 sawDirectionEntry=false;
                 host.instruction=kind == 139 ? vehicleInstructions : nullptr;
@@ -1255,11 +1314,18 @@ void testHierarchyHelperCallers()
                 rt->functions.setOverride(0x1dcc08,kind == 139 ? matrix : nullptr);
                 rt->functions.setOverride(0x1da238,kind == 149 ? registry.find(0x1da238) : nullptr);
                 rt->functions.setOverride(0x1db0f0,kind == 149 ? registry.find(0x1db0f0) : nullptr);
-                auto helper = isInverse(kind) ? (native ? (kind>=155 ? collisionDriftInverse : inverse) : referenceInverse) : (native ? direction : referenceDirection);
+                auto helper = isInverse(kind) ? (native ? (kind>=155 ? auditedInverse : inverse) : referenceInverse) : (native ? direction : referenceDirection);
                 if (!fromEntry) { helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return"); }
                 try { continuation(ram, &ctx, rt.get()); }
                 catch (const SegmentEnd &) { require(services.stop != 0xffffffff, "unexpected segment end"); return; }
                 require(services.stop == 0xffffffff && ctx.pc == 0xbad0000, "hierarchy consumer returned early");
+                if (kind == 171 || kind == 177) {
+                    // Read the published angular velocity through the real point-velocity consumer.
+                    setRegU32(&ctx,4,address(0x18000)); setRegU32(&ctx,5,address(0x190c0));
+                    setRegU32(&ctx,6,address(0x19000)); setRegU32(&ctx,31,0xbad0000); ctx.pc=0x1ee0a0;
+                    getPointVelocity__9RigidBodyR8_fvectorT1_0x1ee0a0(ram,&ctx,rt.get());
+                    require(ctx.pc==0xbad0000,"rigid-body point velocity returned early");
+                }
                 if (kind == 139) {
                     setRegU32(&ctx,4,address(0x18000)); ctx.pc=0x1ab250;
                     vehicleSetCsMat__7Vehicle_0x1ab250(ram,&ctx,rt.get());
@@ -1274,8 +1340,11 @@ void testHierarchyHelperCallers()
             const auto refRandomCalls = services.randomCalls;
             const auto refWeatherPoints=services.weatherPoints, refWeatherIdentities=services.weatherIdentities;
             const auto refSpatialCalls=services.spatialCalls;
-            const auto refCollisionDriftCalls=collisionDriftCalls;
-            if(kind>=155) require(refCollisionDriftCalls[kind-155]==1,"collision/drift producer did not reach its inverse");
+            const auto refAuditedInverseCalls=auditedInverseCalls;
+            if(kind>=155) {
+                const bool rejected=kind>=172 && kind<=176 && fromEntry && n>=112;
+                require(refAuditedInverseCalls[kind-155]==unsigned(!rejected),"audited inverse producer reach");
+            }
             if (kind == 138 && fromEntry) require(refRandomCalls == 2, "random-position producer must make two real rand calls");
             if (expectedSelection >= 0) require(getRegU32(&a,2) == uint32_t(expectedSelection), "original attractor boundary selection");
             // Tow-truck and attractor consumers need no forward-W exclusion.
@@ -1317,7 +1386,7 @@ void testHierarchyHelperCallers()
             // Full rear-view entries retain the original rotation producer's identity-helper VU writes.
             const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : initial;
             if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls ||
-                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || collisionDriftCalls != refCollisionDriftCalls || !dataEqual() ||
+                services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;

@@ -78,6 +78,15 @@ namespace
     }
     bool vuUntouched(const R5900Context &initial, const R5900Context &after)
     { return !std::memcmp(reinterpret_cast<const uint8_t *>(&initial) + vuAt, reinterpret_cast<const uint8_t *>(&after) + vuAt, vuBytes); }
+    RecompiledFunction nativeDirectionImplementation = nullptr;
+    R5900Context directionEntry;
+    bool sawDirectionEntry = false;
+    void rearDirection(uint8_t *ram, R5900Context *ctx, Runtime *rt)
+    {
+        directionEntry = *ctx; sawDirectionEntry = true;
+        nativeDirectionImplementation(ram,ctx,rt);
+        require(vuUntouched(directionEntry,*ctx),"rear-view native leaf changed its producer's VU state");
+    }
     void context(R5900Context &ctx, uint32_t alias)
     {
         for (unsigned r = 1; r < 32; ++r) for (auto &v : ctx.r[r].uw) v = bits();
@@ -121,6 +130,7 @@ void testHierarchyHelperCallers()
     rt->functions.setResume(tmb_resume_table, tmb_resume_count);
     tmb::Registry registry; tmb::math::install(registry); tmb::hierarchy::install(registry);
     const auto inverse = registry.find(0x1da1e8), direction = registry.find(0x1da298);
+    nativeDirectionImplementation = direction;
     require(inverse && direction, "missing hierarchy leaves");
     tmb::Registry graphics; tmb::graphics::install(graphics);
     const auto vehicleInstructions=graphics.instructionHandler(); const auto matrix=registry.find(0x1dcc08);
@@ -164,7 +174,8 @@ void testHierarchyHelperCallers()
         0x1f5414, 0x1f5458, 0x1f54f4, 0x1f5538, 0x1f55d4, 0x1f5618, 0x1f56a8, 0x1f5904,
         0x1888e8, 0x18b4c0, 0x1e4818, 0x1e42d8, 0x1e435c, 0x1e43b4, 0x1e43c8,
         0x15e1b8, 0x1b42c8, 0x1b430c, 0x1b43a8, 0x1b4434, 0x1b44c0,
-        0x150bc8, 0x150cc0, 0x150d2c, 0x150d98, 0x108d6c, 0x109870, 0x1099a0, 0x1abd60};
+        0x150bc8, 0x150cc0, 0x150d2c, 0x150d98, 0x108d6c, 0x109870, 0x1099a0, 0x1abd60,
+        0x1137cc, 0x11398c, 0x113a78, 0x113b28, 0x113c2c, 0x113f28, 0x1142d8, 0x114394, 0x1fdd3c};
     const auto isInverse = [](unsigned kind) { return kind < 4 || kind == 12 || kind == 13 || (kind >= 24 && kind <= 30) || (kind >= 37 && kind <= 45) || (kind >= 50 && kind <= 57) || (kind >= 65 && kind <= 67) || (kind >= 76 && kind <= 96) || (kind >= 111 && kind <= 118) || (kind >= 123 && kind <= 125) || (kind >= 135 && kind <= 138); };
     const unsigned saved = _mm_getcsr(); unsigned cases = 0, memoryCases = 0;
     for (unsigned mode = 0; mode < 4; ++mode) for (unsigned kind = 0; kind < std::size(callers); ++kind)
@@ -927,7 +938,7 @@ void testHierarchyHelperCallers()
                     }
                 }
             }
-            else
+            else if (kind == 139)
             {
                 // Complete peel-out producer/tail, followed by the real production-native coordinate-system consumer.
                 constexpr uint32_t vehicle=0x18000;
@@ -965,12 +976,78 @@ void testHierarchyHelperCallers()
                     word(gp-0x46a8,0x3fc90fdb); word(gp-0x46a4,0xbfc90fdb); word(gp-0x46a0,0xbfc90fdb);
                 }
             }
+            else
+            {
+                // Real camera producers and consumers through pose publication or the next actual query boundary.
+                constexpr uint32_t camera=0x10000, vehicle=0x18000, cs=0x1c000;
+                const unsigned slot=n%4; const uint32_t slot4=slot*4, slot16=slot*16;
+                continuation=resume_0x1135d0; services.stop=0x1fdc90;
+                reg(22,camera); reg(23,cs); setRegU32(&initial,21,slot4); setRegU32(&initial,30,slot4);
+                word(sp+0xd0,slot); word(sp+0xd4,address(vehicle)); word(sp+0x104,address(cs+0x10));
+                word(sp+0x108,address(cs+0x20)); word(sp+0xe4,address(sp+0x40)); word(sp+0xec,slot16);
+                word(vehicle+0x2018,address(n&4 ? cs : 0x1d000));
+                word(sp+0x100,address(camera+0x43d0)); word(sp+0x118,address(camera+0x42e0));
+                word(sp+0x11c,address(camera+0x42f0)); word(sp+0xe8,address(camera+0x42d0));
+                word(cs+0x4c,bits()); word(cs+0x1c,bits());
+                word(camera+0x416c+slot16,bits());
+                word(camera+0x43e4+slot4,1); word(sp+0x1b0,0xbad0000); word(sp+0x1b4,0);
+                for (uint32_t at=0x7718;at<=0x77e8;at+=4) word(gp-at,0x3e000000);
+                word(gp-0x46a8,0x3fc90fdb); word(gp-0x46a4,0xbfc90fdb); word(gp-0x46a0,0xbfc90fdb);
+                for (uint32_t at:{cs+0x60,cs+0x64,cs+0x68}) word(at,n&1 ? 0x3e000000 : 0xbe000000);
+                reg(4,cs+0x20); reg(5,sp+0x40); reg(6,sp+0x50); reg(17,sp+0x50);
+                if (kind == 140) {
+                    services.stop=0x1cec90; reg(16,cs+0x20); reg(18,sp+0x40); reg(19,sp+0x50);
+                    reg(17,camera+0x4404+slot4); word(camera+0x4404+slot4,1);
+                    word(sp+0xdc,address(cs+0x10)); word(sp+0xd8,address(vehicle+0x1d0));
+                    word(gp-0x4154,0x18000u-0x1ae650u); word(0x18000,0);
+                    if (n>=64) { fromEntry=true; initial.pc=0x113774; }
+                } else if (kind == 141) {
+                    reg(17,cs+0x20); reg(16,sp+0x70); reg(20,camera+slot4); reg(23,cs+0x10);
+                    reg(5,sp+0x60); reg(6,sp+0x70);
+                    if (n>=64) { fromEntry=true; initial.pc=0x113978; }
+                } else if (kind == 142) {
+                    reg(16,sp+0x40); setRegU32(&initial,18,slot16); reg(21,vehicle+0x1d0); reg(23,cs+0x10);
+                    reg(20,camera+0x42d0+slot4); reg(19,camera+0x4300+slot4);
+                    word(sp+0xe0,address(camera+0x4404+slot4));
+                    if (n>=64) { fromEntry=true; initial.pc=0x113a50; }
+                } else if (kind == 143) {
+                    services.stop=0x1dbd58; reg(4,n&4 ? cs+0x20 : 0x1d020);
+                    initial.fu[23]=0; word(vehicle+0x3e0,0);
+                    if (n>=64) { fromEntry=true; initial.pc=0x113ae0; }
+                } else if (kind == 144) {
+                    reg(20,sp+0x40); reg(18,vehicle+0x1d0); setRegU32(&initial,19,slot16);
+                    initial.fu[23]=0; initial.fu[21]=initial.fu[22]=0x3e000000;
+                    if (n>=64) { fromEntry=true; initial.pc=0x113bf4; }
+                } else if (kind == 145) {
+                    services.stop=0x1d02b8; reg(16,camera+0x4160+slot16); reg(17,camera+slot16);
+                    reg(18,camera+0x43c0); reg(19,camera+0x43d0); setRegU32(&initial,20,slot16);
+                    word(sp+0xf0,address(vehicle+0x1d0)); word(sp+0xf4,address(camera+0x4340));
+                    word(vehicle+0x33c,0x3f800000); ram[vehicle+0x491]=uint8_t(n&1);
+                    reg(4,sp); reg(6,camera+0x4160+slot16);
+                    if (n>=64) { fromEntry=true; initial.pc=0x113eb8; setRegU32(&initial,4,slot); }
+                } else if (kind <= 147) {
+                    services.stop=0x1d02b8; reg(18,vehicle+0x1d0); reg(20,vehicle+0xd0);
+                    const uint32_t out=sp+(kind==146 ? 0x70 : 0xc0);
+                    reg(16,out); reg(4,vehicle+0xd0); reg(6,out);
+                    if (n>=64) { fromEntry=true; initial.pc=kind==146 ? 0x114298 : 0x11435c; reg(4,vehicle); }
+                } else {
+                    continuation=resume_0x1fdc90; services.stop=0xffffffff;
+                    reg(17,cs); reg(16,sp+0x30); reg(4,sp+0x30); reg(5,sp); reg(6,sp+0x10); returnAt(0x90);
+                    word(gp-0x3270,n&1); initial.fu[12]=n&2 ? 0x3f000000 : 0xbf000000;
+                    if (n>=64) {
+                        fromEntry=true; initial.pc=0x1fdc90; reg(4,cs); setRegU32(&initial,5,n%8==0 ? 1 : 0);
+                        setRegU32(&initial,31,0xbad0000);
+                    }
+                }
+            }
             snapshot(input.get());
             const auto run = [&](bool native, R5900Context &ctx) {
                 referenceW.clear(); services.yields = services.randomCalls = 0;
                 rt->functions.setOverride(0x1da1e8, native ? inverse : referenceInverse);
-                rt->functions.setOverride(0x1da298, native ? direction : referenceDirection);
+                rt->functions.setOverride(0x1da298, native ? (kind == 148 ? rearDirection : direction) : referenceDirection);
+                sawDirectionEntry=false;
                 host.instruction=kind == 139 ? vehicleInstructions : nullptr;
+                if (kind == 141 && native) host.instruction=vehicleInstructions;
                 rt->functions.setOverride(0x1dcc08,kind == 139 ? matrix : nullptr);
                 auto helper = isInverse(kind) ? (native ? inverse : referenceInverse) : (native ? direction : referenceDirection);
                 if (!fromEntry) { helper(ram, &ctx, rt.get()); require(ctx.pc == callers[kind], "wrong hierarchy return"); }
@@ -999,7 +1076,9 @@ void testHierarchyHelperCallers()
             const bool wholeCase=n < 4 || (fromEntry && n < 68);
             snapshot(expected.get()); if (wholeCase) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
             restore(); _mm_setcsr(control); run(true, b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
-            if (!cpuEqual(a,b) || !vuUntouched(initial,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls || !dataEqual() ||
+            // Full rear-view entries retain the original rotation producer's identity-helper VU writes.
+            const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : initial;
+            if (!cpuEqual(a,b) || !vuUntouched(expectedVu,b) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
             { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;
@@ -1019,5 +1098,5 @@ void testHierarchyHelperCallers()
         ++historical;
     }
     _mm_setcsr(saved);
-    std::printf("hierarchy consumers: %u generated sequences, %u whole-memory checks; CPU/clock/FP exact outside retired VU/forward W; native VU untouched; %u historical forward ABI cases (%u whole-memory)\n", cases, memoryCases, historical, historical / 16);
+    std::printf("hierarchy consumers: %u generated sequences, %u whole-memory checks; CPU/clock/FP exact outside retired VU/forward W; native leaves VU untouched, original producer effects retained; %u historical forward ABI cases (%u whole-memory)\n", cases, memoryCases, historical, historical / 16);
 }

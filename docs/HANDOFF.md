@@ -50,6 +50,9 @@ inverse transforms, with complete consumers, seeded generated producers and an a
 [`NATIVE_PEEL_OUT.md`](NATIVE_PEEL_OUT.md) retires that peel-out forward transform,
 with complete producer-to-pose checks and a fresh audit of the four opaque W fields.
 
+[`NATIVE_CAMERA_TRANSFORMS.md`](NATIVE_CAMERA_TRANSFORMS.md) adds all eight camera-update
+forward transforms, rear-view positioning and the coupled inline XYZW position publication.
+
 [`NATIVE_HIERARCHY.md`](NATIVE_HIERARCHY.md) covers native collision/height hierarchy sphere tests, audited
 inverse transforms and BSP plane distances, their original-caller tests and RAM boundary.
 

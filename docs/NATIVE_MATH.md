@@ -71,3 +71,6 @@ weather identity boundaries, including their original reduction order and caller
 
 [`NATIVE_DIRECTIONS.md`](NATIVE_DIRECTIONS.md) extends native direction math to the three hot BSP
 collision setup callers, with generated-consumer checks and an explicit stack-W boundary.
+
+[`NATIVE_CAMERA_TRANSFORMS.md`](NATIVE_CAMERA_TRANSFORMS.md) subsequently adds camera-update
+and rear-view forward transforms, including the coupled inline position consumer's exact W contract.

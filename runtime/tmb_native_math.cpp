@@ -20,6 +20,8 @@ namespace tmb::math
         constexpr uint32_t kTransposedProduct = 0x001dcc68u, kFullProduct = 0x001dcd50u;
         constexpr uint32_t kBasisProduct = 0x001dcc08u;
         constexpr uint32_t kDirectionProduct = 0x001da298u;
+        // bozo:native kCameraPosition
+        constexpr uint32_t kCameraPosition[] = {0x11399c, 0x1139a0, 0x1139a4, 0x1139a8};
         struct Statistics
         {
             uint64_t calls[3]{}, checked[3]{};
@@ -131,6 +133,23 @@ namespace tmb::math
             ++statistics.directions;
             ctx->pc = getRegU32(ctx, 31);
         }
+    }
+
+    bool cameraInstruction(uint8_t *, R5900Context *ctx, Runtime *rt, uint32_t pc)
+    {
+        if (!bozo::port::nativeGraphics(rt) ||
+            std::find(std::begin(kCameraPosition), std::end(kCameraPosition), pc) == std::end(kCameraPosition)) return false;
+        if (pc != 0x1139a8) return true;
+        Vector position, offset, basisTail;
+        std::memcpy(&position, span(rt, getRegU32(ctx, 2), 16), 16);
+        std::memcpy(&offset, span(rt, getRegU32(ctx, 16), 16), 16);
+        // The immediately preceding transform loads this basis column into VF13. Its W survives VADD.xyz.
+        // Publish that record field directly, without retaining any register state between instructions.
+        std::memcpy(&basisTail, span(rt, getRegU32(ctx, 17) + 32, 16), 16);
+        auto result = combineXYZ(position, offset, false);
+        result.bits[3] = basisTail.bits[3];
+        std::memcpy(span(rt, getRegU32(ctx, 5), 16), &result, 16);
+        return true;
     }
 
     void install(Registry &runtime)

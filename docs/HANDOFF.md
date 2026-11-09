@@ -15,6 +15,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_AI_BEAD_FORWARD.md`](NATIVE_AI_BEAD_FORWARD.md) adds the AI hunt and bait forwards.
 [`NATIVE_ZOOMIES_HAL_FORWARD.md`](NATIVE_ZOOMIES_HAL_FORWARD.md) adds the Zoomies and HalTrans weapon forwards.
 [`NATIVE_COMBO_FORWARD.md`](NATIVE_COMBO_FORWARD.md) adds the five combo-launch forwards.
 [`NATIVE_TIRE_ROTATION_FORWARD.md`](NATIVE_TIRE_ROTATION_FORWARD.md) adds the two tire-pair correction forwards.
@@ -24,7 +25,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 [`NATIVE_BLIMP_DEATH_FORWARD.md`](NATIVE_BLIMP_DEATH_FORWARD.md) adds the sinking blimp drift and explosion forwards.
 [`NATIVE_GASTANK_FORWARD.md`](NATIVE_GASTANK_FORWARD.md) adds the rolling and falling gas tank forwards.
 [`NATIVE_FLYER_FORWARD.md`](NATIVE_FLYER_FORWARD.md) adds the junk jet and blimp flight forwards.
-Coverage is 178/269 known forward returns (91 remain), with 134/134 known inverse returns native.
+Coverage is 180/269 known forward returns (89 remain), with 134/134 known inverse returns native.
 
 [`NATIVE_HELI_DEATH_FORWARD.md`](NATIVE_HELI_DEATH_FORWARD.md) adds the two falling-helicopter forwards.
 Coverage is 150/269 known forward returns (119 remain), with 134/134 known inverse returns native.

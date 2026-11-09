@@ -1,5 +1,7 @@
 # Native Zoomies and HalTrans weapon forward transforms
 
+[AI hunt and bait forwards](NATIVE_AI_BEAD_FORWARD.md) follow with two AI-driving sites.
+
 Four weapon forward returns use native XYZ arithmetic after the
 [combo-launch forwards](NATIVE_COMBO_FORWARD.md). Known forward coverage grows from
 174 to 178 of 269 returns (91 remain). Known inverse coverage stays 134 of 134;

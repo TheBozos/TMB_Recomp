@@ -1,5 +1,7 @@
 # Native machine-gun muzzle forward transforms
 
+[Tire-pair correction forwards](NATIVE_TIRE_ROTATION_FORWARD.md) follow with two vehicle-orientation sites.
+
 Two weapon-initialization forward returns use native XYZ arithmetic after the
 [helicopter gun and walking pedestrian forwards](NATIVE_ENVHELI_PED_FORWARD.md).
 Known forward coverage grows from 165 to 167 of 269 returns (102 remain). Known

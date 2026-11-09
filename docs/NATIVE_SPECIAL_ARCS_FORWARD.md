@@ -1,5 +1,7 @@
 # Native launcher special-weapon forward transforms (held aim and lock-on arcs)
 
+[The weapon hit-test batch](NATIVE_WEAPON_HIT_FORWARD.md) follows with six RockHD/RicoHD sites.
+
 Seven more `Launcher::UpdateSpecial` forward returns use native XYZ arithmetic after
 the [type-100 sweep batch](NATIVE_SPECIAL_SWEEP_FORWARD.md). Known forward coverage
 grows from 209 to 216 of 269 returns (53 remain). Known inverse coverage stays 134

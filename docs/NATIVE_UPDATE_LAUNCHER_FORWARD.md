@@ -1,5 +1,7 @@
 # Native UpdateLauncher forward transforms
 
+[The HUD laser batch](NATIVE_HUD_LASER_FORWARD.md) follows with the laser sight's two points.
+
 The three `Launcher::UpdateLauncher` forward returns use native XYZ arithmetic after
 the [FireSpecial types c0/1e0/220 batch](NATIVE_FIRE_TORCH_FORWARD.md). Known forward
 coverage grows from 255 to 258 of 269 returns (11 remain). Known inverse coverage

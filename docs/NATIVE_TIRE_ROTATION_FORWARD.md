@@ -1,5 +1,7 @@
 # Native tire-pair correction forward transforms
 
+[Combo-launch forwards](NATIVE_COMBO_FORWARD.md) follow with five vehicle combo sites.
+
 Two vehicle-orientation forward returns use native XYZ arithmetic after the
 [machine-gun muzzle forwards](NATIVE_MACHINE_GUN_FORWARD.md). Known forward coverage
 grows from 167 to 169 of 269 returns (100 remain). Known inverse coverage stays 134

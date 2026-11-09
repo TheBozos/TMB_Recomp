@@ -15,6 +15,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_FIRE_LOCKON_FORWARD.md`](NATIVE_FIRE_LOCKON_FORWARD.md) adds the FireSpecial type a0 lock-on forwards.
 [`NATIVE_FIRE_SPECIAL_FORWARD.md`](NATIVE_FIRE_SPECIAL_FORWARD.md) adds the first FireSpecial forwards (types 20, 40, 60).
 [`NATIVE_LOOPTANK_FORWARD.md`](NATIVE_LOOPTANK_FORWARD.md) adds the LoopTank segment forwards.
 [`NATIVE_SPECIAL_TORCH_FORWARD.md`](NATIVE_SPECIAL_TORCH_FORWARD.md) adds the special-weapon torch forwards (UpdateSpecial complete).

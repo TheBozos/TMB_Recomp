@@ -1,5 +1,7 @@
 # Native FireSpecial forward transforms (types 20, 40, 60)
 
+[The FireSpecial type a0 batch](NATIVE_FIRE_LOCKON_FORWARD.md) follows with six lock-on launch points.
+
 Five `Launcher::FireSpecial` forward returns use native XYZ arithmetic after the
 [LoopTank batch](NATIVE_LOOPTANK_FORWARD.md). Known forward coverage grows from 238 to
 243 of 269 returns (26 remain). Known inverse coverage stays 134 of 134; BozoEngine

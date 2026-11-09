@@ -7,10 +7,36 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-09
+
+### Changed
+
+- **The game's 3D math runs natively.** Every inventoried coordinate transform (269 forward and 134 inverse uses)
+  now runs as native C++. So do the hierarchy, collision, terrain, particle, camera, weapon and HUD calculations
+  built on them; none of them goes through the recompiled vector-unit helper any more. Generated tests compare
+  every one against the original arithmetic. Recorded one-player and four-player replays match the previous build
+  on every frame's calls, draws, sound and timing. The only differences found were in unused scratch memory.
+- More of the graphics path is native: HUD and menu image builders, mesh shader parameters, screen and weather
+  projection, texture inputs and upload completion. The game no longer emits per-object shader packets.
+- BozoEngine is updated to `4a8f70a`.
+
 ### Fixed
 
 - **Rare hang when leaving a menu movie** (seen once on vehicle select): a movie could freeze after a long frame, and
   the next menu choice then waited for its decoder forever. The movie player's vblank handler now runs natively.
+
+### Developer changes
+
+- The native-math caller suite covers about 191,000 generated sequences (9,952 whole-memory comparisons). They span
+  four rounding modes, denormal flushing, RAM aliases and arbitrary W payloads, with full-owner entries for each
+  call site.
+- `docs/HANDOFF.md` links one qualification document per batch: test coverage, replay comparison and window runs.
+
+### Known limits
+
+- Only the USA disc is supported. Windows is the validated player target; the migrated Linux player build is not yet validated.
+- Full campaign endings, a fresh standard-user Windows installation and four physical controllers still need player/hardware acceptance.
+  Widescreen is not implemented; presentation above 60 Hz remains experimental for effects that update at game rate.
 
 ## [0.4.0] - 2026-11-06
 
@@ -165,7 +191,8 @@ The first release. You build the game on your own PC from your own USA disc; not
 - Technical: built from TMB_Recomp's code and the PS2Recomp fork (`native/renderer`) with the build kit's GCC 16.2,
   FFmpeg 9.0.2 and Python 3.14; the default mode has no GS, VU or SPU2 emulation and no IOP hardware model.
 
-[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.0...v0.3.1

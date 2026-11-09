@@ -15,6 +15,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_SPECIAL_ARCS_FORWARD.md`](NATIVE_SPECIAL_ARCS_FORWARD.md) adds the held-aim and lock-on arc special-weapon forwards.
 [`NATIVE_SPECIAL_SWEEP_FORWARD.md`](NATIVE_SPECIAL_SWEEP_FORWARD.md) adds the three type-100 special-weapon forwards.
 [`NATIVE_SPECIAL_VOLLEY_FORWARD.md`](NATIVE_SPECIAL_VOLLEY_FORWARD.md) adds the second batch of launcher special-weapon forwards.
 [`NATIVE_SPECIAL_GUNS_FORWARD.md`](NATIVE_SPECIAL_GUNS_FORWARD.md) adds the first five launcher special-weapon forwards.

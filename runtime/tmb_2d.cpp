@@ -884,7 +884,9 @@ namespace tmb::twod
             ctx->pc = getRegU32(ctx, 31);
         }
 
-        void loadImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        // The decoder's last picture shown natively (circuit 2, and the backdrop when the menus are not drawn natively).
+        // False when there is none to show natively (TMB_NATIVE_2D=0, or no picture yet).
+        bool presentMoviePicture()
         {
             std::shared_ptr<const bozo::render::Texture> picture;
             {
@@ -897,14 +899,7 @@ namespace tmb::twod
                 }
             }
             if (!on() || !picture)
-            {
-                // Even an empty native presentation completes: there is no GIF interrupt to release its buffer.
-                if (bozo::port::nativeGraphics(runtime))
-                    completeMoviePicture(rdram, ctx);
-                else
-                    loadImage__FPUi_0x1df838(rdram, ctx, runtime);
-                return;
-            }
+                return false;
             constexpr float kFrameHeight = 448.0f;
             bozo::render::Screen screen;
             screen.originX = 2048.0f - 320.0f;
@@ -915,16 +910,104 @@ namespace tmb::twod
             if (!tmb::native::menusDrawn())
                 bozo::render::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
                                                            screen.originY + (kFrameHeight - height) * 0.5f, width, height);
-            completeMoviePicture(rdram, ctx);
+            return true;
         }
 
-        // vblankHandler: the game's, then what handler_endimage did when the transfer it started ended (the GIF DMA end
-        // interrupt, now never raised): the handler sets the held flag only after loadImage returns, so the picture
-        // loadImage replaced is freed here (voBufDecCount: the buffer's count down by one), else the decoder could wait
-        // for that buffer while the next picture waits for it (an intermittent hang in a movie).
+        void loadImageOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            // Even an empty native presentation completes: there is no GIF interrupt to release its buffer.
+            if (presentMoviePicture() || bozo::port::nativeGraphics(runtime))
+                completeMoviePicture(rdram, ctx);
+            else
+                loadImage__FPUi_0x1df838(rdram, ctx, runtime);
+        }
+
+        // voBufDecCount natively: the movie's picture buffer's count down by one (not below zero).
+        void releaseMoviePicture(uint8_t *rdram)
+        {
+            const int32_t count = static_cast<int32_t>(word(rdram, kVoBuf + 0xcu));
+            if (count > 0)
+                setWord(rdram, kVoBuf + 0xcu, static_cast<uint32_t>(count - 1));
+        }
+
+        // The movie player's vblankHandler (Sony's ezmpeg sample, INTC vblank start while a movie plays), native. Each
+        // decoded picture (the oldest in the picture buffer, voBufGetTag) is shown for two fields: on an even field when
+        // its tag says 2 (then 1), on an odd field when it says 1 (then 0); the odd field's showing ended its GIF transfer,
+        // whose DMA end interrupt (handler_endimage) freed the picture's buffer (voBufDecCount): freed here at once.
+        //
+        // It used to run the game's own handler and free the buffer after it returned. Guest code inside an override
+        // leaves it when a scheduler event comes due (the vblank's end, a frame end's clock catch-up), and the rest of
+        // the handler then runs after the override has returned: the odd field's tag became 0 with its buffer never
+        // freed. That tag stayed the oldest, so no picture was shown again: the movie froze, the decoder waited for a
+        // free buffer forever (decBs0's voBufGetData loop), and a skip or a menu choice that stops the movie waited for
+        // the decoder (updateMpegMovieDecoding's videoDecIsFlushed loop): no game frame ended (one-player route, vehicle
+        // select, frame 4340). No guest code runs here, so nothing can leave it half done.
         constexpr uint32_t kVblankHandler = 0x001C1890u;
+        constexpr int32_t kGpDisplayOn = -0x36dc, kGpField = -0x36d4, kGpPathBusy = -0x36d0, kGpShown = -0x36cc,
+                          kGpNewest = -0x36bc;
+        constexpr uint32_t kVoTagStride = 0x85740u; // VoTag: its state word first, then the two fields' transfer chains
+        constexpr uint32_t kVideoDec = 0x004C4A30u;   // its state at + 0xa8 (1 aborted, 2 flushing, 3 ended)
+        uint64_t g_movieShownAt = 0;                  // the vblank count when the handler last showed a picture
+
+        void vblankHandlerNative(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t gp = getRegU32(ctx, 28);
+            const uint32_t field = static_cast<uint32_t>(bozo::port::vblankCount(runtime) & 1u); // CSR.FIELD
+            setWord(rdram, gp + static_cast<uint32_t>(kGpField), field);
+            if (word(rdram, gp + static_cast<uint32_t>(kGpDisplayOn)) != 0u)
+            {
+                setWord(rdram, gp + static_cast<uint32_t>(kGpPathBusy), 0u); // sceGsSyncPath: nothing in flight
+                const int32_t count = static_cast<int32_t>(word(rdram, kVoBuf + 0xcu));
+                const int32_t size = static_cast<int32_t>(word(rdram, kVoBuf + 0x10u));
+                if (count > 0 && size > 0) // voBufGetTag: none while the buffer is empty
+                {
+                    const int32_t index = static_cast<int32_t>(word(rdram, kVoBuf + 0x8u));
+                    setWord(rdram, gp + static_cast<uint32_t>(kGpNewest), static_cast<uint32_t>((index - 1 + size) % size));
+                    const uint32_t oldest = static_cast<uint32_t>(((index - count + size) % size + size) % size);
+                    const uint32_t tag = word(rdram, kVoBuf + 0x4u) + oldest * kVoTagStride;
+                    const uint32_t state = word(rdram, tag);
+                    const bool even = field == 0u;
+                    if ((even && state == 2u) || (!even && state == 1u))
+                    {
+                        presentMoviePicture();
+                        // loadImage's completion: a picture still held from before is freed first (handler_endimage).
+                        const uint32_t held = gp + static_cast<uint32_t>(kImageHeld);
+                        if (word(rdram, held) != 0u)
+                        {
+                            setWord(rdram, held, 0u);
+                            releaseMoviePicture(rdram);
+                        }
+                        setWord(rdram, tag, even ? 1u : 0u);
+                        if (!even)
+                            releaseMoviePicture(rdram); // its transfer has ended
+                        setWord(rdram, gp + static_cast<uint32_t>(kGpShown), 1u);
+                        g_movieShownAt = bozo::port::vblankCount(runtime);
+                    }
+                    else if (count >= size && bozo::port::vblankCount(runtime) - g_movieShownAt == 120u)
+                    {
+                        // A full picture buffer and nothing shown for 120 fields: the decoder waits for a buffer.
+                        std::fprintf(stderr,
+                                     "[tmb:movie] stall: picture buffer full (%d of %d, next %d), oldest tag %u state %u at field %u, "
+                                     "held %u, decoder state %u\n",
+                                     count, size, index, oldest, state, field, word(rdram, gp + static_cast<uint32_t>(kImageHeld)),
+                                     word(rdram, kVideoDec + 0xa8u));
+                    }
+                }
+            }
+            setReturnS32(ctx, 0);
+            ctx->pc = getRegU32(ctx, 31); // jr $ra
+        }
+
+        // The game's GS image transfers (native graphics off, a diagnostic): the game's handler, then what
+        // handler_endimage did when the transfer it started ended (the GIF DMA end interrupt, never raised): the
+        // picture loadImage replaced is freed after the handler sets its held flag.
         void vblankHandlerOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
+            if (bozo::port::nativeGraphics(runtime))
+            {
+                vblankHandlerNative(rdram, ctx, runtime);
+                return;
+            }
             g_imageReplaced.store(false, std::memory_order_relaxed);
             vblankHandler__Fi_0x1c1890(rdram, ctx, runtime);
             if (!g_imageReplaced.exchange(false, std::memory_order_relaxed))

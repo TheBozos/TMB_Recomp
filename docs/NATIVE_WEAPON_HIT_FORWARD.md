@@ -1,5 +1,7 @@
 # Native weapon hit-test forward transforms (RockHD and RicoHD)
 
+[The Ferris wheel and final boss batch](NATIVE_FERRIS_BOSS_FORWARD.md) follows with four more hit-test sites.
+
 Six weapon hit-test forward returns use native XYZ arithmetic after the
 [held-aim and lock-on arc batch](NATIVE_SPECIAL_ARCS_FORWARD.md). Known forward
 coverage grows from 216 to 222 of 269 returns (47 remain). Known inverse coverage

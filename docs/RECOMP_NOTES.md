@@ -1876,3 +1876,35 @@ Known artifacts: the objects drawn as the newer frame (teleports, ambiguous alik
 (sprines, stripes, arcs, kites, rain and snow, lens flares) move at 60 against the rest; the HUD is 60 Hz; anything
 the game moves without a key (rain, the screen-space programs of the VIF path) is 60 Hz; a camera cut detected late
 (fewer than 60% of the objects moved) blends one frame across it.
+
+## Movie stall at a menu choice: the movie's vblank handler native (2026-11-09)
+
+One windowed one-player run (`ch1p_frames.txt`) ended at frame 4340, the route's CROSS on the vehicle screen, with
+`no game frame ended for 600 fields: the main loop waits at switchThread, ra updateMpegMovieDecoding+0xe0`. Threads:
+main in updateMpegMovieDecoding's abort path (videoDecAbort, videoDecFlush, then switchThread until videoDecIsFlushed
+or the decoder's state 3), defMain (thread 10) rotating, videoDecMain (thread 11) at 0x1fe9a0: decBs0's
+`switchThread; voBufGetData` loop, waiting for a free picture buffer (voBuf at 0x4c4a18: 5 buffers, count at + 0xc).
+The decoder only leaves decBs0 after one more picture, then waits for the count to reach 0, so the abort waited on a
+buffer that never came free.
+
+The cause: the vblank handler (0x1c1890) shows the oldest picture for two fields (tag 2 -> 1 on an even field,
+1 -> 0 on an odd one; the odd one sets the held flag gp - 0x36d8, and handler_endimage, the GIF end interrupt, freed
+the buffer). The port ran the game's handler inside its override and freed the buffer after it returned. Guest code
+inside an override leaves it when a scheduler event comes due (BozoEngine's deferred stop: the checkpoints return,
+the override goes on, the rest of the guest code runs after it): the override then found nothing held, and the rest
+of the handler set the tag to 0 and the flag to 1. The oldest tag stayed 0, so the handler never showed (or freed)
+anything again: the movie froze, the decoder filled the 5 buffers, and the next menu choice hung. The natural trigger
+is a long frame (the vehicle screen's second movie starts with a 100 ms frame; the failing run had 109 ms there),
+whose clock catch-up puts an event inside the handler.
+
+Reproduction: `TMB_STRESS_VBLANK_STOP=1` (a temporary build, not kept) charged the clock to just before the next
+event as the handler started, during looping menu movies (gp - 0x34f4 set): `[tmb:movie] vblank handler left mid-way
+at 0x1df838` twice at vblank 4070-4071, then the same fault at frame 4340, same threads and return addresses.
+
+The fix: with native graphics the handler is C++ (runtime/tmb_2d.cpp, vblankHandlerNative): the same field parity,
+flags and tag states, the picture shown natively, and the odd field's buffer freed at once. No guest code runs in it,
+so nothing can leave it half done. The game's handler still runs with native graphics off (a diagnostic). If the
+picture buffer is full and nothing was shown for 120 fields, the handler logs `[tmb:movie] stall: ...` (counts, the
+oldest tag's state, the field, the held flag, the decoder's state). Checked: the one-player route to 6500 frames (and
+with the stress setting, which no longer applies), the four-player route to 6500, the movies route to 4200 (pictures
+change between captures), the vehicle screen's movie delivering 30 pictures a second through the frame-4340 choice.

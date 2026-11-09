@@ -7,6 +7,11 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Rare hang when leaving a menu movie** (seen once on vehicle select): a movie could freeze after a long frame, and
+  the next menu choice then waited for its decoder forever. The movie player's vblank handler now runs natively.
+
 ## [0.4.0] - 2026-11-06
 
 ### Changed

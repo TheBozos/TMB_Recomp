@@ -15,7 +15,7 @@ under "Unreleased" as they land, then move them under the new version's heading 
   now runs as native C++. So do the hierarchy, collision, terrain, particle, camera, weapon and HUD calculations
   built on them; none of them goes through the recompiled vector-unit helper any more. Generated tests compare
   every one against the original arithmetic. Recorded one-player and four-player replays match the previous build
-  frame for frame.
+  on every frame's calls, draws, sound and timing. The only differences found were in unused scratch memory.
 - More of the graphics path is native: HUD and menu image builders, mesh shader parameters, screen and weather
   projection, texture inputs and upload completion. The game no longer emits per-object shader packets.
 - BozoEngine is updated to `4a8f70a`.

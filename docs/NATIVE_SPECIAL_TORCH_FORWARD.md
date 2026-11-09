@@ -1,5 +1,7 @@
 # Native launcher special-weapon torch forward transforms
 
+[The LoopTank batch](NATIVE_LOOPTANK_FORWARD.md) follows with its two segment points.
+
 Ten more `Launcher::UpdateSpecial` forward returns use native XYZ arithmetic after
 the [Ferris wheel and final boss batch](NATIVE_FERRIS_BOSS_FORWARD.md). Known forward
 coverage grows from 226 to 236 of 269 returns (33 remain). Known inverse coverage

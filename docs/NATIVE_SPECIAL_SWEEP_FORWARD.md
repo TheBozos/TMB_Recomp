@@ -1,5 +1,7 @@
 # Native launcher special-weapon forward transforms (type 100)
 
+[The held-aim and lock-on arc batch](NATIVE_SPECIAL_ARCS_FORWARD.md) follows with seven sites.
+
 Three more `Launcher::UpdateSpecial` forward returns use native XYZ arithmetic after
 the [second special-weapon batch](NATIVE_SPECIAL_VOLLEY_FORWARD.md). Known forward
 coverage grows from 206 to 209 of 269 returns (60 remain). Known inverse coverage

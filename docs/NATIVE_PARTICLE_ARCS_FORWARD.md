@@ -1,5 +1,7 @@
 # Native particle arc forward transforms
 
+[FinalBoss gun-shot forwards](NATIVE_BOSS_SHOTS_FORWARD.md) follow with twelve boss sites.
+
 Two particle forward returns use native XYZ arithmetic after the
 [AI hunt and bait forwards](NATIVE_AI_BEAD_FORWARD.md). Known forward coverage grows
 from 180 to 182 of 269 returns (87 remain). Known inverse coverage stays 134 of 134;

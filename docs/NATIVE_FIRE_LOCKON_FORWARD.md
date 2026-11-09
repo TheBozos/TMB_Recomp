@@ -1,5 +1,7 @@
 # Native FireSpecial forward transforms (type a0 lock-on launch points)
 
+[The FireSpecial types c0/1e0/220 batch](NATIVE_FIRE_TORCH_FORWARD.md) follows with the last frame-output sites.
+
 Six more `Launcher::FireSpecial` forward returns use native XYZ arithmetic after the
 [first FireSpecial batch](NATIVE_FIRE_SPECIAL_FORWARD.md). Known forward coverage
 grows from 243 to 249 of 269 returns (20 remain). Known inverse coverage stays 134 of

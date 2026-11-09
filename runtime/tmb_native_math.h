@@ -10,7 +10,7 @@
 namespace tmb::math
 {
     // Audited XYZ-only consumers: collision queries, vehicle spatial records and hierarchy lighting/attachments.
-    inline constexpr std::array<uint32_t, 249> directionReturns{
+    inline constexpr std::array<uint32_t, 255> directionReturns{
         0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc, 0x11708c, 0x1880e0, 0x1d4284, 0x1d42e8, 0x1cb19c,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, // height-test collision/BSP results
         0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804, // line-of-sight BSP/volume results
@@ -80,7 +80,8 @@ namespace tmb::math
         0x14f190, 0x14f1c4, 0x14f3e8, 0x14f654, 0x14f68c, 0x14f72c, 0x14f954, 0x14fb7c, 0x14fbb8, 0x14fc24, // UpdateSpecial torches
         0x151c08, 0x151c18, // LoopTank segment points
         0x1499d4, 0x149bb8, 0x149c28, 0x149d8c, 0x149e14, // FireSpecial types 20, 40, 60
-        0x14a4d4, 0x14a518, 0x14a73c, 0x14a780, 0x14a98c, 0x14a9d0}; // FireSpecial type a0 lock-on launch points
+        0x14a4d4, 0x14a518, 0x14a73c, 0x14a780, 0x14a98c, 0x14a9d0, // FireSpecial type a0 lock-on launch points
+        0x14acf0, 0x14b3ec, 0x14b424, 0x14b618, 0x14b65c, 0x14b670}; // FireSpecial types c0, 1e0, 220
 
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };

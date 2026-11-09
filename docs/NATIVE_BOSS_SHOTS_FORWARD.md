@@ -1,5 +1,7 @@
 # Native FinalBoss gun-shot forward transforms
 
+[FinalBoss movement forwards](NATIVE_BOSS_MOVE_FORWARD.md) follow with the boss's two movement sites.
+
 Twelve FinalBoss forward returns use native XYZ arithmetic after the
 [particle arc forwards](NATIVE_PARTICLE_ARCS_FORWARD.md). Known forward coverage
 grows from 182 to 194 of 269 returns (75 remain). Known inverse coverage stays 134

@@ -1,5 +1,7 @@
 # Native launcher special-weapon forward transforms (first batch)
 
+[The second special-weapon batch](NATIVE_SPECIAL_VOLLEY_FORWARD.md) follows with vehicle types 1c0 and 140.
+
 Five `Launcher::UpdateSpecial` forward returns use native XYZ arithmetic after the
 [FinalBoss movement forwards](NATIVE_BOSS_MOVE_FORWARD.md). Known forward coverage
 grows from 196 to 201 of 269 returns (68 remain). Known inverse coverage stays 134

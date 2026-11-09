@@ -1,5 +1,7 @@
 # Native combo-launch forward transforms
 
+[Zoomies and HalTrans weapon forwards](NATIVE_ZOOMIES_HAL_FORWARD.md) follow with four more weapon sites.
+
 Five combo forward returns use native XYZ arithmetic after the
 [tire-pair correction forwards](NATIVE_TIRE_ROTATION_FORWARD.md). Known forward
 coverage grows from 169 to 174 of 269 returns (95 remain). Known inverse coverage

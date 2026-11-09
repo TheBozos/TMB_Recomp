@@ -1,5 +1,7 @@
 # Native HUD laser forward transforms
 
+[The BlowDebris batch](NATIVE_BLOW_DEBRIS_FORWARD.md) follows with the debris pieces' six sites.
+
 The two `Hud::BuildLaserStuff` forward returns use native XYZ arithmetic after the
 [UpdateLauncher batch](NATIVE_UPDATE_LAUNCHER_FORWARD.md). Known forward coverage
 grows from 258 to 260 of 269 returns (9 remain). Known inverse coverage stays 134 of

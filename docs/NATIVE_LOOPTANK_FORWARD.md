@@ -1,5 +1,7 @@
 # Native LoopTank forward transforms
 
+[The first FireSpecial batch](NATIVE_FIRE_SPECIAL_FORWARD.md) follows with vehicle types 20, 40 and 60.
+
 The two `LoopTank::update` forward returns use native XYZ arithmetic after the
 [special-weapon torch batch](NATIVE_SPECIAL_TORCH_FORWARD.md). Known forward coverage
 grows from 236 to 238 of 269 returns (31 remain). Known inverse coverage stays 134 of

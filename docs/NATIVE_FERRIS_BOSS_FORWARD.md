@@ -1,5 +1,7 @@
 # Native Ferris wheel and final boss hit-test forward transforms
 
+[The special-weapon torch batch](NATIVE_SPECIAL_TORCH_FORWARD.md) follows with the last ten UpdateSpecial sites.
+
 Four more hit-test forward returns use native XYZ arithmetic after the
 [weapon hit-test batch](NATIVE_WEAPON_HIT_FORWARD.md). Known forward coverage grows
 from 222 to 226 of 269 returns (43 remain). Known inverse coverage stays 134 of 134;

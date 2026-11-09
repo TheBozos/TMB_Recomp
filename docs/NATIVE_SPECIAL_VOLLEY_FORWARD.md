@@ -1,5 +1,7 @@
 # Native launcher special-weapon forward transforms (second batch)
 
+[The type-100 special-weapon batch](NATIVE_SPECIAL_SWEEP_FORWARD.md) follows with three sweep sites.
+
 Five more `Launcher::UpdateSpecial` forward returns use native XYZ arithmetic after
 the [first special-weapon batch](NATIVE_SPECIAL_GUNS_FORWARD.md). Known forward
 coverage grows from 201 to 206 of 269 returns (63 remain). Known inverse coverage

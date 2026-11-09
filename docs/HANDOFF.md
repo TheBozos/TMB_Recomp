@@ -15,6 +15,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_SPECIAL_SWEEP_FORWARD.md`](NATIVE_SPECIAL_SWEEP_FORWARD.md) adds the three type-100 special-weapon forwards.
 [`NATIVE_SPECIAL_VOLLEY_FORWARD.md`](NATIVE_SPECIAL_VOLLEY_FORWARD.md) adds the second batch of launcher special-weapon forwards.
 [`NATIVE_SPECIAL_GUNS_FORWARD.md`](NATIVE_SPECIAL_GUNS_FORWARD.md) adds the first five launcher special-weapon forwards.
 [`NATIVE_BOSS_MOVE_FORWARD.md`](NATIVE_BOSS_MOVE_FORWARD.md) adds the two FinalBoss movement forwards.
@@ -30,7 +31,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 [`NATIVE_BLIMP_DEATH_FORWARD.md`](NATIVE_BLIMP_DEATH_FORWARD.md) adds the sinking blimp drift and explosion forwards.
 [`NATIVE_GASTANK_FORWARD.md`](NATIVE_GASTANK_FORWARD.md) adds the rolling and falling gas tank forwards.
 [`NATIVE_FLYER_FORWARD.md`](NATIVE_FLYER_FORWARD.md) adds the junk jet and blimp flight forwards.
-Coverage is 206/269 known forward returns (63 remain), with 134/134 known inverse returns native.
+Coverage is 209/269 known forward returns (60 remain), with 134/134 known inverse returns native.
 
 [`NATIVE_HELI_DEATH_FORWARD.md`](NATIVE_HELI_DEATH_FORWARD.md) adds the two falling-helicopter forwards.
 Coverage is 150/269 known forward returns (119 remain), with 134/134 known inverse returns native.

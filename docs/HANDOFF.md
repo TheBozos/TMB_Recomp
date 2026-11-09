@@ -15,6 +15,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_PERSISTENT_FORWARD.md`](NATIVE_PERSISTENT_FORWARD.md) adds the last three forwards: 269/269 forward returns are native.
 [`NATIVE_BLOW_DEBRIS_FORWARD.md`](NATIVE_BLOW_DEBRIS_FORWARD.md) adds the BlowDebris forwards (one dead-W-slot RAM hash difference, proven).
 [`NATIVE_HUD_LASER_FORWARD.md`](NATIVE_HUD_LASER_FORWARD.md) adds the HUD laser forwards.
 [`NATIVE_UPDATE_LAUNCHER_FORWARD.md`](NATIVE_UPDATE_LAUNCHER_FORWARD.md) adds the UpdateLauncher forwards.

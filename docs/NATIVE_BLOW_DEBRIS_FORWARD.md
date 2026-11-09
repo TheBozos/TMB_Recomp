@@ -1,5 +1,7 @@
 # Native BlowDebris forward transforms
 
+[The last three persistent-field sites](NATIVE_PERSISTENT_FORWARD.md) complete the forward coverage.
+
 The six `DebrisStuff::BlowDebris` forward returns use native XYZ arithmetic after the
 [HUD laser batch](NATIVE_HUD_LASER_FORWARD.md). Known forward coverage grows from 260
 to 266 of 269 returns (3 remain). Known inverse coverage stays 134 of 134; BozoEngine

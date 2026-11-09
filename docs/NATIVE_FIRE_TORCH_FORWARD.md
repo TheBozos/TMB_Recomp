@@ -1,5 +1,7 @@
 # Native FireSpecial forward transforms (types c0, 1e0, 220)
 
+[The UpdateLauncher batch](NATIVE_UPDATE_LAUNCHER_FORWARD.md) follows with its three aim and muzzle points.
+
 Six more `Launcher::FireSpecial` forward returns use native XYZ arithmetic after the
 [FireSpecial type a0 batch](NATIVE_FIRE_LOCKON_FORWARD.md). Known forward coverage
 grows from 249 to 255 of 269 returns (14 remain). Known inverse coverage stays 134 of

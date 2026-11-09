@@ -15,6 +15,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_HUD_LASER_FORWARD.md`](NATIVE_HUD_LASER_FORWARD.md) adds the HUD laser forwards.
 [`NATIVE_UPDATE_LAUNCHER_FORWARD.md`](NATIVE_UPDATE_LAUNCHER_FORWARD.md) adds the UpdateLauncher forwards.
 [`NATIVE_FIRE_TORCH_FORWARD.md`](NATIVE_FIRE_TORCH_FORWARD.md) adds the FireSpecial types c0/1e0/220 forwards.
 [`NATIVE_FIRE_LOCKON_FORWARD.md`](NATIVE_FIRE_LOCKON_FORWARD.md) adds the FireSpecial type a0 lock-on forwards.

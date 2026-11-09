@@ -10,7 +10,7 @@
 namespace tmb::math
 {
     // Audited XYZ-only consumers: collision queries, vehicle spatial records and hierarchy lighting/attachments.
-    inline constexpr std::array<uint32_t, 260> directionReturns{
+    inline constexpr std::array<uint32_t, 266> directionReturns{
         0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc, 0x11708c, 0x1880e0, 0x1d4284, 0x1d42e8, 0x1cb19c,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, // height-test collision/BSP results
         0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804, // line-of-sight BSP/volume results
@@ -83,7 +83,8 @@ namespace tmb::math
         0x14a4d4, 0x14a518, 0x14a73c, 0x14a780, 0x14a98c, 0x14a9d0, // FireSpecial type a0 lock-on launch points
         0x14acf0, 0x14b3ec, 0x14b424, 0x14b618, 0x14b65c, 0x14b670, // FireSpecial types c0, 1e0, 220
         0x147a8c, 0x147cc8, 0x147cf4, // UpdateLauncher aim and muzzle points
-        0x142640, 0x1426cc}; // HUD laser sight points
+        0x142640, 0x1426cc, // HUD laser sight points
+        0x120788, 0x120838, 0x1208dc, 0x1209a0, 0x120b28, 0x120c3c}; // BlowDebris piece offsets and velocities
 
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };

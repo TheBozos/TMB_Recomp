@@ -10,7 +10,7 @@
 namespace tmb::math
 {
     // Audited XYZ-only consumers: collision queries, vehicle spatial records and hierarchy lighting/attachments.
-    inline constexpr std::array<uint32_t, 206> directionReturns{
+    inline constexpr std::array<uint32_t, 209> directionReturns{
         0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc, 0x11708c, 0x1880e0, 0x1d4284, 0x1d42e8, 0x1cb19c,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, // height-test collision/BSP results
         0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804, // line-of-sight BSP/volume results
@@ -72,7 +72,8 @@ namespace tmb::math
         0x11091c, 0x110a0c, 0x110adc, 0x110d9c, 0x110e8c, 0x110f74,
         0x111788, 0x111cc4, // FinalBoss movement and death-roll position steps
         0x14dc44, 0x14dccc, 0x14dea8, 0x14df2c, 0x14e020, // UpdateSpecial launch points (vehicle types 60, 120, c0)
-        0x14ee10, 0x14ee2c, 0x14ee48, 0x14ef50, 0x14ef80}; // UpdateSpecial volley and launch points (vehicle types 1c0, 140)
+        0x14ee10, 0x14ee2c, 0x14ee48, 0x14ef50, 0x14ef80, // UpdateSpecial volley and launch points (vehicle types 1c0, 140)
+        0x14eb9c, 0x14ec04, 0x14ec70}; // UpdateSpecial type-100 sweep points and aimed position
 
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };

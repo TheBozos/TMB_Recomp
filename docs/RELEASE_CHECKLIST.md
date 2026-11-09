@@ -3,6 +3,15 @@
 Use a scratch `PS2X_USER_DIR` for every automated run. Keep game data and generated code out of Git and release ZIPs.
 Publication is separate from a successful build; this checklist records what was actually verified.
 
+v0.5.0 was published on 2026-11-09 after tagged CI and the owner's release request. Its draft assets were checked
+locally before publication:
+- both player ZIPs pass the SHA-256 and package audits, carry an identical 7,889-file payload, and are stamped with
+  the release commit and engine `4a8f70a`;
+- a fresh install in a path with spaces and accents was built offline from the disc with only the bundled kit. The
+  build was stopped and resumed, then the game played and exited normally, with menu/movie timing passing;
+- the published v0.4.0 install was updated by its own updater, rebuilt and played;
+- the v0.3.2 updater accepted the migration ZIP. Player data was kept in both update cases.
+
 v0.4.0 was published on 2026-11-06 after tagged CI, asset/hash audits and the owner's release request.
 The released portable package was updated, rebuilt and played locally with a scratch user folder. Unchecked items
 remain documented limitations; publication does not turn them into passing checks. See [HANDOFF.md](HANDOFF.md).

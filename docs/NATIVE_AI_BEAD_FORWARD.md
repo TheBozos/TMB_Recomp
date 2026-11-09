@@ -1,5 +1,7 @@
 # Native AI hunt and bait forward transforms
 
+[Particle arc forwards](NATIVE_PARTICLE_ARCS_FORWARD.md) follow with the two particle arc sites.
+
 Two AI-driving forward returns use native XYZ arithmetic after the
 [Zoomies and HalTrans weapon forwards](NATIVE_ZOOMIES_HAL_FORWARD.md). Known forward
 coverage grows from 178 to 180 of 269 returns (89 remain). Known inverse coverage

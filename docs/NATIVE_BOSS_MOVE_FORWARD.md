@@ -1,5 +1,7 @@
 # Native FinalBoss movement forward transforms
 
+[Launcher special-weapon forwards, first batch](NATIVE_SPECIAL_GUNS_FORWARD.md) follow with five UpdateSpecial sites.
+
 Two FinalBoss movement forward returns use native XYZ arithmetic after the
 [FinalBoss gun-shot forwards](NATIVE_BOSS_SHOTS_FORWARD.md). Known forward coverage
 grows from 194 to 196 of 269 returns (73 remain). Known inverse coverage stays 134

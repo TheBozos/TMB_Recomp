@@ -15,6 +15,7 @@ The earlier v0.3.2 release remains in Git history and on GitHub for comparison; 
 
 ## Architecture and build
 
+[`NATIVE_LOOPTANK_FORWARD.md`](NATIVE_LOOPTANK_FORWARD.md) adds the LoopTank segment forwards.
 [`NATIVE_SPECIAL_TORCH_FORWARD.md`](NATIVE_SPECIAL_TORCH_FORWARD.md) adds the special-weapon torch forwards (UpdateSpecial complete).
 [`NATIVE_FERRIS_BOSS_FORWARD.md`](NATIVE_FERRIS_BOSS_FORWARD.md) adds the Ferris wheel and final boss hit-test forwards.
 [`NATIVE_WEAPON_HIT_FORWARD.md`](NATIVE_WEAPON_HIT_FORWARD.md) adds the RockHD/RicoHD hit-test forwards and the hd/DispatchHit W audit.

@@ -10,7 +10,7 @@
 namespace tmb::math
 {
     // Audited XYZ-only consumers: collision queries, vehicle spatial records and hierarchy lighting/attachments.
-    inline constexpr std::array<uint32_t, 236> directionReturns{
+    inline constexpr std::array<uint32_t, 238> directionReturns{
         0x168b30, 0x1cd618, 0x1cda54, 0x1cdabc, 0x11708c, 0x1880e0, 0x1d4284, 0x1d42e8, 0x1cb19c,
         0x1cfd18, 0x1cfde8, 0x1d0224, 0x1d0250, // height-test collision/BSP results
         0x1d25ec, 0x1d261c, 0x1d2784, 0x1d2804, // line-of-sight BSP/volume results
@@ -77,7 +77,8 @@ namespace tmb::math
         0x14ed94, 0x14e2d0, 0x14e320, 0x14e498, 0x14e4dc, 0x14e6a8, 0x14e6ec, // type-100 held aim, type-a0 lock-on arc ends
         0x1b6cd8, 0x1b6d3c, 0x1b5168, 0x1b52c0, 0x1b5528, 0x1b5630, // RockHD and RicoHD hit-test points
         0x12a6d8, 0x12a930, 0x12a9e8, 0x11201c, // Ferris wheel and FinalBoss hit-test points
-        0x14f190, 0x14f1c4, 0x14f3e8, 0x14f654, 0x14f68c, 0x14f72c, 0x14f954, 0x14fb7c, 0x14fbb8, 0x14fc24}; // UpdateSpecial torches
+        0x14f190, 0x14f1c4, 0x14f3e8, 0x14f654, 0x14f68c, 0x14f72c, 0x14f954, 0x14fb7c, 0x14fbb8, 0x14fc24, // UpdateSpecial torches
+        0x151c08, 0x151c18}; // LoopTank segment points
 
     struct alignas(16) Vector { std::array<uint32_t, 4> bits{}; };
     struct Matrix { std::array<Vector, 4> column{}; };

@@ -93,6 +93,10 @@ namespace tmb::textures
     uint32_t idAtTbp(uint32_t tbp);
     std::string nameAt(uint32_t address);
 }
+namespace tmb::textures::dump
+{
+    bool enabled();
+}
 
 namespace tmb::native
 {
@@ -249,6 +253,48 @@ namespace tmb::meshes
                 return v;
             }
         };
+
+        // The textures of every object of the loaded NGP files (TMB_TEXTURE_DUMP): each slot's texture number (obj + 0x50)
+        // and the TEX0 in its register block (obj + 0x70 + 0x30 * slot), looked up as a draw of it would be.
+        void dumpLoadedObjects(const uint8_t *rdram)
+        {
+            const auto u16 = [&](uint32_t a) { uint16_t v; std::memcpy(&v, rdram + (a & 0x1ffffffu), 2); return v; };
+            const auto u32 = [&](uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & 0x1ffffffu), 4); return v; };
+            const auto u64 = [&](uint32_t a) { uint64_t v; std::memcpy(&v, rdram + (a & 0x1ffffffu), 8); return v; };
+            uint64_t objects = 0, slots = 0, found = 0;
+            g_loaded.forEach([&](const bozo::render::packs::LoadedImages::Image &image)
+                             {
+                                 if (!image.file)
+                                     return true;
+                                 for (const bozo::render::packs::MeshObject &object : image.file->objects)
+                                 {
+                                     const uint32_t obj = image.base + object.offset;
+                                     ++objects;
+                                     const uint32_t count = std::min<uint32_t>(u16(obj + 0x5au), 5u);
+                                     for (uint32_t slot = 0; slot < count; ++slot)
+                                     {
+                                         const uint32_t block = obj + 0x70u + 0x30u * slot;
+                                         for (uint32_t q = 0; q < 3u; ++q)
+                                             if ((u32(block + q * 16u + 8u) & 0xffu) == 0x06u) // TEX0_1
+                                             {
+                                                 ++slots;
+                                                 if (tmb::textures::lookupId(u16(obj + 0x50u + 2u * slot), u64(block + q * 16u), 0u))
+                                                     ++found;
+                                                 break;
+                                             }
+                                     }
+                                 }
+                                 return true;
+                             });
+            static uint64_t s_lastFound = ~0ull;
+            if (found != s_lastFound)
+            {
+                s_lastFound = found;
+                std::fprintf(stderr, "[tmb:texdump] loaded objects: %llu, texture slots %llu, %llu looked up\n",
+                             static_cast<unsigned long long>(objects), static_cast<unsigned long long>(slots),
+                             static_cast<unsigned long long>(found));
+            }
+        }
 
         // ---- per object ----
 
@@ -1784,6 +1830,11 @@ namespace tmb::meshes
             }
             else
                 ++it;
+        // TMB_TEXTURE_DUMP (runtime/tmb_texture_dump.cpp): every 250 frames, the textures of every object in the loaded
+        // NGP files, drawn or not, through the same lookup as their draws (their slots' texture numbers and TEX0), so a
+        // dump covers a whole arena and the cars loaded, not only what the camera saw.
+        if (g_rdramForDump && g_frame % 250u == 125u && tmb::textures::dump::enabled())
+            dumpLoadedObjects(g_rdramForDump);
         // TMB_NATIVE_MESHES_DUMP=<file>,<frame>: EE memory at that frame (a diagnostic, to compare the loaded NGP
         // images with the disc's offline).
         if (static const char *s_dump = std::getenv("TMB_NATIVE_MESHES_DUMP"); s_dump && g_rdramForDump)

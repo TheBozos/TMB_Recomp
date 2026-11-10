@@ -36,8 +36,20 @@ takes precedence over texture upscaling, which still covers textures without one
 
 **Making a pack from your own disc:**
 
-1. Play with `TMB_TEXTURE_DUMP=1` (or `=<folder>`) through the arenas and cars you want. Each texture is written
-   once to `texture_dump` as `<identity>.png`, with `index.tsv`.
+1. Dump the textures. `TMB_TEXTURE_DUMP=1` (or `=<folder>`) writes each texture once as `<identity>.png`, with
+   `index.tsv`. Every 250 frames it also writes every texture of every object in the loaded mesh files, drawn or
+   not, so one match covers its whole arena and the cars loaded. For everything at once, run:
+   ```bash
+   python tools/tmb_texture_dump_all.py <build>/tmb-headless.exe <disc.iso> <dump folder>
+   ```
+   It runs headless through:
+   - the 21 story levels (`TMB_STORY_LEVEL`, with every arena, the bosses and the story's cars);
+   - the four-player route;
+   - two Challenge matches with other opponents.
+
+   On the USA disc that is 2,261 textures, all arenas and every AI car. The player-only versions of the cars other
+   than the tow truck (`xxP` files) are not loaded by these runs; about 10% of each car's textures differ from its
+   AI version, and the engine's texture upscaling covers those.
 2. Get Real-ESRGAN's ncnn-vulkan build yourself (xinntao/Real-ESRGAN, BSD-3-Clause; release v0.2.5.0,
    `realesrgan-ncnn-vulkan-20220424-windows.zip`).
 3. Make the pack:
@@ -46,8 +58,14 @@ takes precedence over texture upscaling, which still covers textures without one
    ```
    The tool needs Python with numpy and Pillow. It upscales 4x with `realesrgan-x4plus` over borders taken from
    the opposite edges, so repeating textures stay seamless, then adds the original's fine grain back, because the
-   model flattens gravel and rust. It keeps the GS alpha convention, keeps cut-out alpha sharp, and leaves out
-   textures under 32 texels. With `PS2X_TEXTURE_PACK_RELOAD=1`, changed files are drawn again while playing.
+   model flattens gravel and rust.
+   - **Alpha:** keeps the GS alpha convention. See-through areas stay exactly see-through: the visible shape is
+     smoothed, a few-level alpha is snapped back to its levels, and nothing spills into transparent texels.
+   - **Flat areas** (a texel equal to its 8 neighbours) are kept exactly, so a black background stays black.
+   - **Left out:** the menus and the font (`--skip`, default `SHELL1,FONT`) are left to the engine's upscaling,
+     because the model garbles small lettering. Textures under 32 texels are left out too.
+
+   With `PS2X_TEXTURE_PACK_RELOAD=1`, changed files are drawn again while playing.
 
 Packs are the player's own: never commit, ship or share them.
 
@@ -69,6 +87,29 @@ Packs are the player's own: never commit, ship or share them.
   Before BozoEngine's upload budget (12 MB of larger copies per present), 1P at 4x upscaling fell to 31 presents/s
   for about 20 s while the arena's copies arrived. One of three 4P pack + 4x runs had a single 237 ms gap at a
   moment when no texture was sent; the other two did not.
+
+**Full pack** (all arenas and cars, `tmb_texture_dump_all.py` then `tmb_texture_upscale.py`):
+- The dump takes about 10 minutes with 3 headless jobs. The pack has 2,164 replacements (609 MB of PNGs) and
+  takes about 4 minutes, 85 s of it in Real-ESRGAN.
+- Final timing, bench lock held, game fps min / avg after the level load:
+
+  | Scene | Off | Pack + 4x upscaling |
+  |---|---|---|
+  | Junkyard 1P route | 59.63 / 60.00 | 59.57 / 60.02 |
+  | Suburbs | 59.91 / 60.00 | 59.40 / 59.98 |
+  | Downtown | 59.66 / 60.01 | 59.91 / 60.00 |
+  | Prison | 49.33 / 59.27 | 47.83 / 58.65 |
+  | 4P | 59.57 / 59.89 | 59.08, 59.51, 59.96 / 60.00 (three runs) |
+
+  Prison's story route dips below 60 with everything off too; in an earlier pair the pack run was the better one.
+  Downtown and 4P show occasional present-only stutters (the game stays at 60) with or without a pack, with no
+  texture uploads at those moments. That is an existing presentation issue, separate from textures.
+- Two fixes came out of this:
+  - The engine's texture workers run at the lowest thread priority.
+  - The engine no longer makes an upscaled copy of a texture whose replacement is being read.
+- **The menu hints bug:** "select" and "back" were drawn over dark boxes. The model tinted their black background
+  and bicubic alpha spread into transparent texels. Fixed by the flat and alpha rules above and by leaving the
+  menus to the engine.
 
 **What it looks like:** ground, walls, rust and decals gain real detail, and edges are clean. The model can invent
 shapes from blurred stripes, for example "teeth" on one truck's radiator panel. Hand-fixing a file and reloading is

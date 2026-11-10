@@ -16,6 +16,7 @@ namespace tmb::math { bool hudInstruction(uint8_t *, R5900Context *, Runtime *, 
 namespace tmb::math { bool vehicleInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
 namespace tmb::math { bool contactInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
 namespace tmb::math { bool cameraInstruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
+namespace tmb::stackSwitch { bool instruction(uint8_t *, R5900Context *, Runtime *, uint32_t); }
 
 namespace tmb::graphics
 {
@@ -69,6 +70,7 @@ namespace tmb::graphics
 
         bool instruction(uint8_t *ram, R5900Context *ctx, Runtime *rt, uint32_t pc)
         {
+            if (tmb::stackSwitch::instruction(ram, ctx, rt, pc)) return true;
             if (tmb::scene::instruction(ram, ctx, rt, pc)) return true;
             if (tmb::packets::instruction(ram, ctx, rt, pc)) return true;
             if (tmb::textureInputs::instruction(ram, ctx, rt, pc)) return true;

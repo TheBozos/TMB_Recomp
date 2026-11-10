@@ -87,8 +87,8 @@ forwards for velocity reconstruction, forces, impact offsets and morph hit place
 Coverage is 119/269 known forward returns (150 remain), with 134/134 known inverses native.
 
 Native graphics DMA/register removal: implementation and validation details are in
-[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `4a8f70a`, including native graphics completion
-and the current shared native port services. The published v0.4.0 package remains the earlier release described above.
+[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `db7591c` (see the bump note below), including native graphics
+completion and the current shared native port services. The published v0.4.0 package remains the earlier release described above.
 
 The player runtime's two camera matrix products now use typed native records without VU context state.
 [`NATIVE_MATH.md`](NATIVE_MATH.md) records exact helper/default-run comparisons, the traced HUD position.W
@@ -255,6 +255,27 @@ reader state and TMB's old packet-based flare adapter, independent/combined test
 - Native frame pacing is unconditional. A legacy `TMB_NATIVE_FRAMES=0` environment setting cannot bypass it.
 - Heat haze defaults on, as requested. `BOZO_HEAT_HAZE=0` is the comparison switch.
 - Existing cards/settings keep their format and `%APPDATA%\TMB_Recomp` location. Agent runs must set a scratch `PS2X_USER_DIR`.
+
+## BozoEngine `db7591c`: owned handler stacks and texture upscaling (2026-11-10)
+
+The pin moved from `4a8f70a` to engine main `db7591c` (232 commits). The bump brings SC3's texture upscaling (engine
+PR #83: `texture_upscale` off/2x/4x, `texture_filter` edge/smooth, in the Video tab) and VP2S's owned handler stacks
+(engine PR #75): native callbacks run on the interrupted thread's own stack, below its live SP.
+
+That second change needed two fixes:
+- TMB's crt0 calls `SetupThread(0x8ff800, 0)` (a top, no size). Engine PR #85 declares the 1 MB below such a top.
+- TMB's hand-written code uses SP as data: `hierTraverseAsm` saves it at `s0 + 0x270`, sets it to 0 at `0x1d5450`,
+  and restores it at `0x1d5718` and `0x1d5734` (a delay slot); `sysSetSp`/`sysRestoreSp` switch it.
+  `runtime/tmb_stack_switch.cpp` parks the real SP with the kernel at each switch and resumes it once restored.
+
+Validation (headless, private user folders; evidence in `D:/BozoScratch/texture-upscaling`):
+- Compared with the previous pin, the 1P route (9,500 frames, `ch1p_frames.txt`) and the actual 4P route
+  (8,500 frames) match on every frame for draws, scratchpad, calls, threads and EE cycles.
+- Sound hashes differ on frames 1595, 1596, 1603 and 1611 only (menu), with equal sample counts throughout.
+- RAM differs from frame 4, because callback frames now live on the game's stack rather than at `0x1ffxxxx`.
+- Windowed 1P runs at off/2x/4x and a 4P run at 4x complete. Captures show the copyright movie, the menus, the
+  arena and four views.
+- At 4x, the 1P route kept about 250 MB of copies (25 ms of worker time each); at 2x, 64 MB (7 ms each).
 
 ## Validation recorded in this continuation
 

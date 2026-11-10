@@ -4,8 +4,31 @@ This document covers where TMB's textures come from in the native renderer, and 
 runs. It compares the upscaling options and their legal limits, and gives a staged plan. It also documents the
 first step that exists now: a texture dump behind an environment switch (`TMB_TEXTURE_DUMP`).
 
-Main is `777f964` (release 0.5.0) and BozoEngine is pinned at `4a8f70a`. Everything here concerns the USA build
-in native graphics mode. Nothing in this plan routes through GS emulation or the historical checker.
+The investigation was written against main `777f964` (release 0.5.0) and BozoEngine `4a8f70a`. Everything here
+concerns the USA build in native graphics mode. Nothing in this plan routes through GS emulation or the historical
+checker.
+
+## Status (2026-11-10): runtime upscaling is in the game
+
+BozoEngine already had option B below as a renderer feature: the Soulcalibur III port's
+[engine PR #83](https://github.com/TheBozos/BozoEngine/pull/83). TMB gets it with the pin at `db7591c` and needs
+no code of its own, because `decodeRecord` marks every pack texture as an asset.
+
+- **Settings:** `texture_upscale = off|2x|4x` and `texture_filter = edge|smooth` in `video.ini`, the F2 Video tab,
+  or `PS2X_TEXTURE_UPSCALE` / `PS2X_TEXTURE_FILTER`. It is off by default.
+- **Filters:** the filters are the engine's own MIT code, written from published method descriptions (no
+  GPL xBR/xBRZ code).
+- **Where it applies:** upscaling is present-side only, so the draw-list digests and replays do not change.
+  Mip levels shift so that minified sampling is unchanged.
+- **Measured on TMB's 1P route (windowed, RTX 5070 Ti):**
+  - 4x kept about 250 MB of copies, made in 25 ms of worker time each.
+  - 2x kept 64 MB, made in 7 ms each.
+- **What it looks like:** edges of painted detail (grille bars, rust, decals) are smoother and less blocky. No
+  detail is invented: it is filtering, not the offline AI path (option A).
+
+The plan below still holds for option A, an opt-in pack upscaled offline on the player's PC. Its loader would now
+sit next to the engine's upscaler in `present_gl.cpp`, keyed by the same identity. Step 3 (sampling and mip
+levels) is covered by the engine's mip-level work.
 
 ## 1. Where textures come from
 

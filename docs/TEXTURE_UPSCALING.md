@@ -26,6 +26,28 @@ no code of its own, because `decodeRecord` marks every pack texture as an asset.
 - **What it looks like:** edges of painted detail (grille bars, rust, decals) are smoother and less blocky. No
   detail is invented: it is filtering, not the offline AI path (option A).
 
+## For players: the launcher's "Enhanced textures"
+
+The launcher's Settings tab has an **Enhanced textures (AI)** section. It is opt-in, works from the player's own disc on
+their PC, and nothing of the game is downloaded or shipped.
+
+1. **Make enhanced textures** runs `tools/tmb_texture_enhance.py` with the kit's Python:
+   - the staged `game/tmb-headless.exe` dumps every arena and car (`tools/tmb_texture_dump_all.py`, its pad scripts
+     in `tools/texture_dump/`);
+   - the staged `game/tmb-texture-pack.exe` (`bozo/tmb_texture_pack.cpp`, the native counterpart of
+     `tools/tmb_texture_upscale.py`) upscales them with the kit's Real-ESRGAN (`kit/realesrgan`, from
+     `tools/make_build_kit.py`'s `realesrgan` step: the pinned upstream release zip, with its licences);
+   - the result goes into `texture_pack.new`, which replaces `<user folder>\texture_pack`. The dump and work
+     folders are then removed.
+2. Progress shows per step, with **Stop**: a stopped run goes on where it stopped next time. **Remove** deletes the
+   pack, and **In the game: on/off** writes `video.ini`'s `texture_pack`. The game's own F2 → Video has the same
+   switch.
+3. On this PC (RTX 5070 Ti) the launcher made 2,162 replacements in 5 min 10 s. Run-to-run counts vary by a few
+   textures (2,161 to 2,164).
+
+`tools/tmb_build.py` builds and stages the two tools with the game (the compile and stage steps). A release whose kit
+has no `realesrgan/` greys the button out with a note.
+
 ## Status (2026-11-10, later): AI texture packs (option A)
 
 The engine reads **texture replacements**

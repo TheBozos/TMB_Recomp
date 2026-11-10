@@ -127,13 +127,13 @@ jobs:
           MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
         run: python tools/make_build_kit.py --install-packages --msys "$MSYS2_ROOT" --downloads "$WORK/downloads"
 
-      - name: Build kit (toolchain, Python, SDL3 and ImGui sources, FFmpeg)
+      - name: Build kit (toolchain, Python, SDL3 and ImGui sources, FFmpeg, Real-ESRGAN)
         env:
           MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
           FFMPEG_CACHED: ${{ steps.ffmpeg.outputs.cache-hit }}
         run: |
           set -eu
-          steps="--only toolchain --only python --only deps"
+          steps="--only toolchain --only python --only deps --only realesrgan"
           if [ "$FFMPEG_CACHED" != true ]; then steps="$steps --only ffmpeg"; fi
           python tools/make_build_kit.py --out "$WORK/kit" --msys "$MSYS2_ROOT" --downloads "$WORK/downloads" \
             --work "$WORK/kit-work" $steps --only manifest

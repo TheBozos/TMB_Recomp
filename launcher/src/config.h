@@ -3,6 +3,7 @@
 // The launcher's own settings (launcher.ini in the user folder) and the game's window settings (video.ini there, in
 // the format of the fork's ps2xRuntime/src/lib/ps2_video_settings.cpp: the runner reads it when its window opens).
 
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,6 +31,11 @@ struct VideoConfig
     std::string renderScale = "1";
     int gsScale = 1;
     bool exists = false;
+    // The game's other keys (frame_rate, texture_upscale, texture_filter, texture_pack...), written back as they were.
+    std::map<std::string, std::string> others;
+    // texture_pack: "off" turns the player's texture pack off; unset, the game uses texture_pack in the user folder.
+    bool texturePackOff() const { auto it = others.find("texture_pack"); return it != others.end() && it->second == "off"; }
+    void setTexturePackOff(bool off) { if (off) others["texture_pack"] = "off"; else others.erase("texture_pack"); }
 
     bool load(const std::string &file);
     bool save(const std::string &file) const;

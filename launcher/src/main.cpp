@@ -402,6 +402,15 @@ struct App
     std::thread downloader;
     plat::Process installer;
 
+    // -- enhanced textures: an AI-upscaled texture pack made on this PC from the player's own disc
+    // (tools/tmb_texture_enhance.py: the staged headless game dumps the textures, tmb-texture-pack upscales them with the
+    // kit's Real-ESRGAN into <user>\texture_pack). Nothing is downloaded or shipped.
+    plat::Process enhancer;
+    bool enhancing = false, enhanceRemoving = false, enhanceFinished = false; // finished: its "done" line seen
+    std::string enhanceStep, enhanceError, enhanceNotice;
+    unsigned long long enhanceDone = 0, enhanceTotal = 0;
+    int packFiles = -1; // texture_pack's replacements (-1: not counted yet)
+
     ~App()
     {
         updateCancel = true; // a download stops at its next block
@@ -643,6 +652,100 @@ struct App
     void saveConfig() { cfg.save(p.launcherIni); }
 
     std::vector<std::string> pythonArgs() const { return {"-I", "-X", "utf8", p.script}; }
+
+    // -- enhanced textures
+
+    std::string packDir() const { return plat::str(plat::path(p.user) / L"texture_pack"); }
+    bool hasRealEsrgan() const
+    {
+        return exists(plat::str(plat::path(p.kit) / L"realesrgan" / L"realesrgan-ncnn-vulkan.exe")) &&
+               exists(plat::str(plat::path(p.source) / L"tools" / L"tmb_texture_enhance.py"));
+    }
+    void countPack()
+    {
+        packFiles = 0;
+        std::error_code ec;
+        for (fs::directory_iterator it(plat::path(packDir()), ec), end; !ec && it != end; it.increment(ec))
+            if (it->path().extension() == L".png")
+                ++packFiles;
+    }
+
+    void startEnhance(bool remove)
+    {
+        if (enhancing || building)
+            return;
+        std::vector<std::string> args = {"-I", "-X", "utf8", plat::str(plat::path(p.source) / L"tools" / L"tmb_texture_enhance.py"),
+                                         "--user", p.user};
+        if (remove)
+            args.push_back("--remove");
+        else
+            args.insert(args.end(), {"--game", p.game, "--kit", p.kit});
+        enhanceStep.clear();
+        enhanceError.clear();
+        enhanceNotice.clear();
+        enhanceDone = enhanceTotal = 0;
+        enhanceFinished = false;
+        std::string error;
+        if (!enhancer.start(p.python, args, p.source, true, error))
+        {
+            enhanceError = std::string(L("It could not start: ", "Impossible de démarrer : ")) + error;
+            return;
+        }
+        enhancing = true;
+        enhanceRemoving = remove;
+    }
+
+    void cancelEnhance()
+    {
+        if (!enhancing)
+            return;
+        enhancer.kill();
+        enhancing = false;
+        enhanceNotice = L("Stopped. Make them again to go on where it stopped.",
+                          "Arrêté. Relancez pour reprendre là où ça s'est arrêté.");
+    }
+
+    void pollEnhance()
+    {
+        if (!enhancing)
+            return;
+        auto feed = [&](const std::string &line)
+        {
+            unsigned long long a = 0, b = 0;
+            if (line.rfind("step ", 0) == 0)
+            {
+                enhanceStep = line.substr(5);
+                enhanceDone = enhanceTotal = 0;
+            }
+            else if (line.rfind("progress ", 0) == 0 && std::sscanf(line.c_str() + 9, "%llu %llu", &a, &b) == 2)
+            {
+                enhanceDone = a;
+                enhanceTotal = b;
+            }
+            else if (line.rfind("error ", 0) == 0)
+                enhanceError = line.substr(6);
+            else if (line.rfind("done ", 0) == 0)
+                enhanceFinished = true;
+        };
+        for (const std::string &line : enhancer.takeLines())
+            feed(line);
+        if (enhancer.running())
+            return;
+        enhancer.drain(2000);
+        for (const std::string &line : enhancer.takeLines())
+            feed(line);
+        enhancing = false;
+        countPack();
+        if (enhancer.exitCode() == 0 && enhanceFinished)
+        {
+            enhanceNotice = enhanceRemoving ? L("Removed: the game uses its own textures.", "Supprimées : le jeu utilise ses propres textures.")
+                                            : L("Done. The game uses them the next time it starts.",
+                                                "Terminé. Le jeu les utilisera au prochain démarrage.");
+            enhanceError.clear();
+        }
+        else if (enhanceError.empty())
+            enhanceError = std::string(L("It stopped (exit code ", "Arrêt (code ")) + std::to_string(enhancer.exitCode()) + ").";
+    }
 
     // -- the disc
 
@@ -1274,6 +1377,73 @@ static void drawReady(App &app, float inner)
     }
 }
 
+// Enhanced textures: make (or remove) the AI texture pack, and turn it on or off (video.ini's texture_pack).
+static void drawEnhancedTextures(App &app, float inner)
+{
+    if (app.packFiles < 0)
+        app.countPack();
+    ui::text(L("Enhanced textures (AI)", "Textures améliorées (IA)"), 17, ui::color::inkFaint);
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + inner);
+    ui::textWrapped(L("Every arena and car upscaled with Real-ESRGAN, on this PC, from your own disc: about 15 minutes "
+                      "(up to an hour on older graphics cards), 700 MB, Vulkan needed. Nothing is downloaded or sent.",
+                      "Chaque arène et véhicule agrandis avec Real-ESRGAN, sur ce PC, depuis votre disque : environ 15 minutes "
+                      "(jusqu'à une heure sur les cartes anciennes), 700 Mo, Vulkan requis. Rien n'est téléchargé ni envoyé."),
+                    15, ui::color::inkDim);
+    ImGui::PopTextWrapPos();
+    gap(6);
+    if (app.enhancing)
+    {
+        const char *what = app.enhanceRemoving               ? L("Removing\xE2\x80\xA6", "Suppression\xE2\x80\xA6")
+                           : app.enhanceStep == "dump"       ? L("Reading the textures of every arena and car\xE2\x80\xA6",
+                                                                 "Lecture des textures de chaque arène et véhicule\xE2\x80\xA6")
+                           : app.enhanceStep == "upscale"    ? L("Upscaling with Real-ESRGAN\xE2\x80\xA6", "Agrandissement avec Real-ESRGAN\xE2\x80\xA6")
+                           : app.enhanceStep == "finish"     ? L("Writing the textures\xE2\x80\xA6", "Écriture des textures\xE2\x80\xA6")
+                                                             : L("Preparing\xE2\x80\xA6", "Préparation\xE2\x80\xA6");
+        ui::text(what, 17, ui::color::ink);
+        ui::progressBar(app.enhanceTotal ? static_cast<float>(static_cast<double>(app.enhanceDone) / static_cast<double>(app.enhanceTotal)) : 0.0f,
+                        ImVec2(inner, S(14)), app.time);
+        if (!app.enhanceRemoving && ui::button(L("Stop##enhance", "Arrêter##enhance"), ImVec2(S(160), S(36)), ui::Kind::Danger, true, 17))
+            app.cancelEnhance();
+        return;
+    }
+    const bool ready = app.built() && !app.building && !app.gameRunning && app.hasRealEsrgan();
+    if (ui::button(app.packFiles > 0 ? L("Make again##enhance", "Refaire##enhance") : L("Make enhanced textures##enhance", "Créer les textures améliorées##enhance"),
+                   ImVec2(app.packFiles > 0 ? S(130) : S(290), S(36)), app.packFiles > 0 ? ui::Kind::Normal : ui::Kind::Primary, ready, 17))
+        app.startEnhance(false);
+    if (app.packFiles > 0)
+    {
+        ImGui::SameLine(0, S(10));
+        if (ui::button(L("Remove##enhance", "Supprimer##enhance"), ImVec2(S(130), S(36)), ui::Kind::Normal, !app.gameRunning, 17))
+            app.startEnhance(true);
+        ImGui::SameLine(0, S(12));
+        const bool on = !app.video.texturePackOff();
+        char id[96];
+        std::snprintf(id, sizeof(id), "%s##packon", on ? L("In the game: on", "Dans le jeu : oui") : L("In the game: off", "Dans le jeu : non"));
+        if (ui::pill(id, on, 17))
+        {
+            app.video.setTexturePackOff(on);
+            app.video.save(app.p.videoIni);
+            app.video.exists = true;
+        }
+    }
+    if (!app.hasRealEsrgan())
+        ui::text(L("This release's build kit has no Real-ESRGAN.", "Le kit de cette version n'a pas Real-ESRGAN."), 15, ui::color::inkFaint);
+    else if (!app.built())
+        ui::text(L("Prepare the game first.", "Préparez d'abord le jeu."), 15, ui::color::inkFaint);
+    else if (app.packFiles > 0 && app.enhanceError.empty() && app.enhanceNotice.empty()) // a result replaces the count
+    {
+        const std::string count = std::to_string(app.packFiles) + L(" enhanced textures, in your user folder.",
+                                                                    " textures améliorées, dans votre dossier utilisateur.");
+        ui::text(count.c_str(), 15, ui::color::inkFaint);
+    }
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + inner);
+    if (!app.enhanceError.empty())
+        ui::textWrapped(app.enhanceError.c_str(), 15, ui::color::early);
+    else if (!app.enhanceNotice.empty())
+        ui::textWrapped(app.enhanceNotice.c_str(), 15, ui::color::good);
+    ImGui::PopTextWrapPos();
+}
+
 static void drawSettings(App &app, float inner)
 {
     heading(L("Settings", "Réglages"));
@@ -1285,6 +1455,8 @@ static void drawSettings(App &app, float inner)
     gap(10);
     VideoConfig &v = app.video;
     bool changed = false;
+    const ImVec2 columns = ImGui::GetCursorPos(); // Window and Resolution on the left, Enhanced textures on the right
+    const float half = inner * 0.5f;
     ui::text(L("Window", "Fenêtre"), 17, ui::color::inkFaint);
     const char *modes[3] = {"windowed", "fullscreen", "borderless"};
     const char *modeNames[3] = {L("Windowed", "Fenêtré"), L("Full screen", "Plein écran"), L("Borderless window", "Fenêtre sans bordure")};
@@ -1350,6 +1522,12 @@ static void drawSettings(App &app, float inner)
     if (v.exists)
         ui::text(L("Saved. The game uses it the next time it starts.", "Enregistré. Le jeu l'utilisera au prochain démarrage."), 16,
                  ui::color::good);
+    const float leftBottom = ImGui::GetCursorPosY();
+    ImGui::SetCursorPos(ImVec2(columns.x + half + S(12), columns.y));
+    ImGui::BeginGroup();
+    drawEnhancedTextures(app, half - S(12));
+    ImGui::EndGroup();
+    ImGui::SetCursorPos(ImVec2(columns.x, std::max(leftBottom, ImGui::GetItemRectMax().y - ImGui::GetWindowPos().y + ImGui::GetScrollY())));
     gap(12);
     ui::text(L("Launcher", "Lanceur"), 17, ui::color::inkFaint);
     if (ui::pill("English##en", !g_fr, 18))
@@ -1614,7 +1792,7 @@ static void drawFrame(App &app)
 struct Selftest
 {
     std::string iso, shots, wrong;
-    bool errorDemo = false, cancel = false, screensOnly = false;
+    bool errorDemo = false, cancel = false, screensOnly = false, enhanceOnly = false;
     bool failed = false;
     double playSeconds = 40, crashSeconds = 0;
     std::FILE *log = nullptr;
@@ -1660,6 +1838,31 @@ struct Selftest
                 }};
     }
 
+    // --enhance (a test): Settings, then Make enhanced textures, its progress and its end, then quit.
+    void buildEnhance()
+    {
+        steps.push_back({"settings", [](App &app, double) { app.tab = Tab::Settings; return true; }});
+        steps.push_back(shot("e1-settings", 0.5));
+        steps.push_back({"make", [this](App &app, double)
+                         {
+                             app.startEnhance(false);
+                             say("enhance started: %s", app.enhancing ? "yes" : app.enhanceError);
+                             return true;
+                         }});
+        steps.push_back({"dumping", [](App &app, double t) { return (app.enhanceStep == "dump" && app.enhanceDone > 0) || !app.enhancing || t > 600; }});
+        steps.push_back(shot("e2-dumping"));
+        steps.push_back({"upscaling", [](App &app, double t) { return app.enhanceStep == "upscale" || !app.enhancing || t > 3600; }});
+        steps.push_back(shot("e3-upscaling", 3.0));
+        steps.push_back({"finished", [](App &app, double t) { return !app.enhancing || t > 3600; }});
+        steps.push_back(shot("e4-done", 0.5));
+        steps.push_back({"quit", [this](App &app, double)
+                         {
+                             say("enhance: %s textures, %s", std::to_string(app.packFiles), app.enhanceError.empty() ? "ok: " + app.enhanceNotice : "error: " + app.enhanceError);
+                             app.quit = true;
+                             return true;
+                         }});
+    }
+
     // --screens: the three tabs as they are now (a layout check at a --ui-scale, the update notice), then quit.
     void buildScreens()
     {
@@ -1699,6 +1902,11 @@ struct Selftest
         if (screensOnly)
         {
             buildScreens();
+            return;
+        }
+        if (enhanceOnly)
+        {
+            buildEnhance();
             return;
         }
         steps.push_back(shot("01-welcome", 1.5));
@@ -2020,7 +2228,7 @@ static int selfCheck(const std::string &release, const std::string &file, const 
 int main(int argc, char **argv)
 {
     std::string release, selftestIso, shots, wrong;
-    bool errorDemo = false, cancel = false, screensOnly = false;
+    bool errorDemo = false, cancel = false, screensOnly = false, enhanceOnly = false;
     double playSeconds = 40, crashSeconds = 0;
     float uiScale = 0;
     std::string updateUrl, selfCheckFile, reportPath, downloadPrefix;
@@ -2050,6 +2258,8 @@ int main(int argc, char **argv)
             crashSeconds = std::atof(next().c_str());
         else if (a == "--screens")
             screensOnly = true;
+        else if (a == "--enhance") // a test (with --selftest): Settings' Make enhanced textures, to its end
+            enhanceOnly = true;
         else if (a == "--ui-scale") // a test: the layout at another DPI scale (1.5 = Windows' 150 %)
             uiScale = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--update-url") // a test: another address answering as GitHub's latest-release API
@@ -2105,6 +2315,7 @@ int main(int argc, char **argv)
         test.playSeconds = playSeconds;
         test.crashSeconds = crashSeconds;
         test.screensOnly = screensOnly;
+        test.enhanceOnly = enhanceOnly;
         test.log = _wfopen((plat::path(test.shots) / L"selftest.log").c_str(), L"w");
         test.t0 = plat::now();
         test.say("release %s, user folder %s", app.p.release, app.p.user);
@@ -2125,6 +2336,7 @@ int main(int argc, char **argv)
         app.pollCheck();
         app.pollBuild();
         app.pollUpdate();
+        app.pollEnhance();
         if (updateNow && app.updateStep == App::UpdateStep::Idle)
         {
             std::string version, tag;

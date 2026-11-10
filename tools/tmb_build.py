@@ -95,6 +95,9 @@ STEPS = ['verify', 'extract', 'configure', 'tools', 'recompile', 'packs', 'compi
 # FetchContent sources (BozoEngine's runtime/CMakeLists.txt): <name>-src in the kit's deps/.
 FETCH_NAMES = ['sdl3', 'imgui']
 GAME_EXE = 'tmb'
+# Staged next to the game for the launcher's optional "Enhance textures" step (tools/tmb_texture_enhance.py): the
+# headless runner dumps the player's textures, tmb-texture-pack makes them into a pack with the kit's Real-ESRGAN.
+TOOL_EXES = ['tmb-headless', 'tmb-texture-pack']
 EXE = '.exe' if os.name == 'nt' else ''
 KIT_MANIFEST = 'kit_manifest.json'
 
@@ -633,7 +636,7 @@ class Build:
         self.cmake_build_targets('tmb_packs', percent=ninja_percent)
 
     def step_compile(self):
-        self.cmake_build_targets(GAME_EXE, percent=ninja_percent)
+        self.cmake_build_targets(GAME_EXE, *TOOL_EXES, percent=ninja_percent)
 
     def exe_path(self):
         return os.path.join(self.cmake_build, GAME_EXE + EXE)
@@ -657,6 +660,18 @@ class Build:
             for dll in runtime_dlls(exe, [os.path.dirname(exe), self.find_toolchain()]):
                 shutil.copy2(dll, os.path.join(self.game, os.path.basename(dll)))
                 staged.append(dll)
+        for tool in TOOL_EXES:
+            src, dst = os.path.join(self.cmake_build, tool + EXE), os.path.join(self.game, tool + EXE)
+            if not os.path.isfile(src):
+                raise BuildError('no %s at %s' % (tool, src))
+            if os.path.exists(dst):
+                os.remove(dst)
+            if self.args.debug_info == 'no' and os.path.isfile(strip):
+                self.run([strip, '--strip-debug', '-o', dst, src])
+                shutil.copystat(src, dst)
+            else:
+                shutil.copy2(src, dst)
+            staged.append(src)
         shutil.copy2(self.elf(), os.path.join(self.game, ELF_NAME))
         for name in ('tmb_textures.pack', 'tmb_meshes.pack'):
             shutil.copy2(os.path.join(self.cmake_build, 'packs', name), os.path.join(self.game, name))
@@ -683,7 +698,8 @@ class Build:
                        'build_type': self.args.build_type, 'debug_info': self.args.debug_info,
                        'toolchain': self.find_toolchain(), 'kit': self.kit, 'exe': name,
                        'files': [os.path.basename(p) for p in staged]}, f, indent=1)
-        emit('INFO', 'stage', '%s, %.1f MB, %d DLLs staged' % (name, os.path.getsize(dest) / 1e6, len(staged) - 1))
+        emit('INFO', 'stage', '%s, %.1f MB, %d DLLs and %d tools staged'
+             % (name, os.path.getsize(dest) / 1e6, sum(1 for p in staged if p.lower().endswith('.dll')), len(TOOL_EXES)))
 
     def write_built_from(self):
         """<game>/built_from.ini: the release stamp (<TMB_Recomp>/release.ini, written by tools/make_release.py) of the

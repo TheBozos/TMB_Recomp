@@ -20,11 +20,14 @@ The kit (tmb_build uses it when it sits in <TMB_Recomp>/kit or next to the TMB_R
   deps/        <name>-src: the FetchContent sources BozoEngine's CMake files pin (the same release archives, the same
                SHA-256), unpacked: sdl3-src (SDL 3.4.20) and imgui-src (Dear ImGui v1.92.7-docking, b1bcb12a)
   python/      the Windows embeddable Python (python.org, pinned, SHA-256 checked)
+  realesrgan/  Real-ESRGAN's ncnn-vulkan program, its OpenMP runtime and the realesrgan-x4plus model (the upstream
+               release zip, pinned, SHA-256 checked): the launcher's optional "Enhance textures" step upscales the
+               player's own textures with it on their PC (tools/tmb_texture_enhance.py; nothing of the game ships)
   sources/     the FFmpeg tarball the kit's FFmpeg is built from (LGPL: its corresponding source)
   licenses/    each package's license files (licenses/deps/<name>: SDL3's zlib licence, ImGui's MIT)
   kit_manifest.json   versions, sources, hashes, licenses, sizes
 
-Steps (--only <step> runs one): toolchain, python, deps, ffmpeg, manifest; then --zip.
+Steps (--only <step> runs one): toolchain, python, deps, ffmpeg, realesrgan, manifest; then --zip.
 
 The toolchain's MSYS2 packages are pinned in tools/build_kit_packages.json (committed): the packages the kit is made of
 and every package they depend on, each with its exact version, its file on repo.msys2.org and that file's SHA-256. The
@@ -55,7 +58,7 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 from tmb_build import pe_imports, cmake_rc_flags  # noqa: E402
 
-KIT_VERSION = 2  # 2: BozoEngine (SDL3 and ImGui sources, no prebuilt recompilers, no swscale)
+KIT_VERSION = 3  # 2: BozoEngine (SDL3 and ImGui sources, no prebuilt recompilers, no swscale); 3: + realesrgan/
 
 # ---- pinned downloads (official upstream; a mirror of ours only as a fallback, held to the same SHA-256) ----
 FFMPEG = {
@@ -74,6 +77,26 @@ PYTHON = {
     'url': 'https://www.python.org/ftp/python/3.14.10/python-3.14.10-embed-amd64.zip',
     'sha256': '90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159',
     'license': 'PSF-2.0',
+}
+# Real-ESRGAN (xinntao/Real-ESRGAN): the ncnn-vulkan build of its release v0.2.5.0, of which the kit keeps the program,
+# vcomp140.dll (Microsoft's OpenMP runtime it loads, Visual C++ redistributable) and the realesrgan-x4plus model. The zip
+# carries no licence file: the licences come from the upstream repositories at pinned commits.
+REALESRGAN = {
+    'version': 'v0.2.5.0 (realesrgan-ncnn-vulkan 20220424)',
+    'url': 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip',
+    'sha256': 'abc02804e17982a3be33675e4d471e91ea374e65b70167abc09e31acb412802d',
+    'keep': ['realesrgan-ncnn-vulkan.exe', 'vcomp140.dll', 'models/realesrgan-x4plus.bin', 'models/realesrgan-x4plus.param'],
+    'license': 'MIT (realesrgan-ncnn-vulkan) and BSD-3-Clause (Real-ESRGAN, its model; ncnn); vcomp140.dll: Microsoft '
+               'Visual C++ redistributable',
+    'licenses': [
+        {'file': 'Real-ESRGAN-ncnn-vulkan-LICENSE',
+         'url': 'https://raw.githubusercontent.com/xinntao/Real-ESRGAN-ncnn-vulkan/37026f49824c5cf84062e7c6a5dd71445dcf610f/LICENSE',
+         'sha256': '5abb941454de437b0e90d78dcb72e3688f74e14bcd4e24393273cb5cd0e9c937'},
+        {'file': 'Real-ESRGAN-LICENSE', 'url': 'https://raw.githubusercontent.com/xinntao/Real-ESRGAN/v0.2.5.0/LICENSE',
+         'sha256': '4a699ec4863d96a91fc265948a0c90033f7e8735d515524dcf3444736406e0c2'},
+        {'file': 'ncnn-LICENSE.txt', 'url': 'https://raw.githubusercontent.com/Tencent/ncnn/20220420/LICENSE.txt',
+         'sha256': '6495f972a09ad7f64ccd953e79adba91a93d862edc7135e6d95210bbf4002a01'},
+    ],
 }
 # FetchContent sources: the release archives BozoEngine's CMake files pin (runtime/CMakeLists.txt: URL and URL_HASH),
 # unpacked as deps/<name>-src for tmb_build's FETCHCONTENT_SOURCE_DIR_<NAME>. 'top': the archive's top folder.
@@ -240,7 +263,7 @@ def run(cmd, cwd=None, env=None, logfile=None):
 
 def download(spec, downloads):
     os.makedirs(downloads, exist_ok=True)
-    path = os.path.join(downloads, spec['url'].rsplit('/', 1)[1])
+    path = os.path.join(downloads, spec.get('file') or spec['url'].rsplit('/', 1)[1])
     if not (os.path.isfile(path) and sha256_file(path) == spec['sha256']):
         # A few tries, further apart each time: an upstream site sometimes drops or times out a CI runner's connection
         # (GitHub's release runs start with an empty download cache: a tag's run cannot read another tag's cache).
@@ -606,6 +629,30 @@ class Kit:
         self.part('python', dict(PYTHON, file=os.path.basename(z)))
         log('  python %s' % out.strip())
 
+    # -- realesrgan
+
+    def step_realesrgan(self):
+        z = download(REALESRGAN, self.downloads)
+        dst = os.path.join(self.out, 'realesrgan')
+        rmtree(dst)
+        with zipfile.ZipFile(z) as zf:
+            names = set(zf.namelist())
+            for keep in REALESRGAN['keep']:
+                if keep not in names:
+                    raise KitError('%s: %s is not in the zip' % (os.path.basename(z), keep))
+                target = os.path.join(dst, *keep.split('/'))
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with zf.open(keep) as src, open(target, 'wb') as out:
+                    shutil.copyfileobj(src, out)
+        lic = self.licenses_dir('realesrgan')
+        for spec in REALESRGAN['licenses']:
+            shutil.copy2(download(spec, self.downloads), os.path.join(lic, spec['file']))
+        with open(os.path.join(lic, 'vcomp140.txt'), 'w', encoding='utf-8', newline='\n') as f:
+            f.write('vcomp140.dll is Microsoft\'s OpenMP runtime, part of the Visual C++ Redistributable, shipped in the '
+                    'Real-ESRGAN release zip next to the program that loads it.\n')
+        self.part('realesrgan', {k: v for k, v in REALESRGAN.items() if k != 'licenses'})
+        log('  realesrgan %s' % REALESRGAN['version'])
+
     # -- deps
 
     def step_deps(self):
@@ -721,9 +768,9 @@ class Kit:
     # -- manifest
 
     def step_manifest(self):
-        parts = {n: self.part(n) for n in ('toolchain', 'python', 'deps', 'ffmpeg')}
+        parts = {n: self.part(n) for n in ('toolchain', 'python', 'deps', 'ffmpeg', 'realesrgan')}
         sizes = {}
-        for d in ('ucrt64', 'ffmpeg', 'deps', 'python', 'sources', 'licenses'):
+        for d in ('ucrt64', 'ffmpeg', 'deps', 'python', 'realesrgan', 'sources', 'licenses'):
             sizes[d] = dir_size(os.path.join(self.out, d))[0]
         manifest = {
             'kit': 'TMB_Recomp build kit', 'kit_version': KIT_VERSION, 'engine': 'BozoEngine',
@@ -734,9 +781,11 @@ class Kit:
                 'ffmpeg': 'static FFmpeg: avcodec (mpeg2video decoder, mpegvideo parser), avutil',
                 'deps': '<name>-src FetchContent sources: sdl3 (SDL 3.4.20), imgui (Dear ImGui b1bcb12a)',
                 'python': 'Windows embeddable Python',
+                'realesrgan': 'Real-ESRGAN ncnn-vulkan and its realesrgan-x4plus model (the optional texture step)',
                 'sources': 'FFmpeg source tarball',
                 'licenses': 'license files per component'},
             'toolchain': parts['toolchain'], 'ffmpeg': parts['ffmpeg'], 'python': parts['python'],
+            'realesrgan': parts['realesrgan'],
             'deps': parts['deps'], 'bytes': sizes, 'total_bytes': sum(sizes.values()),
             'licenses': {
                 'gcc': 'GPL-3.0-or-later; the runtime libraries it links into a program (libgcc, libstdc++, '
@@ -749,6 +798,7 @@ class Kit:
                 'ffmpeg': 'LGPL-2.1-or-later, configured without --enable-gpl / --enable-version3 / '
                           '--enable-nonfree; its source in sources/',
                 'python': 'PSF-2.0',
+                'realesrgan': REALESRGAN['license'],
                 'deps': {d['name']: d['license'] for d in DEPS},
                 'gpl_source_note': 'GCC, binutils and the other MSYS2 binaries are redistributed unmodified: their '
                                    'corresponding sources are the MSYS2 source packages of the versions listed in '
@@ -1085,7 +1135,7 @@ def write_pc(path, lib, version, mk):
                 % (lib, lib, version, lib, private))
 
 
-STEPS = ['toolchain', 'python', 'deps', 'ffmpeg', 'manifest']
+STEPS = ['toolchain', 'python', 'deps', 'ffmpeg', 'realesrgan', 'manifest']
 
 
 def main():

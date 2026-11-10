@@ -105,6 +105,10 @@ bool VideoConfig::load(const std::string &file)
         renderScale = v["render_scale"];
     if (!v["gs_scale"].empty())
         gsScale = std::clamp(std::atoi(v["gs_scale"].c_str()), 1, 4);
+    others.clear();
+    for (const auto &[key, value] : v)
+        if (key != "size" && key != "mode" && key != "render_scale" && key != "gs_scale" && !value.empty())
+            others[key] = value;
     return true;
 }
 
@@ -122,6 +126,8 @@ bool VideoConfig::save(const std::string &file) const
     text += "mode = " + mode + "\n";
     text += "render_scale = " + renderScale + "\n";
     text += "gs_scale = " + std::to_string(gsScale) + "\n";
+    for (const auto &[key, value] : others) // the game's own settings (frame_rate, texture_upscale...): kept
+        text += key + " = " + value + "\n";
     return writeAtomically(file, text);
 }
 

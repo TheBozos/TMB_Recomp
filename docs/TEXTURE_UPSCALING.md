@@ -65,13 +65,13 @@ takes precedence over texture upscaling, which still covers textures without one
    python tools/tmb_texture_dump_all.py <build>/tmb-headless.exe <disc.iso> <dump folder>
    ```
    It runs headless through:
-   - the 21 story levels (`TMB_STORY_LEVEL`, with every arena, the bosses and the story's cars);
+   - the 21 story levels (`TMB_STORY_LEVEL`, with every arena, the bosses and the story's cars). Level n's player
+     picks the car n RIGHT presses along on the car-select screen, so levels 0 to 14 load the 15 player-only car
+     versions (`PCAR/xxP` files; about 10% of each car's textures differ from its AI version);
    - the four-player route;
    - two Challenge matches with other opponents.
 
-   On the USA disc that is 2,261 textures, all arenas and every AI car. The player-only versions of the cars other
-   than the tow truck (`xxP` files) are not loaded by these runs; about 10% of each car's textures differ from its
-   AI version, and the engine's texture upscaling covers those.
+   On the USA disc that is 2,289 textures (2,175 replacements in the pack): all arenas, every AI car and every player car.
 2. Get Real-ESRGAN's ncnn-vulkan build yourself (xinntao/Real-ESRGAN, BSD-3-Clause; release v0.2.5.0,
    `realesrgan-ncnn-vulkan-20220424-windows.zip`).
 3. Make the pack:

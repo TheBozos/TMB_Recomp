@@ -3,15 +3,15 @@
 (docs/TEXTURE_UPSCALING.md; then tools/tmb_texture_upscale.py). Headless runs of the native build, each with its own
 user folder under <work>, TMB_UNLOCK_ALL=1 and TMB_TEXTURE_DUMP=<dump>:
 
-- the 21 story levels (TMB_STORY_LEVEL=0..20 on BozoEngine's reference story script): every arena, the player's tow
-  truck, the bosses and the AI cars the story brings;
+- the 21 story levels (TMB_STORY_LEVEL=0..20 on BozoEngine's reference story script): every arena, the bosses and the
+  AI cars the story brings. Level n's player drives the car n RIGHT presses from the first on the car-select screen,
+  so levels 0 to 14 load the 15 player-only versions (xxP: about 10% of each car's textures differ from its AI
+  version);
 - the actual four-player route (BozoEngine's reference p1..p4 scripts, player 1's intro press dropped, as
   docs/HANDOFF.md describes): the AI versions four players drive;
 - two Challenge matches in the Junkyard with other opponents (AXA, HSA, RLA, TKA, TXA).
 
 Each run's dump covers every object of the NGP files loaded (runtime/tmb_meshes.cpp's dumpLoadedObjects), drawn or not.
-Not covered: the player-only versions of the other cars (xxP: about 10% of each car's textures differ from its AI
-version), which only a 1P match with that car loads.
 
   tools/tmb_texture_dump_all.py <tmb-headless> <disc .iso> <dump folder> [--work <folder>] [--jobs 3]
 """
@@ -25,6 +25,22 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 # The pad scripts (button timings, copied from BozoEngine's reference/tmb/scripts, which a release leaves out).
 SCRIPTS = os.path.join(ROOT, 'tools', 'texture_dump')
 COMPLETE = 'complete' # in the dump folder once every run finished
+PLAYER_CARS = 15 # the car-select screen's cars with every car unlocked (TTP, PCP, SUP, MGP, RKP, DCP, SPP, SIP, HSP,
+                 # TXP, AXP, TKP, RLP, STP, B1P), then the list wraps
+
+
+def story(text, rights, at=3790, step=45, pick=3934):
+    """The story script with `rights` RIGHT presses on the car-select screen (shown from frame 3744 to the pick at
+    3934 in tmb-headless), every press from the pick on moved later to make room."""
+    shift = rights * step
+    out = []
+    for entry in text.strip().split(','):
+        frame, press = entry.split(':')
+        frame = int(frame)
+        out.append((frame + shift if frame >= pick else frame, press))
+    out += [(at + i * step, 'RIGHT/12') for i in range(rights)]
+    out.sort(key=lambda e: e[0])
+    return ','.join(f'{f}:{p}' for f, p in out) + '\n', shift
 
 
 def challenge(opponent_rights, end=330.0):
@@ -60,8 +76,15 @@ def dump_all(headless, iso, dump, work, jobs=3, report=print, elf=None):
         text = f.read()
     with open(p1, 'w', encoding='utf-8') as f:
         f.write(text.replace('1292:CROSS/18,', '', 1))
-    runs = [(f'story{n}', {'TMB_STORY_LEVEL': str(n), 'TMB_PLAYER_GOD': '1'}, 7000,
-             ['--pad-script', os.path.join(SCRIPTS, 'story_frames.txt')]) for n in range(21)]
+    with open(os.path.join(SCRIPTS, 'story_frames.txt'), encoding='utf-8') as f:
+        text = f.read()
+    runs = []
+    for n in range(21):
+        script, shift = story(text, n if n < PLAYER_CARS else 0)
+        path = os.path.join(work, f'story{n}.txt')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(script)
+        runs.append((f'story{n}', {'TMB_STORY_LEVEL': str(n), 'TMB_PLAYER_GOD': '1'}, 7000 + shift, ['--pad-script', path]))
     runs.append(('four-player', {}, 8500, ['--pad-script', '1=' + p1] +
                  [a for i in (2, 3, 4) for a in ('--pad-script', f'{i}={os.path.join(SCRIPTS, f"p{i}_frames.txt")}')]))
     for rights in (2, 4):

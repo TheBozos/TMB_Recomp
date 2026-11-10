@@ -9,6 +9,8 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ### Added
 
+- The texture dump now covers the player versions of every car (15 `PCAR` files, 28 more textures): each of
+  the first 15 story runs picks another car, so the dump takes no longer.
 - **Enhanced textures in the launcher** (Settings): one button makes the AI texture pack on your PC from your own disc
   (about 15 minutes with a recent graphics card, 700 MB), with progress, Stop and Remove, and an on/off switch there and
   in F2 → Video. Real-ESRGAN now comes in the build kit (its licences in `kit\licenses\realesrgan`); nothing of the game

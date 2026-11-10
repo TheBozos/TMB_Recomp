@@ -447,6 +447,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `PS2X_LOG_FILE=<file>\|0`, `PS2X_NO_DIALOGS=1`, `PS2X_TEST_CRASH=<s>` | Another log/none, suppress unattended dialogs, or intentionally test crash handling |
 | `TMB_CHEATS_LOG=1`, `TMB_CHEATS_TOGGLE=<s>` | Cheat diagnostics and periodic switching for tests |
 | `TMB_KILL_ENEMIES=<s>`, `TMB_PLAYER_HEALTH_CAP=<x>` | Test-only story progression or player-health cap; see the handoff's save-cheat comparison limit |
+| `TMB_TEXTURE_DUMP=1\|<folder>` | Write each texture the renderer gets once, as `<identity>.png` plus `index.tsv` (in `$PS2X_USER_DIR/texture_dump` for `1`); for building texture packs from your own disc, never to share ([`docs/TEXTURE_UPSCALING.md`](docs/TEXTURE_UPSCALING.md)) |
 
 The former GS/IOP/VIF interpreter switches are not alternate player engines in this tree. Native pacing remains
 active even if an old environment contains `TMB_NATIVE_FRAMES=0`.

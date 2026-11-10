@@ -20,6 +20,8 @@
 #include "bozo/render/texture.h"
 #include "bozo/render/texture_pack.h"
 #include "tmb_meshes.h"
+#include "tmb_texture_dump.h"
+#include "bozo/hash.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -85,6 +87,8 @@ namespace tmb::textures
             std::unordered_map<uint64_t, std::shared_ptr<const Texture>> decoded;
             uint64_t decodes = 0;
             const uint8_t *rdram = nullptr;
+            bool dump = false; // TMB_TEXTURE_DUMP (tmb_texture_dump.h): the records' origins kept for its index
+            std::unordered_map<const Record *, std::string> origin; // record -> "FILE#n"
         };
         Store &store()
         {
@@ -99,6 +103,7 @@ namespace tmb::textures
             s.loaded = true;
             const std::string pathText = tmb::meshes::packPath("TMB_TEXTURE_PACK", TMB_TEXTURE_PACK);
             const char *path = pathText.c_str();
+            s.dump = tmb::textures::dump::enabled();
             if (!s.pack.load(path))
             {
                 std::fprintf(stderr, "[tmb:tex] no texture pack at %s (tools/tmb_texture_pack.py): the native draws are untextured\n", path);
@@ -127,7 +132,38 @@ namespace tmb::textures
         // The n-th record of the listed files.
         const Record *nth(Store &s, const std::vector<std::string> &files, uint32_t n)
         {
-            return s.pack.nth(files, n);
+            const Record *r = s.pack.nth(files, n);
+            if (r && s.dump && !s.origin.count(r)) // which file and which of its records, for the dump's index
+            {
+                uint32_t left = n;
+                for (const std::string &name : files)
+                {
+                    const std::vector<Record> *records = s.pack.file(name);
+                    if (!records)
+                        break;
+                    if (left < records->size())
+                    {
+                        s.origin[r] = name + "#" + std::to_string(left);
+                        break;
+                    }
+                    left -= static_cast<uint32_t>(records->size());
+                }
+            }
+            return r;
+        }
+
+        std::string originOf(const Store &s, const Record *r)
+        {
+            if (!r)
+                return std::string();
+            const auto it = s.origin.find(r);
+            return it != s.origin.end() ? it->second : std::string("?");
+        }
+
+        uint64_t texelHash(const Record &r)
+        {
+            const uint32_t seed[3] = {r.psm, r.width, r.height};
+            return bozo::hash::xxh64(r.texels.data(), r.texels.size(), bozo::hash::xxh64(seed, sizeof(seed), 0));
         }
 
         void mismatch(const char *what, uint32_t n, const Record *r, uint32_t psm, uint32_t width, uint32_t height)
@@ -460,6 +496,10 @@ namespace tmb::textures
                                  texels->psm, palette ? palette->width : 0u, palette ? palette->height : 0u, palette ? palette->psm : 0u);
                 }
             }
+            if (s.dump)
+                tmb::textures::dump::note(texture, {tbp == s.fontTbp && font ? std::string("FONT#0") : originOf(s, texels),
+                                                    indexed(psm) ? (palette == fontPalette && palette ? std::string("FONT#1") : originOf(s, palette)) : std::string(),
+                                                    psm, tex0, texa, texelHash(*texels)});
             auto shared = std::make_shared<const Texture>(std::move(texture));
             s.decoded[key] = shared;
             return shared;
@@ -522,6 +562,8 @@ namespace tmb::textures
             bozo::render::csm1Position(texels.texels[i] & 0xfu, px, py);
             texture.rgba[i] = px < palette.width && py < palette.height ? colour(palette, py * palette.width + px, 0u) : 0u;
         }
+        if (s.dump)
+            tmb::textures::dump::note(texture, {"FONT#0", "FONT#1", texels.psm, 0u, 0u, texelHash(texels)});
         s_font = std::make_shared<const Texture>(std::move(texture));
         return s_font;
     }

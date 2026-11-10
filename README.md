@@ -392,7 +392,7 @@ use physical US positions:
 
 | Key | What it does |
 |---|---|
-| F2 | Settings: Controls (per-player buttons, sticks, triggers, mouse and sensitivity), Video (resolution, window mode, render scale and presentation frame rate), Cheats. Controls save to `input.ini`; video saves to `video.ini`. |
+| F2 | Settings: Controls (per-player buttons, sticks, triggers, mouse and sensitivity), Video (resolution, window mode, render scale, presentation frame rate and texture upscaling), Cheats. Controls save to `input.ini`; video saves to `video.ini`. |
 | F3 | Toggle the frame-rate counter. |
 | F11, Alt+Enter | Switch between the window and the last fullscreen mode. |
 | F8 | Capture consecutive presents (the sequence settings below). |
@@ -427,6 +427,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `PS2X_USER_DIR=<dir>` | Separate cards, settings, logs and crash reports; required for agent/unattended tests |
 | `PS2X_INPUT_CONFIG=<file>`, `PS2X_VIDEO_CONFIG=<file>` | Other controls/video configuration files |
 | `PS2X_WINDOW_SIZE=<w>x<h>`, `PS2X_WINDOW_MODE=windowed\|fullscreen\|borderless`, `PS2X_RENDER_SCALE=<x>` | Starting window mode, size and internal render scale, over `video.ini` |
+| `PS2X_TEXTURE_UPSCALE=off\|2x\|4x`, `PS2X_TEXTURE_FILTER=edge\|smooth`, `PS2X_TEXTURE_STATS=1` | Texture upscaling (off by default) and its filter, over `video.ini`; the stats log texture memory every 10 s |
 | `PS2X_FRAME_RATE=game\|monitor\|<n>` | Presentation at game rate, monitor rate or a fixed rate; higher rates interpolate without speeding up the game |
 | `PS2X_SHOW_FPS=1` | Show FPS at launch; F3 toggles it |
 | `PS2X_FRAME_STATS=1` | Game-thread work measurements independently of the cap |

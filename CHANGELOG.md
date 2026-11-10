@@ -7,6 +7,22 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+### Added
+
+- **Texture upscaling** (off by default): the game's textures can be drawn from 2x or 4x copies with an
+  edge-directed or smooth filter. Set it in F2's Video tab, or with `texture_upscale` / `texture_filter` in
+  `video.ini`. It is BozoEngine's renderer option, from the Soulcalibur III port; replays are unchanged by it.
+- `TMB_TEXTURE_DUMP=1|<folder>` writes each texture the renderer receives as a PNG named by its identity, for
+  texture-pack work from your own disc ([`docs/TEXTURE_UPSCALING.md`](docs/TEXTURE_UPSCALING.md)).
+
+### Changed
+
+- BozoEngine is updated to `db7591c`. Native callbacks now run on the game's own thread stack instead of a fixed
+  area at the top of RAM. TMB declares where its code uses the stack pointer as data (`hierTraverseAsm`,
+  `sysSetSp`/`sysRestoreSp`), so a callback taken there still finds the real stack. One-player and four-player
+  replays match the previous build on every frame's draws, scratchpad, calls, threads and timing. Sound differs on
+  four menu frames only, with equal sample counts.
+
 ## [0.5.0] - 2026-11-09
 
 ### Changed

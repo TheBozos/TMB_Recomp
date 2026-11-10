@@ -87,7 +87,7 @@ forwards for velocity reconstruction, forces, impact offsets and morph hit place
 Coverage is 119/269 known forward returns (150 remain), with 134/134 known inverses native.
 
 Native graphics DMA/register removal: implementation and validation details are in
-[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `563454e` (see the bump notes below), including native graphics
+[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `5032347` (see the bump notes below), including native graphics
 completion and the current shared native port services. The published v0.4.0 package remains the earlier release described above.
 
 The player runtime's two camera matrix products now use typed native records without VU context state.

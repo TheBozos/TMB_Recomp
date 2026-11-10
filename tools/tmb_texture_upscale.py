@@ -14,6 +14,8 @@ textures (docs/TEXTURE_UPSCALING.md). Nothing it reads or writes is part of the 
   back, scaled by --detail. Texels with no alpha get their neighbours' colour first, so no dark fringe bleeds in.
 - Alpha: bicubic over the same border. Two-valued alpha (cut-outs) is cut again at the midpoint, so edges stay sharp but
   follow the smoothed shape; otherwise held within the texture's own range, and values near opaque (128) snapped to it.
+- Flat areas (a texel equal to its 8 neighbours) are kept exactly: a black background stays black.
+- The menus and the font (--skip) are left to the engine's texture upscaling: the model garbles small lettering.
 - Textures smaller than --min-size on either side are left out (the model invents little from 8x8 or 16x16; the
   engine's own texture upscaling covers them when it is on).
 
@@ -67,16 +69,37 @@ def upscale_alpha(alpha):
     values = np.unique(alpha)
     if len(values) == 1:
         return np.full((h * SCALE, w * SCALE), values[0], np.uint8)
-    padded = Image.fromarray(wrap_pad(alpha, PAD).astype(np.uint8), 'L')
-    big = np.asarray(padded.resize((padded.width * SCALE, padded.height * SCALE), Image.BICUBIC), np.float32)
-    big = big[PAD * SCALE:(PAD + h) * SCALE, PAD * SCALE:(PAD + w) * SCALE]
+    def up(a):
+        padded = Image.fromarray(wrap_pad(a, PAD).astype(np.uint8), 'L')
+        big = np.asarray(padded.resize((padded.width * SCALE, padded.height * SCALE), Image.BICUBIC), np.float32)
+        return big[PAD * SCALE:(PAD + h) * SCALE, PAD * SCALE:(PAD + w) * SCALE]
+
+    big = up(alpha)
     if len(values) == 2:
         lo, hi = float(values[0]), float(values[1])
         return np.where(big >= (lo + hi) / 2, hi, lo).astype(np.uint8)
-    big = np.clip(big, float(values.min()), float(values.max()))
-    if 128 in values:
+    # Where the texture is see-through stays exactly so: the shape of its visible texels, smoothed and cut at half
+    # (bicubic alone spreads small alphas into transparent areas, which a blended draw shows as a dark box).
+    shape = up((alpha > 0).astype(np.uint8) * 255) >= 128 if values[0] == 0 else np.ones(big.shape, bool)
+    visible = values[values > 0]
+    big = np.clip(big, float(visible.min()), float(visible.max()))
+    if len(values) <= 4:
+        # A few levels (cut-outs, 0 / 127 / 255): each texel snapped to the nearest one.
+        big = visible[np.abs(big[..., None] - visible[None, None, :].astype(np.float32)).argmin(axis=-1)].astype(np.float32)
+    elif 128 in values:
         big[np.abs(big - 128) <= 2] = 128
-    return np.rint(big).astype(np.uint8)
+    return np.where(shape, np.rint(big), 0).astype(np.uint8)
+
+
+def flat(im):
+    """Texels equal to their 8 neighbours (colour and alpha, wrap-around), at the output size: kept exactly, so a
+    black or flat background stays as it was (the model and the grain would tint it, and a blended draw shows that)."""
+    a = im.astype(np.int16)
+    same = np.ones(a.shape[:2], bool)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            same &= (np.abs(np.roll(np.roll(a, dy, 0), dx, 1) - a) <= 1).all(axis=-1)
+    return np.kron(same, np.ones((SCALE, SCALE), bool))
 
 
 def detail(rgb, sigma):
@@ -98,6 +121,9 @@ def main():
     p.add_argument('--min-size', type=int, default=32)
     p.add_argument('--detail', type=float, default=1.0, help='how much of the original grain is added back (0: none)')
     p.add_argument('--work', help='scratch folder (default: <pack>/.work, removed after)')
+    p.add_argument('--skip', default='SHELL1,FONT',
+                   help="files whose textures are left to the engine's upscaling (comma-separated; default the menus and "
+                        "the font: the model garbles small lettering)")
     args = p.parse_args()
 
     models = args.models or os.path.join(os.path.dirname(os.path.abspath(args.esrgan)), 'models')
@@ -106,12 +132,15 @@ def main():
     for d in (args.pack, src_dir, out_dir):
         os.makedirs(d, exist_ok=True)
 
+    skip = {name.strip().upper().split('.')[0] for name in args.skip.split(',') if name.strip()}
     with open(os.path.join(args.dump, 'index.tsv'), encoding='utf-8') as f:
         rows = list(csv.DictReader(f, delimiter='\t'))
     todo = []
     for row in rows:
         ident, w, h = row['identity'], int(row['width']), int(row['height'])
         if min(w, h) < args.min_size or os.path.exists(os.path.join(args.pack, ident + '.png')):
+            continue
+        if row['texels'].split('#')[0].split('.')[0] in skip:
             continue
         im = np.asarray(Image.open(os.path.join(args.dump, ident + '.png')).convert('RGBA'))
         rgb = bleed(im[..., :3], im[..., 3])
@@ -133,6 +162,8 @@ def main():
             out = out + args.detail * detail(rgb, 3.0)
         a = upscale_alpha(im[..., 3])
         pixels = np.dstack([np.clip(np.rint(out), 0, 255).astype(np.uint8), a])
+        keep = flat(im)
+        pixels[keep] = np.kron(im, np.ones((SCALE, SCALE, 1), np.uint8))[keep]
         Image.fromarray(pixels, 'RGBA').save(os.path.join(args.pack, ident + '.png'), compress_level=6)
     if not args.work:
         shutil.rmtree(work, ignore_errors=True)

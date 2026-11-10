@@ -87,7 +87,7 @@ forwards for velocity reconstruction, forces, impact offsets and morph hit place
 Coverage is 119/269 known forward returns (150 remain), with 134/134 known inverses native.
 
 Native graphics DMA/register removal: implementation and validation details are in
-[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `db7591c` (see the bump note below), including native graphics
+[`NATIVE_GRAPHICS.md`](NATIVE_GRAPHICS.md). The source uses BozoEngine `563454e` (see the bump notes below), including native graphics
 completion and the current shared native port services. The published v0.4.0 package remains the earlier release described above.
 
 The player runtime's two camera matrix products now use typed native records without VU context state.
@@ -276,6 +276,14 @@ Validation (headless, private user folders; evidence in `D:/BozoScratch/texture-
 - Windowed 1P runs at off/2x/4x and a 4P run at 4x complete. Captures show the copyright movie, the menus, the
   arena and four views.
 - At 4x, the 1P route kept about 250 MB of copies (25 ms of worker time each); at 2x, 64 MB (7 ms each).
+
+## BozoEngine `563454e`: texture replacements (2026-11-10)
+
+Engine PR #86 adds texture replacements (`<identity>.png` in the user folder's `texture_pack`, read by workers) and a
+12 MB-per-present budget for larger copies. TMB's side is `tools/tmb_texture_upscale.py` (Real-ESRGAN over a
+`TMB_TEXTURE_DUMP` dump). Frame-pacing measurements with the bench lock are in `docs/TEXTURE_UPSCALING.md`: 1P and 4P
+hold 60 with a pack and 4x upscaling. Before the budget, 4x upscaling alone fell to 31 presents/s on the 1P route.
+Evidence: `D:/BozoScratch/texture-upscaling` (t-*.log, fps_summary.py); Real-ESRGAN in `D:/BozoScratch/esrgan`.
 
 ## Validation recorded in this continuation
 

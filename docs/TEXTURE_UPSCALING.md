@@ -26,9 +26,53 @@ no code of its own, because `decodeRecord` marks every pack texture as an asset.
 - **What it looks like:** edges of painted detail (grille bars, rust, decals) are smoother and less blocky. No
   detail is invented: it is filtering, not the offline AI path (option A).
 
-The plan below still holds for option A, an opt-in pack upscaled offline on the player's PC. Its loader would now
-sit next to the engine's upscaler in `present_gl.cpp`, keyed by the same identity. Step 3 (sampling and mip
-levels) is covered by the engine's mip-level work.
+## Status (2026-11-10, later): AI texture packs (option A)
+
+The engine reads **texture replacements**
+([BozoEngine `docs/texture-replace.md`](https://github.com/TheBozos/BozoEngine/blob/main/docs/texture-replace.md)):
+`<identity>.png` files in `<user folder>\texture_pack`, or set by `texture_pack` in `video.ini` or
+`PS2X_TEXTURE_PACK`. Each file is the texture's size or 2, 4 or 8 times it, read by worker threads. A replacement
+takes precedence over texture upscaling, which still covers textures without one.
+
+**Making a pack from your own disc:**
+
+1. Play with `TMB_TEXTURE_DUMP=1` (or `=<folder>`) through the arenas and cars you want. Each texture is written
+   once to `texture_dump` as `<identity>.png`, with `index.tsv`.
+2. Get Real-ESRGAN's ncnn-vulkan build yourself (xinntao/Real-ESRGAN, BSD-3-Clause; release v0.2.5.0,
+   `realesrgan-ncnn-vulkan-20220424-windows.zip`).
+3. Make the pack:
+   ```bash
+   python tools/tmb_texture_upscale.py <texture_dump> "%APPDATA%/TMB_Recomp/texture_pack" --esrgan <folder>/realesrgan-ncnn-vulkan.exe
+   ```
+   The tool needs Python with numpy and Pillow. It upscales 4x with `realesrgan-x4plus` over borders taken from
+   the opposite edges, so repeating textures stay seamless, then adds the original's fine grain back, because the
+   model flattens gravel and rust. It keeps the GS alpha convention, keeps cut-out alpha sharp, and leaves out
+   textures under 32 texels. With `PS2X_TEXTURE_PACK_RELOAD=1`, changed files are drawn again while playing.
+
+Packs are the player's own: never commit, ship or share them.
+
+**Measured** (Junkyard 1P route, 273 replacements from that route's dump, RTX 5070 Ti, Ryzen 7 7800X3D):
+- Making the pack took 28 s, 11 s of it in Real-ESRGAN, and produced 71 MB of PNGs.
+- In game, each replacement is read in about 7 ms on a worker. The 1P route kept 241 MB of copies and sent 309 MB
+  of textures to the GPU.
+- Frame pacing, measured with the bench lock held over the match's 2-second windows, holds 60:
+
+  | Run | Game fps min / avg | Presents min | Longest gap |
+  |---|---|---|---|
+  | 1P, upscaling off (baseline) | 59.32 / 60.00 | 57.5 | 88 ms |
+  | 1P, 4x upscaling | 59.47 / 60.03 | 57.5 | 47 ms |
+  | 1P, pack | 59.58 / 60.00 | 59.9 | 25 ms |
+  | 1P, pack + 4x upscaling | 59.72 / 60.02 | 59.4 | 28 ms |
+  | 4P baseline | 59.94 / 60.00 | 59.9 | 22 ms |
+  | 4P, pack + 4x upscaling | 59.90 / 60.00 | 59.9 | 22 ms |
+
+  Before BozoEngine's upload budget (12 MB of larger copies per present), 1P at 4x upscaling fell to 31 presents/s
+  for about 20 s while the arena's copies arrived. One of three 4P pack + 4x runs had a single 237 ms gap at a
+  moment when no texture was sent; the other two did not.
+
+**What it looks like:** ground, walls, rust and decals gain real detail, and edges are clean. The model can invent
+shapes from blurred stripes, for example "teeth" on one truck's radiator panel. Hand-fixing a file and reloading is
+the remedy. Textures the dump never saw (other arenas, cars, the story) are covered once they have been dumped.
 
 ## 1. Where textures come from
 

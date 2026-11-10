@@ -9,6 +9,9 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ### Added
 
+- **AI texture packs from your own disc:** `tools/tmb_texture_upscale.py` turns a texture dump into Real-ESRGAN
+  replacements, and the game draws them from `texture_pack` in the user folder. Loading never holds up a frame; 1P
+  and 4P keep 60 fps with a pack and 4x upscaling.
 - **Texture upscaling** (off by default): the game's textures can be drawn from 2x or 4x copies with an
   edge-directed or smooth filter. Set it in F2's Video tab, or with `texture_upscale` / `texture_filter` in
   `video.ini`. It is BozoEngine's renderer option, from the Soulcalibur III port; replays are unchanged by it.
@@ -17,7 +20,9 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ### Changed
 
-- BozoEngine is updated to `db7591c`. Native callbacks now run on the game's own thread stack instead of a fixed
+- Texture upscaling no longer drops frames while an arena's copies arrive (it fell to about 31 fps for some 20 s at
+  4x); larger copies are sent to the GPU at most 12 MB a frame.
+- BozoEngine is updated to `563454e`. Native callbacks now run on the game's own thread stack instead of a fixed
   area at the top of RAM. TMB declares where its code uses the stack pointer as data (`hierTraverseAsm`,
   `sysSetSp`/`sysRestoreSp`), so a callback taken there still finds the real stack. One-player and four-player
   replays match the previous build on every frame's draws, scratchpad, calls, threads and timing. Sound differs on

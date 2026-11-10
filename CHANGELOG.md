@@ -9,6 +9,10 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ### Added
 
+- **Enhanced textures in the launcher** (Settings): one button makes the AI texture pack on your PC from your own disc
+  (about 15 minutes with a recent graphics card, 700 MB), with progress, Stop and Remove, and an on/off switch there and
+  in F2 → Video. Real-ESRGAN now comes in the build kit (its licences in `kit\licenses\realesrgan`); nothing of the game
+  is downloaded or shipped.
 - **AI texture packs from your own disc:** `tools/tmb_texture_upscale.py` turns a texture dump into Real-ESRGAN
   replacements, and the game draws them from `texture_pack` in the user folder. Loading never holds up a frame; 1P
   and 4P keep 60 fps with a pack and 4x upscaling.
@@ -24,11 +28,16 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 - Texture upscaling no longer drops frames while an arena's copies arrive (it fell to about 31 fps for some 20 s at
   4x); larger copies are sent to the GPU at most 12 MB a frame.
-- BozoEngine is updated to `5032347`. Native callbacks now run on the game's own thread stack instead of a fixed
+- BozoEngine is updated to `a36a4d2`. Native callbacks now run on the game's own thread stack instead of a fixed
   area at the top of RAM. TMB declares where its code uses the stack pointer as data (`hierTraverseAsm`,
   `sysSetSp`/`sysRestoreSp`), so a callback taken there still finds the real stack. One-player and four-player
   replays match the previous build on every frame's draws, scratchpad, calls, threads and timing. Sound differs on
   four menu frames only, with equal sample counts.
+
+### Fixed
+
+- The launcher's Settings no longer reset the game's frame rate and texture upscaling in `video.ini` when they saved
+  the window.
 
 ## [0.5.0] - 2026-11-09
 

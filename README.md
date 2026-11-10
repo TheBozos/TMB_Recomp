@@ -45,6 +45,10 @@ remains available for comparison. The steps below describe the native packages.
    first time; you can stop it and resume where it left off.
 6. Click **Play**. **F2** opens controls, video and cheats. Memory cards, settings and logs live in
    `%APPDATA%\TMB_Recomp` (the launcher's Maintenance tab opens it).
+7. Optional: **Settings → Make enhanced textures** upscales every arena's and car's textures with Real-ESRGAN (included
+   in `kit\`), on your PC from your own disc: about 15 minutes with a recent graphics card, about 700 MB, and a Vulkan
+   graphics driver is needed. The game then uses them; turn them off there or in F2 → Video → Texture pack. Nothing is
+   downloaded or sent, and the result is yours alone: do not share it.
 
 Requires **Windows 10 version 1903 or newer / Windows 11, an AVX2 and FMA capable CPU, and OpenGL 3.3**.
 Original heat haze around fire and explosions is enabled by default. `BOZO_HEAT_HAZE=0` disables it for comparisons
@@ -265,6 +269,10 @@ rem          -DLAUNCHER_FONT_DIR=<folder containing Exo2[wght].ttf and OFL.txt>
   A crash report is offered if one appeared in the user folder.
 - Window settings live in `video.ini`; disc choice, language, background motion and build state live in `launcher.ini`
   in the user folder. The launcher's Settings tab controls the starting window; F2 in the game controls the game settings.
+  The launcher keeps `video.ini`'s other keys (frame rate, texture upscaling, texture pack) when it writes the window.
+- Enhanced textures (Settings): `source/tools/tmb_texture_enhance.py` with the kit's Python dumps the textures with
+  `game/tmb-headless.exe`, then `game/tmb-texture-pack.exe` upscales them with `kit/realesrgan` into
+  `%APPDATA%\TMB_Recomp\texture_pack` (resumed when stopped; Remove deletes it).
 - The team's RecompWatcher styling remains: PS2 BIOS blue, glowing boot towers, glass cards, Exo 2 (SIL OFL), and TMB's
   flaming-clown icon (`launcher/tmb.ico`, `runtime/app/tmb.ico`). No game art is used for the icon.
 - Update checks use GitHub's latest-release API. The native updater fetches `TMB_Recomp-<version>-bozo.zip` and its

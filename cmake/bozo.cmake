@@ -203,6 +203,16 @@ tmb_native_manifest(tmb-headless)
 target_link_libraries(tmb-headless PRIVATE tmb_runtime tmb_generated bozo_host)
 target_compile_definitions(tmb-headless PRIVATE BOZO_RUN_DEFAULT_ELF="${TMB_ELF}")
 
+# The launcher's "Enhance textures" step (tools/tmb_texture_enhance.py): a texture dump made into a replacement pack with
+# Real-ESRGAN, on the player's PC (docs/TEXTURE_UPSCALING.md). Reads PNGs with BozoEngine's reader; no other dependency.
+add_executable(tmb-texture-pack bozo/tmb_texture_pack.cpp)
+tmb_native_manifest(tmb-texture-pack)
+target_link_libraries(tmb-texture-pack PRIVATE bozo_render)
+target_compile_options(tmb-texture-pack PRIVATE -Wall -Wextra)
+if(MINGW)
+    target_link_options(tmb-texture-pack PRIVATE -static)
+endif()
+
 # Explicit target: exact native matrix/ABI checks against the owner's generated leaf functions. No disc or game run.
 add_executable(tmb-native-math-tests EXCLUDE_FROM_ALL tests/native_math_tests.cpp tests/native_direction_callers.cpp)
 target_include_directories(tmb-native-math-tests PRIVATE "${CMAKE_SOURCE_DIR}/runtime" ${gen_dir})

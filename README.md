@@ -427,6 +427,7 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `PS2X_USER_DIR=<dir>` | Separate cards, settings, logs and crash reports; required for agent/unattended tests |
 | `PS2X_INPUT_CONFIG=<file>`, `PS2X_VIDEO_CONFIG=<file>` | Other controls/video configuration files |
 | `PS2X_WINDOW_SIZE=<w>x<h>`, `PS2X_WINDOW_MODE=windowed\|fullscreen\|borderless`, `PS2X_RENDER_SCALE=<x>` | Starting window mode, size and internal render scale, over `video.ini` |
+| `PS2X_TEXTURE_PACK=<folder>\|off`, `PS2X_TEXTURE_PACK_RELOAD=1` | Texture replacements: `<identity>.png` files you made from your own disc (default: `texture_pack` in the user folder; see [`docs/TEXTURE_UPSCALING.md`](docs/TEXTURE_UPSCALING.md)); reload re-reads changed files while playing |
 | `PS2X_TEXTURE_UPSCALE=off\|2x\|4x`, `PS2X_TEXTURE_FILTER=edge\|smooth`, `PS2X_TEXTURE_STATS=1` | Texture upscaling (off by default) and its filter, over `video.ini`; the stats log texture memory every 10 s |
 | `PS2X_FRAME_RATE=game\|monitor\|<n>` | Presentation at game rate, monitor rate or a fixed rate; higher rates interpolate without speeding up the game |
 | `PS2X_SHOW_FPS=1` | Show FPS at launch; F3 toggles it |

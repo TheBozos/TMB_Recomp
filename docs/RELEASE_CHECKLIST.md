@@ -3,6 +3,19 @@
 Use a scratch `PS2X_USER_DIR` for every automated run. Keep game data and generated code out of Git and release ZIPs.
 Publication is separate from a successful build; this checklist records what was actually verified.
 
+v0.6.0 was published on 2026-11-11 after tagged CI and the owner's release request. Its draft assets were checked
+locally before publication:
+- both player ZIPs pass the SHA-256 and package audits, carry an identical 7,974-file payload, and are stamped with
+  the release commit and engine `a36a4d2`. Real-ESRGAN, its licences and the enhanced-texture tools are in the kit;
+- a fresh install in a path with spaces and accents was built offline from the disc with only the bundled kit. The
+  build was stopped and resumed, then the game played and exited normally, with menu/movie timing passing;
+- on that install, the launcher's Enhanced textures dumped and upscaled 2,181 replacements in 4 min 18 s. An earlier
+  draft failed here because the dump listed some textures more than once; it was rebuilt with the fix (#104);
+- the v0.5.0 install was updated by its own updater, rebuilt and played; the v0.3.2 updater accepted the migration
+  ZIP. Player data was kept in both update cases;
+- with the bench lock, the pack at 4x held 59.1 to 59.5 minimum and 59.9 average game fps in 1P, three story arenas
+  and 4P, the same as with it off (one RTX 5070 Ti).
+
 v0.5.0 was published on 2026-11-09 after tagged CI and the owner's release request. Its draft assets were checked
 locally before publication:
 - both player ZIPs pass the SHA-256 and package audits, carry an identical 7,889-file payload, and are stamped with

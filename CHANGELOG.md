@@ -15,11 +15,11 @@ under "Unreleased" as they land, then move them under the new version's heading 
   textures** reads every arena and car from your disc, including the cars' player versions, and upscales their
   textures 4x with Real-ESRGAN. It takes about 5 to 15 minutes with a recent graphics card and about 700 MB, and
   needs a Vulkan graphics driver. It shows its progress; **Stop** keeps what is done for next time, and **Remove**
-  deletes the result. Switch the pack on or off there or in the game (F2 → Video → Texture pack). Real-ESRGAN now
+  deletes the result. Switch the pack on or off there or in the game (F2, Video tab, Texture pack). Real-ESRGAN now
   comes in the build kit, with its licences in `kit\licenses\realesrgan`. Nothing of the game is downloaded,
   shipped or sent anywhere.
 - **Texture upscaling** (off by default): the game's own textures can be drawn from 2x or 4x copies with an
-  edge-directed or smooth filter, in F2 → Video or with `texture_upscale` / `texture_filter` in `video.ini`. It is
+  edge-directed or smooth filter, in F2's Video tab or with `texture_upscale` / `texture_filter` in `video.ini`. It is
   BozoEngine's renderer option, from the Soulcalibur III port. Replays are unchanged by it.
 - Loading the pack or the upscaled copies never holds up a frame. One-player, four-player and the story arenas keep
   their frame rate with the full pack and 4x upscaling (timing in

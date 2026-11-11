@@ -1162,6 +1162,8 @@ Version {version}
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr): # the changelog's text, whatever the console's code page (cp1252 on CI)
+        stream.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser(description='Makes the TMB_Recomp release zip (see the docstring).')
     ap.add_argument('--version', help='MAJOR.MINOR.PATCH[-pre] (default: the commit\'s tag, v stripped)')
     ap.add_argument('--commit', help='the commit to release (default HEAD); only committed files count')

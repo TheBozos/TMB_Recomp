@@ -34,6 +34,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #if defined(_WIN32)
@@ -720,14 +721,19 @@ int main(int argc, char **argv)
 
     // ---- the textures to make: padded colour into the model's folder ----
     say("step prepare");
+    // One row per identity: the dump's parallel runs can each list a texture they all load, and two threads writing
+    // the same file into the model's folder would collide.
     std::vector<std::string> rows;
+    std::unordered_set<std::string> seen;
     std::string line;
     std::getline(index, line); // the header
     while (std::getline(index, line))
+    {
         if (!line.empty() && line.back() == '\r')
-            line.pop_back(), rows.push_back(line);
-        else if (!line.empty())
+            line.pop_back();
+        if (!line.empty() && seen.insert(line.substr(0, line.find('\t'))).second)
             rows.push_back(line);
+    }
     std::vector<std::string> todo; // identities (re-read when finished: a whole dump does not stay in memory)
     std::mutex todoMutex;
     std::atomic<size_t> next{0}, prepared{0};

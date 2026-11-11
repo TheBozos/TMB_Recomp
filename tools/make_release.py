@@ -248,8 +248,9 @@ def audit_tree(folder, allow_pe=False, rel_prefix=''):
 
 
 def allowed_extension(rel):
-    """Files of the toolchain or the libraries that share an extension with the game's (none so far but these)."""
-    return rel.startswith(('kit/ucrt64/', 'kit/deps/', 'kit/python/', 'kit/ffmpeg/', 'kit/sources/')) and \
+    """Files of the toolchain or the libraries that share an extension with the game's (Real-ESRGAN's model: .bin)."""
+    return rel.startswith(('kit/ucrt64/', 'kit/deps/', 'kit/python/', 'kit/ffmpeg/', 'kit/sources/',
+                           'kit/realesrgan/')) and \
         not rel.lower().endswith(('.elf', '.irx', '.iso', '.pack', '.pss', '.vag', '.cue'))
 
 

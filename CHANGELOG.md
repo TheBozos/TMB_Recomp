@@ -7,39 +7,56 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-11
+
 ### Added
 
-- The texture dump now covers the player versions of every car (15 `PCAR` files, 28 more textures): each of
-  the first 15 story runs picks another car, so the dump takes no longer.
-- **Enhanced textures in the launcher** (Settings): one button makes the AI texture pack on your PC from your own disc
-  (about 15 minutes with a recent graphics card, 700 MB), with progress, Stop and Remove, and an on/off switch there and
-  in F2 → Video. Real-ESRGAN now comes in the build kit (its licences in `kit\licenses\realesrgan`); nothing of the game
-  is downloaded or shipped.
-- **AI texture packs from your own disc:** `tools/tmb_texture_upscale.py` turns a texture dump into Real-ESRGAN
-  replacements, and the game draws them from `texture_pack` in the user folder. Loading never holds up a frame; 1P
-  and 4P keep 60 fps with a pack and 4x upscaling.
-- `tools/tmb_texture_dump_all.py` dumps every arena and car from your own disc in headless runs (2,261 textures),
-  and the dump now covers every object of the loaded levels, not only what the camera saw.
-- **Texture upscaling** (off by default): the game's textures can be drawn from 2x or 4x copies with an
-  edge-directed or smooth filter. Set it in F2's Video tab, or with `texture_upscale` / `texture_filter` in
-  `video.ini`. It is BozoEngine's renderer option, from the Soulcalibur III port; replays are unchanged by it.
-- `TMB_TEXTURE_DUMP=1|<folder>` writes each texture the renderer receives as a PNG named by its identity, for
-  texture-pack work from your own disc ([`docs/TEXTURE_UPSCALING.md`](docs/TEXTURE_UPSCALING.md)).
+- **Enhanced textures (AI), made on your PC from your own disc.** In the launcher's Settings, **Make enhanced
+  textures** reads every arena and car from your disc, including the cars' player versions, and upscales their
+  textures 4x with Real-ESRGAN. It takes about 5 to 15 minutes with a recent graphics card and about 700 MB, and
+  needs a Vulkan graphics driver. It shows its progress; **Stop** keeps what is done for next time, and **Remove**
+  deletes the result. Switch the pack on or off there or in the game (F2 → Video → Texture pack). Real-ESRGAN now
+  comes in the build kit, with its licences in `kit\licenses\realesrgan`. Nothing of the game is downloaded,
+  shipped or sent anywhere.
+- **Texture upscaling** (off by default): the game's own textures can be drawn from 2x or 4x copies with an
+  edge-directed or smooth filter, in F2 → Video or with `texture_upscale` / `texture_filter` in `video.ini`. It is
+  BozoEngine's renderer option, from the Soulcalibur III port. Replays are unchanged by it.
+- Loading the pack or the upscaled copies never holds up a frame. One-player, four-player and the story arenas keep
+  their frame rate with the full pack and 4x upscaling (timing in
+  [`docs/TEXTURE_UPSCALING.md`](docs/TEXTURE_UPSCALING.md)).
+
+### Fixed
+
+- The launcher's Settings no longer reset the game's frame rate and texture upscaling in `video.ini` when they
+  saved the window.
 
 ### Changed
 
-- Texture upscaling no longer drops frames while an arena's copies arrive (it fell to about 31 fps for some 20 s at
-  4x); larger copies are sent to the GPU at most 12 MB a frame.
 - BozoEngine is updated to `a36a4d2`. Native callbacks now run on the game's own thread stack instead of a fixed
   area at the top of RAM. TMB declares where its code uses the stack pointer as data (`hierTraverseAsm`,
   `sysSetSp`/`sysRestoreSp`), so a callback taken there still finds the real stack. One-player and four-player
   replays match the previous build on every frame's draws, scratchpad, calls, threads and timing. Sound differs on
   four menu frames only, with equal sample counts.
 
-### Fixed
+### Developer changes
 
-- The launcher's Settings no longer reset the game's frame rate and texture upscaling in `video.ini` when they saved
-  the window.
+- `TMB_TEXTURE_DUMP=1|<folder>` writes each texture the renderer receives as a PNG named by its identity, and every
+  250 frames every texture of the loaded levels' objects, drawn or not.
+- `tools/tmb_texture_dump_all.py` dumps every arena, AI car and player car in headless runs (2,289 textures on the
+  USA disc). `tools/tmb_texture_upscale.py` (Python) and `tmb-texture-pack` (native, built and staged with the game)
+  turn the dump into a pack; `tools/tmb_texture_enhance.py` is the launcher's driver for both.
+- Larger texture copies go to the GPU at most 4 MB per frame, and a copy already there is shared when the game moves
+  the texture in its VRAM (BozoEngine).
+
+### Known limits
+
+- Only the USA disc is supported. Windows is the validated player target; the migrated Linux player build is not yet
+  validated.
+- Enhanced textures need a Vulkan graphics driver and were only tested on one NVIDIA card. The menus and the font
+  are left to the engine's upscaling, because the AI model garbles small lettering.
+- Full campaign endings, a fresh standard-user Windows installation and four physical controllers still need
+  player/hardware acceptance. Widescreen is not implemented; presentation above 60 Hz remains experimental for
+  effects that update at game rate.
 
 ## [0.5.0] - 2026-11-09
 
@@ -225,7 +242,8 @@ The first release. You build the game on your own PC from your own USA disc; not
 - Technical: built from TMB_Recomp's code and the PS2Recomp fork (`native/renderer`) with the build kit's GCC 16.2,
   FFmpeg 9.0.2 and Python 3.14; the default mode has no GS, VU or SPU2 emulation and no IOP hardware model.
 
-[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/TheBozos/TMB_Recomp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/TheBozos/TMB_Recomp/compare/v0.3.1...v0.3.2

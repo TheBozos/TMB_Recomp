@@ -48,6 +48,7 @@
 // TMB_NATIVE_PARTICLES_CHECK=1 (a diagnostic): nothing drawn here; types 1, 4, 6 (not on a sphere), 7 and 8 computed and
 // compared with what runtime/tmb_native.cpp's translations draw from the same systems' packets.
 
+#include "bozo/state.h"
 #include "tmb_port.h"
 #include "bozo/render/renderer.h"
 #include "bozo/render/texture.h"
@@ -2636,5 +2637,50 @@ namespace tmb::particles
         runtime.registerFunction(kLensTest, &lensTestOverride);
         runtime.registerFunction(kLensRender, &lensRenderOverride);
         std::fprintf(stderr, "[tmb:particles] native particles on (types mask %#x)\n", settings().types);
+    }
+    // Save states (tmb_state.cpp): the stripes' scroll, the arcs' VU records and the texture choices, per system.
+    void state(bozo::state::Archive &a)
+    {
+        uint64_t n = bozo::state::count(a, g_stripes.size());
+        if (!a.loading())
+            for (auto &[ps, st] : g_stripes)
+            {
+                uint32_t key = ps;
+                bozo::state::io(a, key);
+                bozo::state::pod(a, st);
+            }
+        else
+        {
+            g_stripes.clear();
+            for (uint64_t i = 0; i < n; ++i)
+            {
+                uint32_t key = 0;
+                StripeState st;
+                bozo::state::io(a, key);
+                bozo::state::pod(a, st);
+                g_stripes[key] = st;
+            }
+        }
+        n = bozo::state::count(a, g_arcs.size());
+        if (!a.loading())
+            for (auto &[ps, st] : g_arcs)
+            {
+                uint32_t key = ps;
+                bozo::state::io(a, key);
+                bozo::state::pod(a, st);
+            }
+        else
+        {
+            g_arcs.clear();
+            for (uint64_t i = 0; i < n; ++i)
+            {
+                uint32_t key = 0;
+                ArcState st;
+                bozo::state::io(a, key);
+                bozo::state::pod(a, st);
+                g_arcs[key] = st;
+            }
+        }
+        bozo::state::io(a, g_texIndex);
     }
 }

@@ -16,6 +16,7 @@
 // The pack's container, its loader and the decoders (PSM, CSM1 palettes, TEXA alpha) are the fork's
 // (runtime/native/native_texture_pack.h, tools/native_pack/texture.py); what is TMB's here is the key scheme above.
 
+#include "bozo/state.h"
 #include "tmb_port.h"
 #include "bozo/render/texture.h"
 #include "bozo/render/texture_pack.h"
@@ -582,5 +583,121 @@ namespace tmb::textures
         runtime.registerFunction(kTexmLoadResTexture, &texmLoadResTextureOverride);
         runtime.registerFunction(kSceGsSetDefLoadImage, &sceGsSetDefLoadImageOverride);
         runtime.registerFunction(kFontInit, &fontInitOverride);
+    }
+    // Save states (tmb_state.cpp): what the game told the hooks once (the disc file read at each address, the level's
+    // file lists and set-up order, the records placed in VRAM), with the pack's records as (file, index). Decoded
+    // pictures are dropped on a load.
+    void state(bozo::state::Archive &a)
+    {
+        Store &s = store();
+        std::lock_guard<std::mutex> lock(s.mutex);
+        loadPack(s);
+        // Every file name the game read or listed: a record is found in one of them.
+        std::vector<std::string> names = s.texFiles;
+        names.insert(names.end(), s.resFiles.begin(), s.resFiles.end());
+        names.push_back("FONT");
+        auto ioRecord = [&](const Record *&r, const std::vector<std::string> &where)
+        {
+            std::string file;
+            int64_t index = -1;
+            if (!a.loading() && r)
+            {
+                for (const std::string &name : where)
+                    if (const std::vector<Record> *records = s.pack.file(name);
+                        records && !records->empty() && r >= records->data() && r < records->data() + records->size())
+                    {
+                        file = name;
+                        index = r - records->data();
+                        break;
+                    }
+                if (index < 0)
+                    throw bozo::state::Error("save state: a texture record outside the files the game read");
+            }
+            bozo::state::fields(a, file, index);
+            if (a.loading())
+            {
+                const std::vector<Record> *records = index < 0 ? nullptr : s.pack.file(file);
+                if (index >= 0 && (!records || static_cast<size_t>(index) >= records->size()))
+                    throw bozo::state::Error("save state: a texture record the pack does not have");
+                r = index < 0 ? nullptr : &(*records)[static_cast<size_t>(index)];
+            }
+        };
+        bozo::state::fields(a, s.nameAt, s.texFiles, s.resFiles, s.texOrdinal, s.resOrdinal, s.idAt, s.fontTbp);
+        if (a.loading())
+        {
+            names = s.texFiles;
+            names.insert(names.end(), s.resFiles.begin(), s.resFiles.end());
+            names.push_back("FONT");
+            for (const auto &[at, name] : s.nameAt)
+                names.push_back(name);
+        }
+        else
+            for (const auto &[at, name] : s.nameAt)
+                names.push_back(name);
+        uint64_t n = bozo::state::count(a, s.byId.size());
+        if (!a.loading())
+            for (auto &[id, r] : s.byId)
+            {
+                uint32_t key = id;
+                bozo::state::io(a, key);
+                ioRecord(r, names);
+            }
+        else
+        {
+            s.byId.clear();
+            for (uint64_t i = 0; i < n; ++i)
+            {
+                uint32_t key = 0;
+                const Record *r = nullptr;
+                bozo::state::io(a, key);
+                ioRecord(r, names);
+                s.byId[key] = r;
+            }
+        }
+        n = bozo::state::count(a, s.byBlock.size());
+        if (!a.loading())
+            for (auto &[block, p] : s.byBlock)
+            {
+                uint32_t key = block;
+                bozo::state::fields(a, key, p.x, p.y);
+                ioRecord(p.record, names);
+            }
+        else
+        {
+            s.byBlock.clear();
+            for (uint64_t i = 0; i < n; ++i)
+            {
+                uint32_t key = 0;
+                Store::Placement p;
+                bozo::state::fields(a, key, p.x, p.y);
+                ioRecord(p.record, names);
+                s.byBlock[key] = p;
+            }
+        }
+        n = bozo::state::count(a, s.hAt.size());
+        if (!a.loading())
+            for (auto &[key, r] : s.hAt)
+            {
+                uint64_t k = key;
+                bozo::state::io(a, k);
+                ioRecord(r, names);
+            }
+        else
+        {
+            s.hAt.clear();
+            for (uint64_t i = 0; i < n; ++i)
+            {
+                uint64_t k = 0;
+                const Record *r = nullptr;
+                bozo::state::io(a, k);
+                ioRecord(r, names);
+                s.hAt[k] = r;
+            }
+        }
+        if (a.loading())
+        {
+            s.decoded.clear();
+            s.origin.clear();
+        }
     }
 }

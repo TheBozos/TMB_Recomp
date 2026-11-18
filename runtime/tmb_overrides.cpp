@@ -2,6 +2,7 @@
 // BozoEngine (bozo/port.h). The fork's scheduler experiments, GS lag, VIF1 thread and IOP defaults stayed behind with
 // the emulation (BozoEngine's phase4-inventory.md section 3).
 
+#include "bozo/state.h"
 #include "tmb_port.h"
 
 #include "bozo/app/determinism.h"
@@ -1176,6 +1177,17 @@ namespace tmb
     std::string findDiscImage(const std::string &fromFolder, const std::string &elfName)
     {
         return ::findDiscImage(std::filesystem::path(fromFolder) / elfName).string();
+    }
+}
+
+namespace tmb
+{
+    // Save states (tmb_state.cpp): the overrides' own state (the frame pacing's parity, carry and clock debt, the
+    // movie sound's queue).
+    void overridesState(bozo::state::Archive &a)
+    {
+        bozo::state::fields(a, g_syncVParity, g_frameEndCycle, g_fieldCarry, g_clockDebt, g_theGame, g_moviePcm, g_pcmCalls,
+                            g_sendCalls);
     }
 }
 

@@ -3,17 +3,21 @@
 //
 //   tmb-headless [--frames n] [--elf SCUS_971.01] [--iso image] [--pad-script [n=]file]... [--card-dir dir]
 //                [--out run.ref] [--report n] [--quiet] [--wav file [--wav-frames a-b]] [--no-sound]
+//                [--save-state file --save-state-at n] [--load-state file [--load-state-at n]] [--dump-ram file]
 //
 // --pad-script n=file: player n's frame-keyed script (1 when omitted; players 2-4 are the multitap's slots, as the
 // reference's PS2X_PAD2_SCRIPT..PS2X_PAD4_SCRIPT).
 //
 // --wav: the sound the mixer made (48 kHz stereo, 16-bit), from game frame a to b (all of it by default); --no-sound:
 // the mixer is not brought up at the frames' ends (as before milestone M3).
+// --save-state / --load-state: BozoEngine's save states (BozoEngine/docs/save-states.md): the whole run written when n
+// frames have ended, or loaded before the first frame (or when n frames have ended). --dump-ram: EE RAM at the run's end.
 // Every --report frames (500 by default) and at the end: the frame, the EE clock, the function that waited for the
 // frame's end (the game's loop: uiTitle_Main__Fv at the title), the Shell (the menus' object, gp - 0x4148) and the
 // overrides that ran.
 #include "tmb_host.h"
 #include "tmb_port.h"
+#include "tmb_state.h"
 
 #include "bozo/app/determinism.h"
 #include "bozo/audio/wav.h"
@@ -39,7 +43,7 @@ int main(int argc, char **argv)
     bozo::host::FreeOptions opt;
     opt.elf = BOZO_RUN_DEFAULT_ELF;
     uint64_t report = 500;
-    std::string wavPath;
+    std::string wavPath, dumpRam;
     uint64_t wavFrom = 0, wavTo = UINT64_MAX;
     for (int k = 1; k < argc; ++k)
     {
@@ -84,10 +88,21 @@ int main(int argc, char **argv)
         }
         else if (a == "--no-sound")
             opt.sound = false;
+        else if (a == "--save-state")
+            opt.saveState = value();
+        else if (a == "--save-state-at")
+            opt.saveStateFrame = static_cast<uint32_t>(std::stoull(value()));
+        else if (a == "--load-state")
+            opt.loadState = value();
+        else if (a == "--load-state-at")
+            opt.loadStateFrame = static_cast<uint32_t>(std::stoull(value()));
+        else if (a == "--dump-ram")
+            dumpRam = value();
         else
         {
             std::fprintf(stderr, "usage: tmb-headless [--frames n] [--elf path] [--iso image] [--pad-script [n=]file]... [--card-dir dir] "
-                                 "[--out run.ref] [--report n] [--print] [--quiet] [--wav file [--wav-frames a-b]] [--no-sound]\n");
+                                 "[--out run.ref] [--report n] [--print] [--quiet] [--wav file [--wav-frames a-b]] [--no-sound] "
+                                 "[--save-state file --save-state-at n] [--load-state file [--load-state-at n]] [--dump-ram file]\n");
             return 2;
         }
     }
@@ -120,9 +135,12 @@ int main(int argc, char **argv)
         return 2;
     }
 
+    opt.gameTag = "SCUS-97101";
     bozo::host::FreeHost host(opt);
+    host.onStateMessage = [](bool, const std::string &message) { std::printf("[state] %s\n", message.c_str()); };
     bozo::ee::Dispatcher d(host);
     tmb::scene::Binding scene(&d.runtime());
+    tmb::addStateSection(host, &d.runtime());
     d.setFunctions(tmb_function_table, tmb_function_count, tmb_resume_table, tmb_resume_count);
     std::string error;
     if (!host.setUp(d, tmb_external_table, tmb_external_count, &registry, error))
@@ -196,6 +214,12 @@ int main(int argc, char **argv)
         };
     }
     const uint64_t frames = host.run();
+    if (!dumpRam.empty())
+        if (FILE *f = std::fopen(dumpRam.c_str(), "wb"))
+        {
+            std::fwrite(d.runtime().memory.ram(), 1, 0x2000000u, f);
+            std::fclose(f);
+        }
     if (wav.isOpen())
     {
         std::printf("wav: %s, %.1f s of sound\n", wavPath.c_str(), wav.frames() / 48000.0);

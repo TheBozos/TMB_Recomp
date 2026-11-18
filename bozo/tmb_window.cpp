@@ -24,6 +24,7 @@
 // Sound (milestone M3): the mixer's samples, made on the EE clock at each frame's end, go to the default playback device
 // (bozo::app::AudioDevice: a queue of --audio-latency ms, 32 by default, plus the device's buffer). --audio-stats: the
 // queue, latency and underruns every 2 s. --wav (or PS2X_AUDIO_RECORD): what the mixer made, also to a WAV file.
+#include "tmb_state.h"
 #include "tmb_host.h"
 #include "tmb_port.h"
 
@@ -130,11 +131,20 @@ int main(int argc, char **argv)
             audio.stats = true;
         else if (a == "--wav")
             wavPath = value();
+        else if (a == "--save-state")
+            opt.saveState = value();
+        else if (a == "--save-state-at")
+            opt.saveStateFrame = static_cast<uint32_t>(std::stoull(value()));
+        else if (a == "--load-state")
+            opt.loadState = value();
+        else if (a == "--load-state-at")
+            opt.loadStateFrame = static_cast<uint32_t>(std::stoull(value()));
         else
         {
             std::fprintf(stderr, "usage: tmb [--iso image] [--elf path] [--card-dir dir] [--width w] [--height h] [--fullscreen] "
                                  "[--no-vsync] [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] "
-                                 "[--pad-script [n=]file]... [--print] [--no-sound] [--audio-latency ms] [--audio-stats] [--wav file]\n");
+                                 "[--pad-script [n=]file]... [--print] [--no-sound] [--audio-latency ms] [--audio-stats] [--wav file] "
+                                 "[--save-state file --save-state-at n] [--load-state file [--load-state-at n]]\n");
             return 2;
         }
     }
@@ -187,8 +197,16 @@ int main(int argc, char **argv)
         return 2;
     }
 
+    opt.gameTag = "SCUS-97101";
     bozo::host::FreeHost host(opt);
     bozo::ee::Dispatcher d(host);
+    // Save states (BozoEngine/docs/save-states.md): TMB's section, F5 save, F7 load, F6 / Shift+F6 the slot, the F2 tab.
+    tmb::addStateSection(host, &d.runtime());
+    host.onStateMessage = [](bool, const std::string &message)
+    {
+        std::fprintf(stderr, "[state] %s\n", message.c_str());
+        bozo::app::notify(message);
+    };
     d.setFunctions(tmb_function_table, tmb_function_count, tmb_resume_table, tmb_resume_count);
     std::string error;
     if (!host.setUp(d, tmb_external_table, tmb_external_count, &registry, error))
@@ -242,5 +260,7 @@ int main(int argc, char **argv)
     };
     game.stop = [&] { host.requestStop(); };
     game.framesEnded = [&] { return host.framesEnded(); };
+    game.saveState = [&](int slot) { host.requestSave(bozo::app::stateSlotPath(slot)); };
+    game.loadState = [&](int slot) { host.requestLoad(bozo::app::stateSlotPath(slot)); };
     return bozo::app::runWindow(window, game, &pad);
 }

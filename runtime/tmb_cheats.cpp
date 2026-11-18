@@ -24,6 +24,7 @@
 //   EvaluateEnduranceStatus clears 2 Freeway, 15 and 18 when their endurance kills are reached), and per character its
 //   movies, three arrays of 14 at + 0x2220, + 0x2258, + 0x2290 (uiMovies; 2 for a movie the character does not have).
 
+#include "bozo/state.h"
 #include "tmb_port.h"
 #include "bozo/app/determinism.h"
 #if defined(BOZO_SETTINGS_UI)
@@ -458,4 +459,6 @@ namespace tmb::cheats
         bozo::app::ui::registerTab("Cheats", &drawTab);
 #endif
     }
+    // Save states (tmb_state.cpp): the lock words Unlock everything opened (put back when it goes off).
+    void state(bozo::state::Archive &a) { bozo::state::io(a, g_unlocked); }
 }

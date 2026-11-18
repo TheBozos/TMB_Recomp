@@ -57,6 +57,7 @@
 // order and the adapter reports, per object, the stream's order and GS state against them ([tmb:order]), besides its
 // VU 0-21, matrix and strips against its own translation.
 
+#include "bozo/state.h"
 #include "tmb_port.h"
 #include "tmb_host.h"
 #include "tmb_meshes.h"
@@ -1908,5 +1909,35 @@ namespace tmb::meshes
         runtime.registerFunction(kSkidDraw, &skidDrawOverride);
         runtime.registerFunction(kHier2pFlushDma, &hier2pFlushDmaOverride);
         std::fprintf(stderr, "[tmb:mesh] TMB_NATIVE_MESHES=1: hier objects drawn from the mesh pack at pktAddVu1ObjAsm\n");
+    }
+    // Save states (tmb_state.cpp): the NGP files the game bound (as bound: the game changes the images in memory after
+    // it loads them, so they are not bound again), the marks' counter (written into the game's DMA chains). The skid
+    // marks' object is the frame's.
+    void state(bozo::state::Archive &a)
+    {
+        std::vector<bozo::render::packs::LoadedImages::Image> images;
+        if (!a.loading())
+            images = g_loaded.images();
+        uint64_t n = bozo::state::count(a, images.size());
+        if (a.loading())
+            images.assign(n, {});
+        for (auto &image : images)
+        {
+            bool file = image.file != nullptr;
+            bozo::state::fields(a, image.base, image.size, image.index, file);
+            if (a.loading())
+            {
+                const auto &files = pack().files();
+                if (file && image.index >= files.size())
+                    throw bozo::state::Error("save state: a bound NGP file the mesh pack does not have");
+                image.file = file ? &files[image.index] : nullptr;
+            }
+        }
+        bozo::state::fields(a, g_nextMark, g_frame);
+        if (a.loading())
+        {
+            g_loaded.restore(std::move(images));
+            g_skid.valid = false;
+        }
     }
 }

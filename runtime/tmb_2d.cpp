@@ -1131,4 +1131,11 @@ namespace tmb::twod
             bozo::render::setMoviePictureHook(&moviePicture);
         runtime.registerFunction(kOverheat, &overheatOverride);
     }
+    // Save states (tmb_state.cpp): the pictures shown are the old run's.
+    void stateLoaded()
+    {
+        std::lock_guard<std::mutex> lock(g_movieMutex);
+        g_moviePicture.reset();
+        g_menuPicture.reset();
+    }
 }

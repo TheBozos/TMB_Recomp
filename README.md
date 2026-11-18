@@ -113,6 +113,7 @@ those comparisons from actual native play. [docs/RECOMP_NOTES.md](docs/RECOMP_NO
 | Original heat haze enabled by default | ✅ |
 | Multi-player split-screen, 2 to 4 players; frame-keyed scripts for unattended checks | ✅ |
 | Settings (F2): controls, video, cheats; windowed / fullscreen / borderless | ✅ |
+| Save states (F5 save, F7 load, ten slots; `--save-state` / `--load-state` for scripted runs) | ✅ |
 | Higher internal resolution (2× by default; Video's render scale) | ✅ |
 | Interpolated presentation above 60 Hz; rain, snow, flares and some trails still update at game rate | 🧪 |
 | Every Challenge arena rechecked on BozoEngine | 🔧 |
@@ -402,6 +403,8 @@ use physical US positions:
 |---|---|
 | F2 | Settings: Controls (per-player buttons, sticks, triggers, mouse and sensitivity), Video (resolution, window mode, render scale, presentation frame rate and texture upscaling), Cheats. Controls save to `input.ini`; video saves to `video.ini`. |
 | F3 | Toggle the frame-rate counter. |
+| F5 / F7 | Save / load a save state in the current slot (`states/slot<n>.state` in the user folder). A state loads only into the build that wrote it; a save waits while a movie plays. |
+| F6, Shift+F6 | Next / previous save-state slot (0-9); F2 → Save states lists them. |
 | F11, Alt+Enter | Switch between the window and the last fullscreen mode. |
 | F8 | Capture consecutive presents (the sequence settings below). |
 | F9 | Start/stop a capture burst, ten captures per second. |

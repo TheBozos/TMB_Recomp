@@ -7,7 +7,11 @@
 //
 //   tmb [--iso image] [--elf SCUS_971.01] [--card-dir dir] [--width w --height h] [--fullscreen] [--no-vsync]
 //       [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] [--pad-script [n=]file]...
-//       [--no-sound] [--audio-latency ms] [--audio-stats] [--wav file]
+//       [--no-sound] [--audio-latency ms] [--audio-stats] [--wav file] [--hidden] [--capture-scene]
+//       [--save-state file --save-state-at n] [--load-state file [--load-state-at n]]
+//
+// --hidden: a test run that shows nothing (the window is never shown; --capture-frames reads the game's offscreen
+// picture). --capture-scene: captures read that picture (no overlays) in a shown window too.
 //
 // The user folder (%APPDATA%\TMB_Recomp, as the fork's TMB; PS2X_USER_DIR overrides it) holds input.ini, the memory
 // cards (mc0, mc1; --card-dir overrides) and the logs (logs/TMB_Recomp.log). Without --elf the game data is looked for
@@ -119,6 +123,10 @@ int main(int argc, char **argv)
                 if (!item.empty())
                     window.captureFrames.push_back(std::stoull(item));
         }
+        else if (a == "--hidden")
+            window.hidden = true; // a test run that shows nothing: captures read the game's offscreen picture
+        else if (a == "--capture-scene")
+            window.captureScene = true; // captures read the game's picture (no overlays) even in a shown window
         else if (a == "--quit-after")
             window.quitAfterFrames = std::stoull(value());
         else if (a == "--print")
@@ -142,7 +150,7 @@ int main(int argc, char **argv)
         else
         {
             std::fprintf(stderr, "usage: tmb [--iso image] [--elf path] [--card-dir dir] [--width w] [--height h] [--fullscreen] "
-                                 "[--no-vsync] [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] "
+                                 "[--no-vsync] [--render-scale s] [--capture-dir dir] [--capture-frames n,n,...] [--quit-after n] [--hidden] [--capture-scene] "
                                  "[--pad-script [n=]file]... [--print] [--no-sound] [--audio-latency ms] [--audio-stats] [--wav file] "
                                  "[--save-state file --save-state-at n] [--load-state file [--load-state-at n]]\n");
             return 2;

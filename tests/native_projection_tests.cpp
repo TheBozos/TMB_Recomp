@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include "host_control.h"
 #include "tmb_port.h"
 #include "tmb_projection_math.h"
 #include "tmb_vehicle_math.h"
@@ -78,17 +79,17 @@ int main()
         setRegU32(&initial,31,caller); initial.pc=kind==2?0x1db0f0:0x1da238;
         if(kind==2)setRegU32(&initial,4,(output+(n&15))|alias);
         const unsigned control=((saved|0x1f80)&~0xe040u)|(mode<<13)|(n&1?0x8040:0);
-        _mm_setcsr(control); auto original=initial,native=initial;
+        _mm_setcsr(tmb::test::referenceControl(control)); auto original=initial,native=initial;
         const auto fn=kind==2?mathfUnitMatrixAsm__FPA3_f_0x1db0f0:mathfMulVec4x4__FPA3_fP8_fvectorT1_0x1da238;
         fn(ram,&original,&rt); std::memcpy(expected,ram+flat,512);
         if(n<16){std::memcpy(full.get(),ram,bozo::kFlatBytes);++memoryCases;}
-        std::memcpy(ram+flat,input,512); (kind==2?identity:point)(ram,&native,&rt);
+        std::memcpy(ram+flat,input,512); _mm_setcsr(control); (kind==2?identity:point)(ram,&native,&rt);
         const unsigned after=_mm_getcsr(); _mm_setcsr(saved);
-        if(std::memcmp(expected,ram+flat,512)||!cpu(original,native,initial)||after!=control||
+        if(std::memcmp(expected,ram+flat,512)||!cpu(original,native,initial)||!tmb::test::sameControl(after, control)||
            (n<16&&std::memcmp(full.get(),ram,bozo::kFlatBytes)))
         {
             std::fprintf(stderr,"FAIL projection kind%u case%u mode%u data%d CPU%d FP%d\n",kind,n,mode,
-                std::memcmp(expected,ram+flat,512),cpu(original,native,initial),after==control);return 1;
+                std::memcmp(expected,ram+flat,512),cpu(original,native,initial),tmb::test::sameControl(after, control));return 1;
         }
         ++cases;
     }
@@ -136,7 +137,7 @@ int main()
             const uint64_t ret=0xbad0000;std::memcpy(ram+0x30000+0x120,&ret,8);
         }
         d.updateLimit(&initial); std::memcpy(arenaInput.get(),ram+0x10000,0x40000);
-        const unsigned control=((saved|0x1f80)&~0xe040u)|(mode<<13)|(n&1?0x8040:0);
+        const unsigned control=tmb::test::referenceControl(((saved|0x1f80)&~0xe040u)|(mode<<13)|(n&1?0x8040:0)); // generated code on both sides: the game's rounding
         _mm_setcsr(control); auto a=initial,b=initial;
         rt.functions.setOverride(0x1da238,mathfMulVec4x4__FPA3_fP8_fvectorT1_0x1da238);
         rt.functions.setOverride(0x1db0f0,mathfUnitMatrixAsm__FPA3_f_0x1db0f0);
@@ -146,7 +147,7 @@ int main()
         rt.functions.setOverride(0x1da238,point);rt.functions.setOverride(0x1db0f0,identity);
         try{caller(ram,&b,&rt);}catch(const bozo::ee::StopGuest&){require(b.pc==0xbad0000,"native caller stopped early");}
         const unsigned after=_mm_getcsr();_mm_setcsr(saved);
-        if(!cpu(a,b,initial)||std::memcmp(arenaExpected.get(),ram+0x10000,0x40000)||after!=control||
+        if(!cpu(a,b,initial)||std::memcmp(arenaExpected.get(),ram+0x10000,0x40000)||!tmb::test::sameControl(after, control)||
            (n<8&&std::memcmp(full.get(),ram,bozo::kFlatBytes)))
         {std::fprintf(stderr,"FAIL caller kind%u case%u mode%u CPU%d\n",kind,n,mode,cpu(a,b,initial));return 2;}
         ++callers;

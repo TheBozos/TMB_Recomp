@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Actual sphere/LOD decisions and hierarchy-helper consumers, compiled from the local game ELF.
+#include "host_control.h"
 #include "tmb_port.h"
 #include "tmb_native_math.h"
 #include "tmb_hierarchy_math.h"
@@ -145,7 +146,7 @@ void testSphereLodCallers()
                 std::memset(ram + 0x13000, 0, 12); word(0x14000, 0x40400000); word(0x14004, 0x40800000); word(0x14008, 0);
             }
             snapshot(input.get()); auto a = initial, b = initial;
-            const unsigned control = ((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u);
+            const unsigned control = tmb::test::referenceControl(((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u)); // generated code on both sides: the game's rounding
             host.enabled = false; services.yields = 0; services.stop = 0xffffffff;
             _mm_setcsr(control);
             try { function(ram, &a, rt.get()); }
@@ -156,9 +157,9 @@ void testSphereLodCallers()
             snapshot(expected.get()); if (n < 4) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++memoryCases; }
             restore(); host.enabled = true; services.yields = 0;
             _mm_setcsr(control); function(ram, &b, rt.get()); const auto after = _mm_getcsr(); _mm_setcsr(saved);
-            if (!cpuEqual(a, b) || !vuUntouched(initial, b) || after != refControl || services.yields != refYields || !dataEqual() ||
+            if (!cpuEqual(a, b) || !vuUntouched(initial, b) || !tmb::test::sameControl(after, refControl) || services.yields != refYields || !dataEqual() ||
                 (n < 4 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
-            { std::fprintf(stderr, "FAIL sphere/LOD kind %u case %u mode %u CPU%d VU%d FP%d data%d\n", kind,n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("sphere/LOD caller differs"); }
+            { std::fprintf(stderr, "FAIL sphere/LOD kind %u case %u mode %u CPU%d VU%d FP%d data%d\n", kind,n,mode,cpuEqual(a,b),vuUntouched(initial,b),tmb::test::sameControl(after, refControl),dataEqual()); throw std::runtime_error("sphere/LOD caller differs"); }
             require(b.pc == 0xbad0000 && getRegU32(&b, 29) == address(sp), "sphere/LOD return ABI"); ++cases;
         }
     std::printf("sphere/LOD: %u complete generated callers, %u whole-memory checks; complete CPU/clock/FP/selection exact outside retired VU/local W; native VU untouched\n", cases, memoryCases);
@@ -221,16 +222,16 @@ void testSphereLodCallers()
                 throw std::runtime_error("hierarchy helper continuation did not reach its query boundary");
             };
             auto a = initial, b = initial;
-            const auto control = ((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u);
+            const auto control = tmb::test::referenceControl(((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u)); // generated code on both sides: the game's rounding
             _mm_setcsr(control);
             try { run(false, a); }
             catch (...) { std::fprintf(stderr, "hierarchy original kind %u case %u\n", kind, n); throw; }
             const auto refControl = _mm_getcsr(); const auto refYields = services.yields;
             snapshot(expected.get()); if (n < 4) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++helperMemory; }
             restore(); _mm_setcsr(control); run(true, b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
-            if (!cpuEqual(a,b) || !vuUntouched(initial,b) || after != refControl || services.yields != refYields || !dataEqual() ||
+            if (!cpuEqual(a,b) || !vuUntouched(initial,b) || !tmb::test::sameControl(after, refControl) || services.yields != refYields || !dataEqual() ||
                 (n < 4 && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
-            { std::fprintf(stderr,"FAIL hierarchy helper %x case %u mode %u CPU%d VU%d FP%d data%d\n",caller,n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy helper consumer differs"); }
+            { std::fprintf(stderr,"FAIL hierarchy helper %x case %u mode %u CPU%d VU%d FP%d data%d\n",caller,n,mode,cpuEqual(a,b),vuUntouched(initial,b),tmb::test::sameControl(after, refControl),dataEqual()); throw std::runtime_error("hierarchy helper consumer differs"); }
             ++helperCases;
         }
     _mm_setcsr(saved);

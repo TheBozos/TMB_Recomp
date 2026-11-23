@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Real hierarchy helper consumers compiled from the local game ELF; no copied game implementation.
+#include "host_control.h"
 #include "tmb_port.h"
 #include "tmb_native_math.h"
 #include "tmb_hierarchy_math.h"
@@ -2826,7 +2827,7 @@ void testHierarchyHelperCallers()
                     require(ctx.pc==0xbad0000,"peel-out coordinate-system consumer returned early");
                 }
             };
-            const unsigned control = ((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u);
+            const unsigned control = tmb::test::referenceControl(((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u)); // generated code on both sides: the game's rounding
             auto a = initial, b = initial; _mm_setcsr(control);
             try { run(false, a); }
             catch (...) { std::fprintf(stderr, "hierarchy original kind %u case %u\n", kind, n); throw; }
@@ -3467,10 +3468,10 @@ void testHierarchyHelperCallers()
             // Full rear-view entries retain the original rotation producer's identity-helper VU writes.
             const auto &expectedVu=kind == 148 && sawDirectionEntry ? directionEntry : kind==195 && sawForceInverseEntry ? forceInverseEntry : initial;
             if(kind==195 && sawForceInverseEntry) require(vuUntouched(forceReferenceEntry,forceInverseEntry),"force-field original producer effects differ");
-            if (!cpuEqual(a,b) || !(kind>=236 ? weaponVuRetired(initial,a,b) : vuUntouched(expectedVu,b)) || after != refControl || services.yields != refYields || services.randomCalls != refRandomCalls ||
+            if (!cpuEqual(a,b) || !(kind>=236 ? weaponVuRetired(initial,a,b) : vuUntouched(expectedVu,b)) || !tmb::test::sameControl(after, refControl) || services.yields != refYields || services.randomCalls != refRandomCalls ||
                 services.weatherPoints != refWeatherPoints || services.weatherIdentities != refWeatherIdentities || services.spatialCalls != refSpatialCalls || auditedInverseCalls != refAuditedInverseCalls || services.aiActions != refAiActions || services.vehicleLightActions != refVehicleLightActions || services.finalActions != refFinalActions || services.rigidActions != refRigidActions || rigidDirectionCalls != refRigidDirections || driverDirectionCalls != refDriverDirections || services.driverActions != refDriverActions || services.driverQueryEndpoints != refDriverEndpoints || services.collisionActions != refCollisionActions || services.collisionVelocities != refCollisionVelocities || collisionDirectionCalls != refCollisionDirections || attachmentDirectionCalls != refAttachmentDirections || services.attachmentActions != refAttachmentActions || minionDirectionCalls != refMinionDirections || services.minionActions != refMinionActions || services.minionPoints != refMinionPoints || weaponDirectionCalls != refWeaponDirections || services.weaponInputs != refWeaponInputs || services.weaponBases != refWeaponBases || services.weaponOutputs != refWeaponOutputs || services.weaponTargets != refWeaponTargets || !dataEqual() ||
                 (wholeCase && std::memcmp(whole.get(),ram,bozo::kFlatBytes)))
-            { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),after==refControl,dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
+            { std::fprintf(stderr,"FAIL hierarchy %x case %u mode %u CPU%d VU%d FP%d data%d\n",callers[kind],n,mode,cpuEqual(a,b),vuUntouched(initial,b),tmb::test::sameControl(after, refControl),dataEqual()); throw std::runtime_error("hierarchy consumer differs"); }
             ++cases;
         }
     require(aiShotPublications[0] && aiShotPublications[1],"AI fixtures did not publish front/rear attack states");

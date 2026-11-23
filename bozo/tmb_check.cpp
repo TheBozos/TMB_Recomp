@@ -6,10 +6,11 @@
 // --window (builds with TMB_WINDOW): the same pinned run, its frames shown in a window as they are made (BozoEngine's
 // window, the renderer's present), to capture the pictures of chosen frames (milestone M5's pixel comparison):
 //   tmb-check <log.clg> ... --window --capture-frames n,n,... [--capture-dir dir] [--width w --height h]
-//             [--render-scale s] [--aspect a]
+//             [--render-scale s] [--aspect a] [--hidden]
 // --capture-frames n: the picture once n frames have ended, i.e. the reference record n - 1's frame (frame_<n>.png). The
 // run is held at that frame's end until the window has read it back, so the picture is exactly that frame's. The window
 // is 640x448 at render scale 1 by default; --aspect is the picture's shape inside it (4:3 by default, letterboxed).
+// --hidden: the window is never shown, and the captures read the game's offscreen picture (the same pixels).
 #include "run_main.h"
 
 #if TMB_CHECK_WINDOW
@@ -86,6 +87,8 @@ namespace
                 window.renderScale = std::stof(value());
             else if (a == "--aspect")
                 window.aspect = std::stof(value());
+            else if (a == "--hidden")
+                window.hidden = true;
             else
                 rest.push_back(args[k]);
         }

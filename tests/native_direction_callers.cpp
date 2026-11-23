@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Run the generated BSP collision setup through its real XYZ consumers. No copied game code is committed.
+#include "host_control.h"
 #include "tmb_port.h"
 #include "tmb_native_math.h"
 #include "bozo/libs/libraries.h"
@@ -123,7 +124,7 @@ void testDirectionCallers()
             const float radius = 6.5f; std::memcpy(&initial.fu[20], &radius, 4);
             std::memcpy(input.get(), ram + 0x10000, arenaBytes);
             std::memcpy(input.get() + arenaBytes, ram + globals, globalBytes);
-            const unsigned control = ((saved | 0x1f80) & ~0xe040u) | (mode << 13) | (n & 1 ? 0x8040 : 0);
+            const unsigned control = tmb::test::referenceControl(((saved | 0x1f80) & ~0xe040u) | (mode << 13) | (n & 1 ? 0x8040 : 0)); // generated code on both sides: the game's rounding
             const auto run = [&](RecompiledFunction direction, R5900Context &ctx)
             {
                 services.yields = 0; rt->functions.setOverride(0x1da298, direction);
@@ -145,7 +146,7 @@ void testDirectionCallers()
             std::memcpy(ram + 0x10000, input.get(), arenaBytes);
             std::memcpy(ram + globals, input.get() + arenaBytes, globalBytes);
             run(nativeDirection, b); const unsigned after = _mm_getcsr(); _mm_setcsr(saved);
-            if (!cpuEqual(a, b) || !vuUntouched(initial, b) || after != control || referenceYields != services.yields ||
+            if (!cpuEqual(a, b) || !vuUntouched(initial, b) || !tmb::test::sameControl(after, control) || referenceYields != services.yields ||
                 std::memcmp(expected.get(), ram + 0x10000, arenaBytes) ||
                 std::memcmp(expected.get() + arenaBytes, ram + globals, globalBytes) ||
                 (n < 4 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
@@ -248,7 +249,7 @@ void testDirectionCallers()
             setRegU32(&initial, 6, address(output)); word(output + 12, bits());
             // Both light directions may execute in one continuation; both opaque W words must stay untouched.
             std::memcpy(input.get(), ram + 0x10000, arenaBytes);
-            const unsigned control = ((saved | 0x1f80) & ~0xe040u) | (mode << 13) | (n & 1 ? 0x8040 : 0);
+            const unsigned control = tmb::test::referenceControl(((saved | 0x1f80) & ~0xe040u) | (mode << 13) | (n & 1 ? 0x8040 : 0)); // generated code on both sides: the game's rounding
             const auto run = [&](RecompiledFunction direction, R5900Context &ctx)
             {
                 services.yields = 0; rt->functions.setOverride(0x1da298, direction);
@@ -269,12 +270,12 @@ void testDirectionCallers()
             _mm_setcsr(control); run(nativeDirection, b);
             const unsigned after = _mm_getcsr(); _mm_setcsr(saved);
             // Original scalar normalization can raise host exception flags; compare its complete FP effects too.
-            if (!cpuEqual(a, b) || !vuUntouched(initial, b) || after != referenceControl || referenceYields != services.yields ||
+            if (!cpuEqual(a, b) || !vuUntouched(initial, b) || !tmb::test::sameControl(after, referenceControl) || referenceYields != services.yields ||
                 std::memcmp(expected.get(), ram + 0x10000, arenaBytes) ||
                 (n < 4 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
             {
                 std::fprintf(stderr, "FAIL vehicle/light caller %x case %u mode %u CPU%d data%d FP%d yields %u/%u\n",
-                    caller, n, mode, cpuEqual(a, b), std::memcmp(expected.get(), ram + 0x10000, arenaBytes), after == referenceControl,
+                    caller, n, mode, cpuEqual(a, b), std::memcmp(expected.get(), ram + 0x10000, arenaBytes), tmb::test::sameControl(after, referenceControl),
                     referenceYields, services.yields);
                 throw std::runtime_error("vehicle/light direction consumer differs");
             }
@@ -307,7 +308,7 @@ void testDirectionCallers()
         const uint32_t alias = n % 3 == 0 ? 0x80000000 : n % 3 == 1 ? 0x20000000 : 0;
         setRegU32(&initial, 4, vehicle | alias); setRegU32(&initial, 5, n % 4);
         setRegU32(&initial, 29, sp | alias); initial.pc = 0x118178; initial.cycleLimit = 0;
-        const unsigned control = ((saved | 0x1f80) & ~0xe040u) | (mode << 13) | (n & 1 ? 0x8040 : 0);
+        const unsigned control = tmb::test::referenceControl(((saved | 0x1f80) & ~0xe040u) | (mode << 13) | (n & 1 ? 0x8040 : 0)); // generated code on both sides: the game's rounding
         const auto run = [&](R5900Context &ctx)
         {
             services.yields = 0;
@@ -324,7 +325,7 @@ void testDirectionCallers()
         const uint32_t poisonedW = bits(); std::memcpy(ram + result + 12, &poisonedW, 4);
         _mm_setcsr(control); run(b); const auto after = _mm_getcsr(); _mm_setcsr(saved);
         std::memcpy(ram + result + 12, input.get() + result - 0x10000 + 12, 4);
-        require(!std::memcmp(&a, &b, sizeof(a)) && after == referenceControl && services.yields == referenceYields &&
+        require(!std::memcmp(&a, &b, sizeof(a)) && tmb::test::sameControl(after, referenceControl) && services.yields == referenceYields &&
                 !std::memcmp(expected.get(), ram + 0x10000, arenaBytes) &&
                 (n >= 4 || !std::memcmp(whole.get(), ram, bozo::kFlatBytes)), "contact position W affected XYZ consumer");
         ++contactCases;

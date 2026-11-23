@@ -1,4 +1,5 @@
 // Exact, independent-original comparisons: record values, overlapping memory, the complete CPU ABI and untouched VU state.
+#include "host_control.h"
 #include "tmb_port.h"
 #include "tmb_native_math.h"
 #include "bozo/libs/libraries.h"
@@ -99,7 +100,7 @@ int main()
                 R5900Context original = initial, native = initial;
                 // Deliberately vary caller rounding and denormal settings. Native code must restore the whole word.
                 const unsigned control = ((savedControl | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1u ? 0x8040u : 0u);
-                _mm_setcsr(control);
+                _mm_setcsr(tmb::test::referenceControl(control));
                 helper.original(rt->memory.flat(), &original, rt.get());
                 if (helper.direction) // direction outputs are XYZ; the native record contract retains destination W
                     std::memcpy(arena + (output - physicalBase) + 12, input.data() + (output - physicalBase) + 12, 4);
@@ -110,6 +111,7 @@ int main()
                     ++fullMemoryCases;
                 }
                 std::memcpy(arena, input.data(), input.size());
+                _mm_setcsr(control);
                 registry.find(helper.address)(rt->memory.flat(), &native, rt.get());
                 const unsigned after = _mm_getcsr();
                 _mm_setcsr(savedControl);
@@ -119,11 +121,11 @@ int main()
                 std::memset(reinterpret_cast<uint8_t *>(&original) + vuAt, 0, vuBytes);
                 std::memset(reinterpret_cast<uint8_t *>(&native) + vuAt, 0, vuBytes);
                 if (std::memcmp(arena, expected.data(), expected.size()) || std::memcmp(&original, &native, sizeof(native)) ||
-                    !untouched || after != control || (n < 32 && std::memcmp(rt->memory.flat(), wholeRam.get(), bozo::kFlatBytes)))
+                    !untouched || !tmb::test::sameControl(after, control) || (n < 32 && std::memcmp(rt->memory.flat(), wholeRam.get(), bozo::kFlatBytes)))
                 {
                     std::fprintf(stderr, "FAIL %s case %u host mode %u: data %d, CPU %d, untouched VU %d, host control %d\n",
                         helper.name, n, mode, std::memcmp(arena, expected.data(), expected.size()),
-                        std::memcmp(&original, &native, sizeof(native)), untouched, after == control);
+                        std::memcmp(&original, &native, sizeof(native)), untouched, tmb::test::sameControl(after, control));
                     for (size_t i = 0; i < arenaBytes; i += 4)
                         if (std::memcmp(arena + i, expected.data() + i, 4))
                         {

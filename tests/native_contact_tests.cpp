@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Compare actual generated original blocks against the production instruction dispatcher, including ordered aliases.
+#include "host_control.h"
 #include "tmb_contact_math.h"
 #include "tmb_native_math.h"
 #include "tmb_contact_original.h"
@@ -201,7 +202,7 @@ namespace
                     if (kind == 6 && ctx.pc == 0xbad0000) return;
                     throw std::runtime_error("contact continuation did not reach query boundary");
                 };
-                const auto control = ((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u);
+                const auto control = tmb::test::referenceControl(((saved | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1 ? 0x8040u : 0u)); // generated code on both sides: the game's rounding
                 auto a = initial, b = initial;
                 _mm_setcsr(control); run(false, a); const auto refControl = _mm_getcsr(); const auto refYields = services.yields;
                 for (unsigned i = 0; i < outputs; ++i) std::memcpy(ram + output[i] + 12, payload(output[i]) + 12, 4);
@@ -215,10 +216,10 @@ namespace
                 const bool untouched = !std::memcmp(reinterpret_cast<uint8_t *>(&initial) + vuAt, reinterpret_cast<uint8_t *>(&b) + vuAt, vuBytes);
                 std::memset(reinterpret_cast<uint8_t *>(&a) + vuAt, 0, vuBytes);
                 std::memset(reinterpret_cast<uint8_t *>(&b) + vuAt, 0, vuBytes);
-                if (std::memcmp(&a, &b, sizeof(a)) || !untouched || after != refControl || refYields != services.yields ||
+                if (std::memcmp(&a, &b, sizeof(a)) || !untouched || !tmb::test::sameControl(after, refControl) || refYields != services.yields ||
                     std::memcmp(expectedAll.get(), ram + base, bytes) || std::memcmp(expectedAll.get() + bytes, ram + globals, globalBytes) ||
                     (n < 4 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
-                { std::fprintf(stderr, "FAIL contact continuation %u case %u mode %u CPU%d VU%d FP%d data%d globals%d\n",kind,n,mode,std::memcmp(&a,&b,sizeof(a)),untouched,after==refControl,std::memcmp(expectedAll.get(),ram+base,bytes),std::memcmp(expectedAll.get()+bytes,ram+globals,globalBytes)); throw std::runtime_error("contact continuation differs"); }
+                { std::fprintf(stderr, "FAIL contact continuation %u case %u mode %u CPU%d VU%d FP%d data%d globals%d\n",kind,n,mode,std::memcmp(&a,&b,sizeof(a)),untouched,tmb::test::sameControl(after, refControl),std::memcmp(expectedAll.get(),ram+base,bytes),std::memcmp(expectedAll.get()+bytes,ram+globals,globalBytes)); throw std::runtime_error("contact continuation differs"); }
                 ++cases;
             }
         host.enabled = true; rt.services = nullptr;
@@ -279,11 +280,12 @@ int main()
                 if (site.translation) setRegU32(&initial, site.translation, (translation | alias) + ((n >> 8u) & 15u));
                 R5900Context original = initial, native = initial;
                 const unsigned control = ((savedControl | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1u ? 0x8040u : 0u);
-                _mm_setcsr(control);
+                _mm_setcsr(tmb::test::referenceControl(control));
                 originalBlock(index, ram, original, rt.get());
                 std::memcpy(expected.data(), arena, arenaBytes);
                 if (n < 8) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++wholeCases; }
                 std::memcpy(arena, input.data(), arenaBytes);
+                _mm_setcsr(control);
                 for (uint32_t pc = site.first; pc <= site.last; pc += 4)
                 {
                     if (!handler(ram, &native, rt.get(), pc)) return 2;
@@ -292,10 +294,10 @@ int main()
                 const unsigned after = _mm_getcsr();
                 _mm_setcsr(savedControl);
                 if (std::memcmp(arena, expected.data(), arenaBytes) || std::memcmp(&native, &initial, sizeof(initial)) ||
-                    after != control || (n < 8 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
+                    !tmb::test::sameControl(after, control) || (n < 8 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
                 {
                     std::fprintf(stderr, "FAIL contact block %u case %u mode %u: memory %d CPU/VU %d host %d\n", index, n, mode,
-                        std::memcmp(arena, expected.data(), arenaBytes), std::memcmp(&native, &initial, sizeof(initial)), after == control);
+                        std::memcmp(arena, expected.data(), arenaBytes), std::memcmp(&native, &initial, sizeof(initial)), tmb::test::sameControl(after, control));
                     return 4;
                 }
                 host.enabled = false;

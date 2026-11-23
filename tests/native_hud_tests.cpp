@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Compare actual generated original blocks against the production instruction dispatcher, including ordered aliases.
+#include "host_control.h"
 #include "tmb_hud_math.h"
 #include "tmb_native_math.h"
 #include "tmb_hud_original.h"
@@ -92,11 +93,12 @@ int main()
                 if (site.translation) setRegU32(&initial, site.translation, (translation | alias) + ((n >> 8u) & 15u));
                 R5900Context original = initial, native = initial;
                 const unsigned control = ((savedControl | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1u ? 0x8040u : 0u);
-                _mm_setcsr(control);
+                _mm_setcsr(tmb::test::referenceControl(control));
                 originalBlock(index, ram, original, rt.get());
                 std::memcpy(expected.data(), arena, arenaBytes);
                 if (n < 8) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++wholeCases; }
                 std::memcpy(arena, input.data(), arenaBytes);
+                _mm_setcsr(control);
                 for (uint32_t pc = site.first; pc <= site.last; pc += 4)
                 {
                     if (!handler(ram, &native, rt.get(), pc)) return 2;
@@ -105,10 +107,10 @@ int main()
                 const unsigned after = _mm_getcsr();
                 _mm_setcsr(savedControl);
                 if (std::memcmp(arena, expected.data(), arenaBytes) || std::memcmp(&native, &initial, sizeof(initial)) ||
-                    after != control || (n < 8 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
+                    !tmb::test::sameControl(after, control) || (n < 8 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
                 {
                     std::fprintf(stderr, "FAIL HUD block %u case %u mode %u: memory %d CPU/VU %d host %d\n", index, n, mode,
-                        std::memcmp(arena, expected.data(), arenaBytes), std::memcmp(&native, &initial, sizeof(initial)), after == control);
+                        std::memcmp(arena, expected.data(), arenaBytes), std::memcmp(&native, &initial, sizeof(initial)), tmb::test::sameControl(after, control));
                     return 4;
                 }
                 host.enabled = false;

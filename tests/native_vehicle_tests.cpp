@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Compare actual generated original blocks against the production instruction dispatcher, including ordered aliases.
+#include "host_control.h"
 #include "tmb_vehicle_math.h"
 #include "tmb_native_math.h"
 #include "tmb_vehicle_original.h"
@@ -100,11 +101,12 @@ int main()
                 if (site.translation) setRegU32(&initial, site.translation, (translation | alias) + ((n >> 8u) & 15u));
                 R5900Context original = initial, native = initial;
                 const unsigned control = ((savedControl | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1u ? 0x8040u : 0u);
-                _mm_setcsr(control);
+                _mm_setcsr(tmb::test::referenceControl(control));
                 originalBlock(index, ram, original, rt.get());
                 std::memcpy(expected.data(), arena, arenaBytes);
                 if (n < 8) { std::memcpy(whole.get(), ram, bozo::kFlatBytes); ++wholeCases; }
                 std::memcpy(arena, input.data(), arenaBytes);
+                _mm_setcsr(control);
                 for (uint32_t pc = site.first; pc <= site.last; pc += 4)
                 {
                     if (!handler(ram, &native, rt.get(), pc)) return 2;
@@ -113,10 +115,10 @@ int main()
                 const unsigned after = _mm_getcsr();
                 _mm_setcsr(savedControl);
                 if (std::memcmp(arena, expected.data(), arenaBytes) || std::memcmp(&native, &initial, sizeof(initial)) ||
-                    after != control || (n < 8 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
+                    !tmb::test::sameControl(after, control) || (n < 8 && std::memcmp(whole.get(), ram, bozo::kFlatBytes)))
                 {
                     std::fprintf(stderr, "FAIL vehicle block %u case %u mode %u: memory %d CPU/VU %d host %d\n", index, n, mode,
-                        std::memcmp(arena, expected.data(), arenaBytes), std::memcmp(&native, &initial, sizeof(initial)), after == control);
+                        std::memcmp(arena, expected.data(), arenaBytes), std::memcmp(&native, &initial, sizeof(initial)), tmb::test::sameControl(after, control));
                     return 4;
                 }
                 host.enabled = false;
@@ -177,7 +179,7 @@ int main()
             for (auto &v : initial.vu0_vf) for (auto &bits : v.u) bits = randomBits();
             initial.vu0_vf[0] = Vu0Vector{}; initial.vu0_vf[0].u[3] = 0x3f800000;
             R5900Context original = initial, native = initial;
-            const unsigned control = ((savedControl | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1u ? 0x8040u : 0u);
+            const unsigned control = tmb::test::referenceControl(((savedControl | 0x1f80u) & ~0xe040u) | (mode << 13u) | (n & 1u ? 0x8040u : 0u)); // generated code on both sides: the game's rounding
             _mm_setcsr(control);
             host.enabled = false;
             vehicleSetCsMat__7Vehicle_0x1ab250(ram, &original, rt.get());
@@ -195,10 +197,10 @@ int main()
             std::memset(reinterpret_cast<uint8_t *>(&native) + vuAt, 0, vuBytes);
             std::memset(reinterpret_cast<uint8_t *>(&original) + vuAt, 0, vuBytes);
             if (std::memcmp(ram + vehicle, callerExpected.get(), callerBytes) || std::memcmp(&original, &native, sizeof(native)) ||
-                !untouched || after != control || (n < 4 && std::memcmp(ram, whole.get(), bozo::kFlatBytes)))
+                !untouched || !tmb::test::sameControl(after, control) || (n < 4 && std::memcmp(ram, whole.get(), bozo::kFlatBytes)))
             {
                 std::fprintf(stderr, "FAIL complete vehicleSetCsMat case %u mode %u: memory %d CPU %d VU %d host %d\n", n, mode,
-                    std::memcmp(ram + vehicle, callerExpected.get(), callerBytes), std::memcmp(&original, &native, sizeof(native)), untouched, after == control);
+                    std::memcmp(ram + vehicle, callerExpected.get(), callerBytes), std::memcmp(&original, &native, sizeof(native)), untouched, tmb::test::sameControl(after, control));
                 return 8;
             }
             if (native.cycles != 16 || native.checkpoints != 2 || native.pc != 0xbad0000) return 9;

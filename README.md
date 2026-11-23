@@ -449,13 +449,15 @@ screen); the variables give their state at launch (`runtime/tmb_cheats.cpp`).
 | `--pad-script [n=]<file>` | Frame-keyed scripted input for player n (1–4); repeat for multiple players |
 | `--quit-after <frames>` | End an unattended windowed run |
 | `--capture-dir <dir> --capture-frames n,n` | Capture chosen game frames |
+| `--hidden` | Test run that never shows the window: captures read the game's offscreen picture (add `--no-sound` so nothing plays; `--wav` still records) |
+| `--capture-scene` | Captures read the game's picture without overlays, in a shown window |
 | `PS2X_CAPTURE_WINDOW_DIR=<dir>` | F8/F9 capture destination |
 | `PS2X_CAPTURE_SEQUENCE=<n>`, `PS2X_CAPTURE_SEQUENCE_AT=<s>[,<s>...]` | Consecutive presents at F8 or the chosen times, with interpolation timing metadata |
 | `PS2X_CAPTURE_BURST_AT=<s>[,<s>...]` | Start/stop an F9-style burst at the chosen times |
 | `PS2X_CAPTURE_DIR=<dir>`, `PS2X_CAPTURE_INTERVAL=<s>` | Periodic picture captures |
 | `--audio-stats`, `--audio-latency <ms>` | Audio queue/underrun diagnostics and queue target |
 | `--wav <file>`, `PS2X_AUDIO_RECORD=<file>` | Record the native mixer output |
-| `--no-sound` | Disable device playback for a diagnostic run |
+| `--no-sound` | Disable device playback (test runs; `--wav` still records) |
 | `PS2X_SETTINGS_OPEN=Controls\|Video\|Cheats` | Open F2 directly on a tab for UI tests |
 | `PS2X_LOG_FILE=<file>\|0`, `PS2X_NO_DIALOGS=1`, `PS2X_TEST_CRASH=<s>` | Another log/none, suppress unattended dialogs, or intentionally test crash handling |
 | `TMB_CHEATS_LOG=1`, `TMB_CHEATS_TOGGLE=<s>` | Cheat diagnostics and periodic switching for tests |

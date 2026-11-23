@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Differential checks against complete generated helpers, including the original VCALLMS library path.
+#include "host_control.h"
 #include "tmb_port.h"
 #include "tmb_hierarchy_math.h"
 #include "bozo/ee/dispatcher.h"
@@ -107,7 +108,7 @@ int main()
                 d.updateLimit(&initial); // the dispatcher supplies this scheduler cache before executing a helper
                 R5900Context original=initial,native=initial;
                 const unsigned control = ((saved|0x1f80u)&~0xe040u)|(mode<<13)|(n&1 ? 0x8040u : 0);
-                _mm_setcsr(control);
+                _mm_setcsr(tmb::test::referenceControl(control));
                 if (kind == 2) bspPlaneTest2Vec__FP6_planeP8_fvectorT1T1_0x201660(ram,&original,&rt);
                 else if (kind) mathfMulVec__FPA3_fP8_fvectorT1_0x1da1e8(ram,&original,&rt);
                 else hdHatSphereTestAsm__FP8_fvectorfT0T0_0x1cf7c0(ram,&original,&rt);
@@ -119,10 +120,11 @@ int main()
                 if (n<32) { std::memcpy(full.get(),ram,bozo::kFlatBytes); ++memoryCases; }
                 std::memcpy(arena,input.data(),input.size());
                 const auto before=host.microCalls;
+                _mm_setcsr(control);
                 (kind == 2 ? plane : kind ? inverse : sphere)(ram,&native,&rt);
                 nativeMicros += host.microCalls-before;
                 const unsigned after=_mm_getcsr(); _mm_setcsr(saved);
-                if (!compareCpu(original,native,initial) || std::memcmp(arena,expected.data(),input.size()) || after!=control ||
+                if (!compareCpu(original,native,initial) || std::memcmp(arena,expected.data(),input.size()) || !tmb::test::sameControl(after,control) ||
                     (n<32 && std::memcmp(full.get(),ram,bozo::kFlatBytes)))
                 {
                     if(!kind) {
@@ -130,7 +132,7 @@ int main()
                         for(unsigned v:{14u,15u,17u,18u,20u,21u,22u,23u,24u,27u})std::fprintf(stderr,"vf%u %08x %08x %08x %08x\n",v,original.vu0_vf[v].u[0],original.vu0_vf[v].u[1],original.vu0_vf[v].u[2],original.vu0_vf[v].u[3]);
                     }
                     std::fprintf(stderr,"FAIL kind %u mode %u case %u: CPU %d data %d host %d return %x/%x\n",kind,mode,n,
-                        compareCpu(original,native,initial),std::memcmp(arena,expected.data(),input.size()),after==control,
+                        compareCpu(original,native,initial),std::memcmp(arena,expected.data(),input.size()),tmb::test::sameControl(after,control),
                         getRegU32(&native,2),getRegU32(&original,2));
                     for (size_t i=0;i<sizeof(native);++i) if ((i<vuAt || i>=vuAt+vuBytes) && ((uint8_t *)&original)[i]!=((uint8_t *)&native)[i])
                         std::fprintf(stderr,"CPU byte %zu original %02x native %02x\n",i,((uint8_t *)&original)[i],((uint8_t *)&native)[i]);
@@ -155,11 +157,12 @@ int main()
             setRegU32(&initial,28,0x14854);setRegU32(&initial,31,0xbad0000);d.updateLimit(&initial);
             auto original=initial,native=initial;
             const unsigned control=((saved|0x1f80u)&~0xe040u)|(mode<<13)|(n&1 ? 0x8040u : 0);
-            _mm_setcsr(control);
+            _mm_setcsr(tmb::test::referenceControl(control));
             hdHatSphereTestAsm__FP8_fvectorfT0T0_0x1cf7c0(ram,&original,&rt);
+            _mm_setcsr(control);
             const auto before=host.microCalls;sphere(ram,&native,&rt);
             const auto after=_mm_getcsr();_mm_setcsr(saved);
-            if (!compareCpu(original,native,initial) || after!=control || host.microCalls!=before) {
+            if (!compareCpu(original,native,initial) || !tmb::test::sameControl(after,control) || host.microCalls!=before) {
                 std::fprintf(stderr,"FAIL sphere edge %u mode %u return %x/%x\n",n,mode,getRegU32(&native,2),getRegU32(&original,2));return 5;
             }
             ++edges;
@@ -196,7 +199,7 @@ int main()
         for(auto &v:initial.vu0_vf)for(auto &b:v.u)b=randomBits();initial.vu0_vf[0]={};initial.vu0_vf[0].u[3]=0x3f800000;
         d.updateLimit(&initial);auto original=initial,native=initial;
         const unsigned control=((saved|0x1f80u)&~0xe040u)|(mode<<13)|(n&1 ? 0x8040u : 0);
-        _mm_setcsr(control);
+        _mm_setcsr(tmb::test::referenceControl(control));
         rt.functions.setOverride(0x201660,&referencePlane);
         try { bspVecTestIn__FP8_hierbspP8_fvectorT1_0x201318(ram,&original,&rt); }
         catch(const bozo::ee::StopGuest &) { if(original.pc!=0xbad0000)throw; } // recursive root return to dispatcher
@@ -204,10 +207,11 @@ int main()
         if(n<8)std::memcpy(full.get(),ram,bozo::kFlatBytes);
         std::memcpy(ram+0x10000,callerInput.get(),callerBytes);
         rt.functions.setOverride(0x201660,plane);
+        _mm_setcsr(tmb::test::referenceControl(control)); // the generated caller runs on both sides: the game's rounding
         try { bspVecTestIn__FP8_hierbspP8_fvectorT1_0x201318(ram,&native,&rt); }
         catch(const bozo::ee::StopGuest &) { if(native.pc!=0xbad0000)throw; }
         const unsigned after=_mm_getcsr();_mm_setcsr(saved);
-        if(!compareCpu(original,native,initial)||std::memcmp(callerExpected.get(),ram+0x10000,callerBytes)||after!=control||
+        if(!compareCpu(original,native,initial)||std::memcmp(callerExpected.get(),ram+0x10000,callerBytes)||!tmb::test::sameControl(after,tmb::test::referenceControl(control))||
             (n<8&&std::memcmp(full.get(),ram,bozo::kFlatBytes))||native.pc!=0xbad0000) {
             std::fprintf(stderr,"FAIL complete BSP caller %u mode %u CPU %d data %d pc %x\n",n,mode,compareCpu(original,native,initial),std::memcmp(callerExpected.get(),ram+0x10000,callerBytes),native.pc);return 6;
         }

@@ -45,6 +45,13 @@ namespace tmb::native
         }
         double g_lastMatchFrame = -1.0, g_lastMenuFrame = -1.0;
         bool inMatch() { return g_lastMatchFrame >= 0.0 && hostSeconds() - g_lastMatchFrame < 0.1; }
+        // The same by game frame, not host time, for the reference checker (checkedEffects): the frames (bozo::det) at
+        // the last match frame's end and the last menu frame's (counted outside a match only, as g_lastMenuFrame).
+        int64_t g_checkMatchEnd = -1, g_checkMenuEnd = -1;
+        // 0.1 s as the reference ran (60 frames a second): match1p's last match frame ends at 13729 and its flares stay
+        // native to 13735 (6 frames on), the game's from 13736.
+        bool checkRecent(int64_t at) { return at >= 0 && static_cast<int64_t>(bozo::det::frame()) - at <= 6; }
+        bool checkInMatch() { return checkRecent(g_checkMatchEnd); }
 
         // The menus natively too (TMB_NATIVE_MENUS=0: not drawn). Their frames end at sceGsSyncV (onMenuFrameEnd).
         bool menusNative()
@@ -139,10 +146,15 @@ namespace tmb::native
         return on;
     }
 
-    // For the particles drawn natively (runtime/tmb_particles.cpp): whether the effects are drawn natively now (a match
-    // or a native menu), and the group the next natively drawn program gets.
-    bool effectsInStream() { return enabled() && (inMatch() || menusNative()); }
+    // For the particles in the reference checker (tmb-check: no native graphics). Not the match and menu flags' host
+    // time, which made the check stop at match1p frame 5593 or 13737 by the host's speed: the reference's choices (TMB
+    // a7869c0, which recorded it), by game frame. The particles natively within 0.1 s of a match or menu frame's end (its
+    // effectsInStream); the lens flares natively only within 0.1 s of a match frame's (its flareDepthNative needed
+    // inMatch: the attract demo's frames end as menu frames, their flares the game's, with its GS readback).
+    bool checkedEffects() { return enabled() && (checkInMatch() || checkRecent(g_checkMenuEnd)); }
+    bool checkedFlares() { return enabled() && checkInMatch(); }
 
+    // For the particles drawn natively: the group the next natively drawn program gets.
     uint64_t nextStreamGroup() { return g_group + 1u; }
 
     // For the movie pictures (runtime/tmb_2d.cpp): whether the shell's menus are drawn natively now.
@@ -208,6 +220,7 @@ namespace tmb::native
     {
         if (!enabled())
             return;
+        g_checkMatchEnd = static_cast<int64_t>(bozo::det::frame());
         g_lastMatchFrame = hostSeconds();
         publish();
     }
@@ -216,7 +229,11 @@ namespace tmb::native
     // of it (empty with TMB_NATIVE_MENUS=0, so the last match frame does not stay over a menu).
     void onMenuFrameEnd()
     {
-        if (!enabled() || inMatch())
+        if (!enabled())
+            return;
+        if (!checkInMatch())
+            g_checkMenuEnd = static_cast<int64_t>(bozo::det::frame());
+        if (inMatch())
             return;
         g_lastMenuFrame = hostSeconds();
         publish();

@@ -150,7 +150,8 @@ namespace tmb::native
     // time, which made the check stop at match1p frame 5593 or 13737 by the host's speed: the reference's choices (TMB
     // a7869c0, which recorded it), by game frame. The particles natively within 0.1 s of a match or menu frame's end (its
     // effectsInStream); the lens flares natively only within 0.1 s of a match frame's (its flareDepthNative needed
-    // inMatch: the attract demo's frames end as menu frames, their flares the game's, with its GS readback).
+    // inMatch: the "No lives left" screen's frames after the match end as menu frames, their flares the game's, with its
+    // GS readback).
     bool checkedEffects() { return enabled() && (checkInMatch() || checkRecent(g_checkMenuEnd)); }
     bool checkedFlares() { return enabled() && checkInMatch(); }
 

@@ -68,7 +68,8 @@
 namespace tmb::native
 {
     bool enabled();
-    bool effectsInStream();
+    bool checkedEffects();
+    bool checkedFlares();
     uint64_t nextStreamGroup();
     bool flareDepthNative();
     bool flareDepthBlock(uint32_t x0, uint32_t y0, uint32_t z[16]);
@@ -2415,7 +2416,8 @@ namespace tmb::particles
             const uint32_t view = getRegU32(ctx, 4), gp = getRegU32(ctx, 28);
             g_view = view;
             const bool toggledAll = toggledOff() && !settings().toggleFlares;
-            if (!settings().on || (!bozo::port::nativeGraphics(runtime) && !tmb::native::effectsInStream()) ||
+            // Without native graphics (only the reference checker, tmb-check) as the reference chose (checkedEffects).
+            if (!settings().on || (!bozo::port::nativeGraphics(runtime) && !tmb::native::checkedEffects()) ||
                 u32(rdram, gp + static_cast<uint32_t>(kGpColours)) == 0u || toggledAll)
             {
                 g_flaresNative = false;
@@ -2424,8 +2426,9 @@ namespace tmb::particles
                 return;
             }
             // The lens flares here too unless left to the game (the check, TMB_NATIVE_PARTICLES_FLARES=0, the flares' toggle
-            // period, the native depth off: their GS readback then).
+            // period, the native depth off: their GS readback then; in the reference checker outside a match, checkedFlares).
             const bool flaresNative = settings().flares && !settings().check && !(settings().toggleFlares && toggledOff()) &&
+                                      (bozo::port::nativeGraphics(runtime) || tmb::native::checkedFlares()) &&
                                       tmb::native::flareDepthNative();
 
             // The frustum (viewGetWH, viewGetFov): the half extents' slopes and the sphere test's factors.

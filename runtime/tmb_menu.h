@@ -23,8 +23,15 @@ namespace tmb::menu
         std::function<void(int)> setStateSlot;
         std::function<std::string(int)> slotSummary;
         std::function<bool(int)> saveState, loadState;
+        // Ends the game (the window closes): QUIT GAME, confirmed by a second Cross.
+        std::function<void()> quit;
+        // Widescreen (runtime/tmb_widescreen.cpp): the setting applied now, and the window's picture shape (0 the
+        // default 4:3, 16:9 while a view is wide).
+        std::function<bool()> widescreen;
+        std::function<void(float)> setPictureAspect;
     };
     void setHooks(Hooks hooks);
+    Hooks currentHooks();
 
     // A save state was loaded: the pages close (what they showed is gone).
     void stateLoaded();

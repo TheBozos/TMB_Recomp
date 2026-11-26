@@ -15,6 +15,11 @@ under "Unreleased" as they land, then move them under the new version's heading 
   AND SAVE writes `video.ini`), **Cheats** (unlock everything, infinite health / ammo / energy, no AI, weak enemies;
   at once) and **Save states** (the slot, LOAD, SAVE, as F5 / F7). Triangle or Circle goes back. The controls stay in
   F2.
+- **QUIT GAME** at the bottom of PC SETTINGS: Cross, then Cross again, ends the game and closes the window.
+- **Widescreen (16:9)**, off by default: in F2's Video tab, PC SETTINGS → Video, or `widescreen = on` in `video.ini`
+  (`PS2X_WIDESCREEN=1`). In one-player and two-player matches the game draws a 16:9 picture: it shows more at the
+  sides (its own views made wider, culling and all), nothing is stretched, and the HUD keeps its shape. The menus,
+  movies and loading screens stay 4:3, centred, and three- and four-player split screens stay 4:3.
 
 ## [0.6.0] - 2026-11-11
 

@@ -61,6 +61,11 @@ namespace tmb::menu
     void install(tmb::Registry &runtime);
 }
 
+namespace tmb::widescreen
+{
+    void update(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, bool match);
+}
+
 namespace tmb::meshes
 {
     void install(tmb::Registry &runtime);
@@ -501,6 +506,7 @@ namespace
         g_lastMatchFrameNoted.store(hitchClock(), std::memory_order_relaxed);
         tmb::cheats::onFrame(rdram); // the Cheats tab (runtime/tmb_cheats.cpp)
         const uint32_t gp = getRegU32(ctx, 28);
+        tmb::widescreen::update(rdram, ctx, runtime, true); // widescreen: the match's views (runtime/tmb_widescreen.cpp)
         tmb::native::onFrameEnd(); // TMB_NATIVE: publish the frame's native draws
         timerEndOfRealTimeProcessing__Fv_0x1f67f0(rdram, ctx, runtime);
         int32_t *frameTicks = reinterpret_cast<int32_t *>(rdram + ((gp + kFrameTicksGpOffset) & 0x1FFFFFFu));
@@ -550,6 +556,7 @@ namespace
     {
         g_pacer.setCap(static_cast<uint32_t>(fieldRate(rdram, gp)));
         g_pacer.setPaced(bozo::port::realTime(runtime)); // a headless or checked run is not held to real time
+        tmb::widescreen::update(rdram, ctx, runtime, false); // the window's picture shape as the views are now
         tmb::native::onMenuFrameEnd(); // TMB_NATIVE: publishes a menu frame's native draws (not in a match)
         const double step = g_pacer.frameEnd();
         tmb::cheats::logProgress(rdram, gp); // TMB_LOG_PROGRESS

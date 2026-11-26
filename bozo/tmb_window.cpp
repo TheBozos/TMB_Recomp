@@ -293,6 +293,10 @@ int main(int argc, char **argv)
         host.requestLoad(bozo::app::stateSlotPath(slot));
         return true;
     };
+    menuHooks.quit = [&] { host.requestStop(); };
+    menuHooks.widescreen = [] { return bozo::app::video::shared().applied.widescreen; };
+    menuHooks.setPictureAspect = [](float aspect) { bozo::app::setPictureAspect(aspect); };
+    bozo::app::video::offerWidescreen(true); // runtime/tmb_widescreen.cpp
     tmb::menu::setHooks(std::move(menuHooks));
     return bozo::app::runWindow(window, game, &pad);
 }

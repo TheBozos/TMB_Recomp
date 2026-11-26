@@ -30,6 +30,11 @@ namespace tmb::native
     bool enabled();
 }
 
+namespace tmb::widescreen
+{
+    float screenWidth();
+}
+
 namespace tmb::textures
 {
     std::shared_ptr<const bozo::render::Texture> font();
@@ -752,7 +757,7 @@ namespace tmb::twod
             const uint32_t def = word(rdram, kViews + 4u);
             const float width = half(rdram, def + 8u), height = half(rdram, def + 0xau);
             bozo::render::Screen screen;
-            screen.width = width > 0.0f ? width : 640.0f;
+            screen.width = std::max(width > 0.0f ? width : 640.0f, tmb::widescreen::screenWidth()); // widescreen: the bar centred
             screen.height = height > 0.0f ? height : 448.0f;
             screen.originX = 2048.0f - screen.width * 0.5f;
             screen.originY = 2048.0f - screen.height * 0.5f;
@@ -902,13 +907,13 @@ namespace tmb::twod
                 return false;
             constexpr float kFrameHeight = 448.0f;
             bozo::render::Screen screen;
-            screen.originX = 2048.0f - 320.0f;
+            screen.width = tmb::widescreen::screenWidth(); // widescreen: the picture centred in its 640
+            screen.originX = 2048.0f - screen.width * 0.5f;
             screen.originY = 2048.0f - kFrameHeight * 0.5f;
-            screen.width = 640.0f;
             screen.height = kFrameHeight;
             const float width = static_cast<float>(picture->width), height = static_cast<float>(picture->height);
             if (!tmb::native::menusDrawn())
-                bozo::render::Renderer::instance().setBackdrop(std::move(picture), screen, screen.originX + (640.0f - width) * 0.5f,
+                bozo::render::Renderer::instance().setBackdrop(std::move(picture), screen, 2048.0f - 320.0f + (640.0f - width) * 0.5f,
                                                            screen.originY + (kFrameHeight - height) * 0.5f, width, height);
             return true;
         }

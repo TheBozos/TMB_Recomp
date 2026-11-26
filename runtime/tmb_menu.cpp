@@ -1,7 +1,8 @@
 // PC SETTINGS in the game's own Options screen: a ninth line under the game's eight, and behind it pages drawn with the
 // game's font and steered with the pad, for what the settings window (F2) offers besides the controls: Video (the
-// window's settings, applied and saved to video.ini), Cheats (runtime/tmb_cheats.cpp's switches, at once) and Save
-// states (the slot, load, save). The controls stay in F2.
+// window's settings, applied and saved to video.ini; widescreen: runtime/tmb_widescreen.cpp), Cheats
+// (runtime/tmb_cheats.cpp's switches, at once) and Save states (the slot, load, save), and QUIT GAME (a second Cross
+// ends the game). The controls stay in F2.
 //
 // The Options screen (uiOptions, 0x1911F0, screen 10 of uiMain's table; one call a frame), from its code:
 // - Its cursor is options_main_line (0x4FB2F4), 0 to 7 (DIFFICULTY ... SAVE SETTINGS TO MEMORY CARD); options_subScreen
@@ -202,6 +203,7 @@ namespace tmb::menu
             std::vector<std::pair<int, int>> resolutions;
             int monitorRefresh = 0;
             std::string status; // a line under the page: what Cross did
+            bool quitArmed = false; // QUIT GAME pressed once: a second Cross quits
         } g_menu;
 
         std::string upper(std::string s)
@@ -279,6 +281,7 @@ namespace tmb::menu
             VUpscale,
             VFilter,
             VPack,
+            VWide,
             VPause,
             VFast,
             VApply,
@@ -300,6 +303,7 @@ namespace tmb::menu
             rows[VFilter] = {"UPSCALING FILTER", v.textureUpscale.filter == bozo::render::UpscaleFilter::Smooth ? "SMOOTH" : "EDGE"};
             const bool pack = h.texturePackFolder && !h.texturePackFolder(packOn(v.texturePack) ? v.texturePack : "").empty();
             rows[VPack] = {"TEXTURE PACK", pack ? onOff(packOn(v.texturePack)) : "NONE"};
+            rows[VWide] = {"WIDESCREEN", onOff(v.widescreen)};
             rows[VPause] = {"PAUSE IN BACKGROUND", onOff(v.pauseInBackground)};
             rows[VFast] = {"FAST FORWARD", v.fastForward == 0 ? "UNLIMITED" : timesText(v.fastForward / 100)};
             rows[VApply] = {"APPLY AND SAVE", ""};
@@ -353,6 +357,7 @@ namespace tmb::menu
                 v.texturePack = packOn(v.texturePack) ? "off" : s_lastOn;
                 return true;
             }
+            case VWide: v.widescreen = !v.widescreen; return true;
             case VPause: v.pauseInBackground = !v.pauseInBackground; return true;
             case VFast: v.fastForward = step(kFastForwards, v.fastForward, delta); return true;
             default: return false;
@@ -479,6 +484,8 @@ namespace tmb::menu
                 std::vector<Row> rows;
                 for (const Page p : topPages(h))
                     rows.push_back({pageName(p), ""});
+                if (h.quit)
+                    rows.push_back({m.quitArmed ? "QUIT GAME: PRESS X AGAIN" : "QUIT GAME", ""});
                 return rows;
             }
             case Page::Video: return videoRows(m, h);
@@ -505,6 +512,7 @@ namespace tmb::menu
             m.page = page;
             m.line = 0;
             m.status.clear();
+            m.quitArmed = false;
             if (page == Page::Video && h.videoShared)
             {
                 const bozo::app::video::Shared s = h.videoShared();
@@ -528,6 +536,13 @@ namespace tmb::menu
 
             if (pressed(kTriangle) || pressed(kCircle))
             {
+                if (m.quitArmed)
+                {
+                    m.quitArmed = false; // Back only disarms QUIT GAME
+                    g.sound(kSoundBack);
+                    rows = rowsOf(m, h);
+                    goto draw;
+                }
                 g.sound(kSoundBack);
                 if (m.page == Page::Top)
                 {
@@ -543,6 +558,7 @@ namespace tmb::menu
             else if (pressed(kUp) || pressed(kDown))
             {
                 m.line = nextLine(rows, m.line, pressed(kUp) ? -1 : 1);
+                m.quitArmed = false;
                 g.sound(pressed(kUp) ? kSoundUp : kSoundDown);
                 m.status.clear();
             }
@@ -577,6 +593,15 @@ namespace tmb::menu
                         open(m, pages[static_cast<size_t>(m.line)], h);
                         rows = rowsOf(m, h);
                     }
+                    else if (h.quit && m.line == static_cast<int>(pages.size()))
+                    {
+                        // QUIT GAME: a second Cross ends the game (the window closes, as closing it does).
+                        g.sound(kSoundAccept);
+                        if (m.quitArmed)
+                            h.quit();
+                        m.quitArmed = !m.quitArmed;
+                        rows = rowsOf(m, h);
+                    }
                 }
                 else if (m.page == Page::Video && m.line == VApply && h.videoApply)
                 {
@@ -602,6 +627,7 @@ namespace tmb::menu
                 }
             }
 
+        draw:
             // The page's sliders hidden, as the game's controls page hides them (uiOptions shows them again on its page).
             g.call(&blankSliders__Fi_0x19de38, kBlankSliders, {0u});
             // Drawn: the title, then each line (the selected one larger and brighter, as the game's), its value to the right.
@@ -699,6 +725,8 @@ namespace tmb::menu
                 ctx->pc = getRegU32(ctx, 31); // jr $ra: the game's page not run
         }
     }
+
+    Hooks currentHooks() { return hooks(); }
 
     void setHooks(Hooks h)
     {

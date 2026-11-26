@@ -22,6 +22,11 @@
 #include <cstdlib>
 #include <cstring>
 
+namespace tmb::widescreen
+{
+    float screenWidth();
+}
+
 namespace tmb::twod
 {
     void publish();
@@ -112,6 +117,9 @@ namespace tmb::native
             // A match draws fields (the frame's every other line), the shell's menus whole frames.
             const float lines = menusNative() ? 2.0f : 1.0f;
             screen.originY = 2048.0f - 112.0f * lines; // NTSC: a 640 x 224 field
+            // Widescreen: the views 853 wide about the same centre (runtime/tmb_widescreen.cpp).
+            screen.width = tmb::widescreen::screenWidth();
+            screen.originX = 2048.0f - screen.width * 0.5f;
             screen.height = 224.0f * lines;
             // GS Z is z / w itself (the microprograms write FTOI4 of z / w into XYZF2's 24-bit Z, that word over 16).
             screen.gsZScale = 1.0f;

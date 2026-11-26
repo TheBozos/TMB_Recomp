@@ -299,6 +299,34 @@ namespace tmb::cheats
 
     void setTheGame(uint32_t game) { g_theGame.store(game, std::memory_order_relaxed); }
 
+    // The Cheats tab's switches, for the game's own Options screen (runtime/tmb_menu.cpp): read, and set at once.
+    struct Values
+    {
+        bool unlockAll = false, noAi = false;
+        uint32_t health = 0u, ammo = 0u, energy = 0u; // one bit per player
+        float enemyCap = -1.0f;                        // weak enemies: < 0 off
+    };
+    Values values()
+    {
+        Values v;
+        v.unlockAll = g_unlockAll.load(std::memory_order_relaxed);
+        v.noAi = g_noAi.load(std::memory_order_relaxed);
+        v.health = g_infiniteHealth.load(std::memory_order_relaxed);
+        v.ammo = g_infiniteAmmo.load(std::memory_order_relaxed);
+        v.energy = g_infiniteEnergy.load(std::memory_order_relaxed);
+        v.enemyCap = g_enemyCap.load(std::memory_order_relaxed);
+        return v;
+    }
+    void setValues(const Values &v)
+    {
+        g_unlockAll.store(v.unlockAll, std::memory_order_relaxed);
+        g_noAi.store(v.noAi, std::memory_order_relaxed);
+        g_infiniteHealth.store(v.health, std::memory_order_relaxed);
+        g_infiniteAmmo.store(v.ammo, std::memory_order_relaxed);
+        g_infiniteEnergy.store(v.energy, std::memory_order_relaxed);
+        g_enemyCap.store(v.enemyCap, std::memory_order_relaxed);
+    }
+
     // Once a frame (timerEndOfRealTimeProcessing, the frame's processing done).
     // TMB_LOG_PROGRESS=1 (finding the story's state): each word of Shell + 0x18000 + 0x2180 to + 0x2500 that changes,
     // with the time, from every frame end (the menus' too).

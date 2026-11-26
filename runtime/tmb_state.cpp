@@ -19,6 +19,7 @@ namespace tmb
     namespace particles { void state(bozo::state::Archive &); }
     namespace cheats { void state(bozo::state::Archive &); }
     namespace twod { void stateLoaded(); }
+    namespace menu { void stateLoaded(); }
 
     void addStateSection(bozo::host::FreeHost &host, Runtime *runtime)
     {
@@ -42,7 +43,10 @@ namespace tmb
                                        a.end();
                                        cheats::state(a);
                                        if (a.loading())
+                                       {
                                            twod::stateLoaded();
+                                           menu::stateLoaded();
+                                       }
                                    },
                                    [] { return std::string(); }});
     }

@@ -113,6 +113,7 @@ those comparisons from actual native play. [docs/RECOMP_NOTES.md](docs/RECOMP_NO
 | Original heat haze enabled by default | ✅ |
 | Multi-player split-screen, 2 to 4 players; frame-keyed scripts for unattended checks | ✅ |
 | Settings (F2): controls, video, cheats; windowed / fullscreen / borderless | ✅ |
+| PC SETTINGS in the game's Options screen: video, cheats and save states with the pad | ✅ |
 | Save states (F5 save, F7 load, ten slots; `--save-state` / `--load-state` for scripted runs) | ✅ |
 | Higher internal resolution (2× by default; Video's render scale) | ✅ |
 | Interpolated presentation above 60 Hz; rain, snow, flares and some trails still update at game rate | 🧪 |
@@ -408,6 +409,10 @@ use physical US positions:
 | F11, Alt+Enter | Switch between the window and the last fullscreen mode. |
 | F8 | Capture consecutive presents (the sequence settings below). |
 | F9 | Start/stop a capture burst, ten captures per second. |
+
+In the game, **Options → PC SETTINGS** (the last line, under the memory card lines) has the same Video, Cheats and
+Save states with the pad: Up / Down to choose, Left / Right to change, Cross to open or act (Video's APPLY AND SAVE,
+Save states' LOAD and SAVE), Triangle or Circle to go back. The controls are rebound in F2.
 
 The picture stays 4:3 inside the window. Video can present at game rate, a fixed higher rate, or the monitor's rate
 with interpolation; the game itself keeps its 60 Hz timing. Interpolation adds about one game frame of latency and

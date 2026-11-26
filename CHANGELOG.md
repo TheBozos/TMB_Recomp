@@ -7,6 +7,15 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+### Added
+
+- **PC SETTINGS in the game's own Options screen.** A ninth line under SAVE SETTINGS TO MEMORY CARD opens pages
+  drawn in the game's font and steered with the pad: **Video** (display mode, resolution, render scale, frame rate,
+  anti-aliasing, texture smoothing, upscaling and its filter, texture pack, pause in background, fast forward; APPLY
+  AND SAVE writes `video.ini`), **Cheats** (unlock everything, infinite health / ammo / energy, no AI, weak enemies;
+  at once) and **Save states** (the slot, LOAD, SAVE, as F5 / F7). Triangle or Circle goes back. The controls stay in
+  F2.
+
 ## [0.6.0] - 2026-11-11
 
 ### Added

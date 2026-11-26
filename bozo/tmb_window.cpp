@@ -18,7 +18,8 @@
 // as the fork's TMB did (<exe>/game/SCUS_971.01, then the same in the user folder).
 //
 // Milestone M4, as the fork's TMB: F2 the settings window (Controls: input.ini; Video: video.ini in the user folder,
-// --width / --height / --fullscreen (borderless) / --render-scale over it; Cheats: runtime/tmb_cheats.cpp), F3 the
+// --width / --height / --fullscreen (borderless) / --render-scale over it; Cheats: runtime/tmb_cheats.cpp; Video,
+// Cheats and Save states also in the game's Options screen, PC SETTINGS: runtime/tmb_menu.cpp), F3 the
 // frame rate counter (PS2X_SHOW_FPS=1 from the start), F8 a capture sequence (PS2X_CAPTURE_SEQUENCE presents,
 // PS2X_CAPTURE_SEQUENCE_AT seconds), F9 a burst of captures, ten a second; --capture-frames saves the game's picture at
 // the first present after each of those game frames. The captures go to --capture-dir, else PS2X_CAPTURE_WINDOW_DIR,
@@ -30,6 +31,7 @@
 // queue, latency and underruns every 2 s. --wav (or PS2X_AUDIO_RECORD): what the mixer made, also to a WAV file.
 #include "tmb_state.h"
 #include "tmb_host.h"
+#include "tmb_menu.h"
 #include "tmb_port.h"
 
 #include "bozo/app/app.h"
@@ -38,6 +40,7 @@
 #include "bozo/audio/wav.h"
 #include "bozo/app/device_pad.h"
 #include "bozo/app/input_bindings.h"
+#include "bozo/app/panel.h"
 #include "bozo/app/video_settings.h"
 #include "bozo/app/window.h"
 #include "bozo/ee/dispatcher.h"
@@ -270,5 +273,26 @@ int main(int argc, char **argv)
     game.framesEnded = [&] { return host.framesEnded(); };
     game.saveState = [&](int slot) { host.requestSave(bozo::app::stateSlotPath(slot)); };
     game.loadState = [&](int slot) { host.requestLoad(bozo::app::stateSlotPath(slot)); };
+
+    // PC SETTINGS in the game's Options screen (runtime/tmb_menu.cpp): the window's video settings and save states.
+    tmb::menu::Hooks menuHooks;
+    menuHooks.videoShared = [] { return bozo::app::video::shared(); };
+    menuHooks.videoApply = [](const bozo::app::video::Settings &s) { bozo::app::video::post(s, true); };
+    menuHooks.texturePackFolder = [](const std::string &s) { return bozo::app::video::texturePackFolder(s); };
+    menuHooks.stateSlot = [] { return bozo::app::stateSlot(); };
+    menuHooks.setStateSlot = [](int slot) { bozo::app::setStateSlot(slot); };
+    menuHooks.slotSummary = [](int slot) { return bozo::app::stateSlotSummary(slot); };
+    menuHooks.saveState = [&](int slot)
+    {
+        host.requestSave(bozo::app::stateSlotPath(slot));
+        bozo::app::captureStatePicture(slot); // the slot's picture, as F5 takes it
+        return true;
+    };
+    menuHooks.loadState = [&](int slot)
+    {
+        host.requestLoad(bozo::app::stateSlotPath(slot));
+        return true;
+    };
+    tmb::menu::setHooks(std::move(menuHooks));
     return bozo::app::runWindow(window, game, &pad);
 }

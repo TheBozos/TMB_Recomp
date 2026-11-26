@@ -56,6 +56,11 @@ namespace tmb::cheats
     void logProgress(uint8_t *rdram, uint32_t gp);
 }
 
+namespace tmb::menu
+{
+    void install(tmb::Registry &runtime);
+}
+
 namespace tmb::meshes
 {
     void install(tmb::Registry &runtime);
@@ -1139,6 +1144,7 @@ namespace
         runtime.registerFunction(kMtapPortClose, &mtapPortClose);
         runtime.registerFunction(kMtapGetConnection, &mtapGetConnection);
         tmb::cheats::install(runtime); // TMB_NO_AI, infinite health / ammo / energy, weak enemies (runtime/tmb_cheats.cpp)
+        tmb::menu::install(runtime); // PC SETTINGS in the game's Options screen (runtime/tmb_menu.cpp)
         if (const char *fx = std::getenv("TMB_FX_TEST"); fx && *fx)
         {
             g_fxTest.period = std::max(0.5, std::atof(fx));

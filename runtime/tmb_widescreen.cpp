@@ -12,6 +12,11 @@
 // them again at each screen's start (the menus get theirs back at 640), so only a match frame's end widens them, and
 // one ends them narrow again when widescreen is switched off or the layout is split in four.
 //
+// The dialogs over a match (displayDialog 0x163500: the pause, the results, won and lost) lay their text and darkening
+// out for a 640-wide view (centred at x 320 from the view's left edge, the band 640 wide), and with one player the
+// pause keeps the match's view: so the views go back to 640 before the dialog starts (its picture 4:3, centred), and the
+// match's next frame end widens them again.
+//
 // Off (the default) or in the headless program (no hooks), nothing changes: replays and the reference check are the
 // game's own picture.
 
@@ -20,17 +25,22 @@
 
 #include <algorithm>
 #include <atomic>
+#include <vector>
 #include <cstring>
 
 namespace tmb::widescreen
 {
     namespace
     {
-        constexpr uint32_t kViews = 0x004DFCD0u, kNumViews = 0x004FBC44u, kViewTweakSetFov = 0x001FDEA0u;
+        constexpr uint32_t kViews = 0x004DFCD0u, kNumViews = 0x004FBC44u, kViewTweakSetFov = 0x001FDEA0u,
+                           kDisplayDialog = 0x00163500u;
         constexpr uint16_t kNarrow = 640, kWide = 853; // 640 * 4 / 3
         constexpr float kWideAspect = 16.0f / 9.0f;
 
         std::atomic<bool> g_wide{false};
+        // Every viewport widened (the views' records point at a few fixed ones, which viewCreate hands out again: the
+        // pause's full-screen view may be one widened earlier in the match and not shown since), narrowed together.
+        std::vector<uint32_t> g_widened;
         float g_aspectSet = -1.0f;
 
         uint32_t word(const uint8_t *rdram, uint32_t address)
@@ -52,6 +62,34 @@ namespace tmb::widescreen
         {
             const uint32_t v = word(rdram, kViews + view * 16u + 4u);
             return v >= 0x100000u && v < 0x2000000u ? v : 0u;
+        }
+    }
+
+    namespace
+    {
+        // The game's own rebuild of every view's frustum and projection, on a copy of the context (guest code there
+        // never leaves the override: BozoEngine kernel.md section 3b), its stack below the thread's.
+        void rebuildViews(uint8_t *rdram, const R5900Context *ctx, PS2Runtime *runtime)
+        {
+            R5900Context copy = *ctx;
+            SET_GPR_U32(&copy, 29, (getRegU32(ctx, 29) - 0x200u) & ~0xFu);
+            copy.leaving = 0;
+            copy.pc = kViewTweakSetFov;
+            viewTweakSetFov__Fv_0x1fdea0(rdram, &copy, runtime);
+        }
+    }
+
+    namespace
+    {
+        // Every widened viewport back at 640; whether one was.
+        bool narrowAll(uint8_t *rdram)
+        {
+            bool changed = false;
+            for (const uint32_t vp : g_widened)
+                if (half(rdram, vp + 4u) == kWide)
+                    setHalf(rdram, vp + 4u, kNarrow), changed = true;
+            g_widened.clear();
+            return changed;
         }
     }
 
@@ -84,20 +122,16 @@ namespace tmb::widescreen
                 {
                     const uint16_t w = half(rdram, vp + 4u);
                     if (want && w == kNarrow)
+                    {
                         setHalf(rdram, vp + 4u, kWide), changed = true;
-                    else if (!want && w == kWide)
-                        setHalf(rdram, vp + 4u, kNarrow), changed = true;
+                        if (std::find(g_widened.begin(), g_widened.end(), vp) == g_widened.end())
+                            g_widened.push_back(vp);
+                    }
                 }
+            if (!want)
+                changed = narrowAll(rdram) || changed;
             if (changed)
-            {
-                // The game's own rebuild of every view's frustum and projection, on a copy of the context (guest code
-                // there never leaves the override: BozoEngine kernel.md section 3b), its stack below the thread's.
-                R5900Context copy = *ctx;
-                SET_GPR_U32(&copy, 29, (getRegU32(ctx, 29) - 0x200u) & ~0xFu);
-                copy.leaving = 0;
-                copy.pc = kViewTweakSetFov;
-                viewTweakSetFov__Fv_0x1fdea0(rdram, &copy, runtime);
-            }
+                rebuildViews(rdram, ctx, runtime);
         }
         bool anyWide = false;
         for (uint32_t i = 0; i < count; ++i)
@@ -111,4 +145,26 @@ namespace tmb::widescreen
             h.setPictureAspect(aspect);
         }
     }
+
+    namespace
+    {
+        // displayDialog(type): the views narrow again first (above), then the game's dialog.
+        void displayDialogOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (bozo::port::nativeGraphics(runtime))
+            {
+                if (narrowAll(rdram))
+                {
+                    rebuildViews(rdram, ctx, runtime);
+                    g_wide.store(false, std::memory_order_relaxed);
+                    const tmb::menu::Hooks h = tmb::menu::currentHooks();
+                    if (h.setPictureAspect)
+                        h.setPictureAspect(0.0f), g_aspectSet = 0.0f;
+                }
+            }
+            displayDialog__F13_shellOverlay_0x163500(rdram, ctx, runtime);
+        }
+    }
+
+    void install(tmb::Registry &runtime) { runtime.registerFunction(kDisplayDialog, &displayDialogOverride); }
 }

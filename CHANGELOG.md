@@ -7,8 +7,14 @@ under "Unreleased" as they land, then move them under the new version's heading 
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-27
+
 ### Added
 
+- **Save states.** F5 saves and F7 loads the current slot, F6 / Shift+F6 pick the slot (0 to 9), and F2 has a
+  **Save states** tab listing them with a picture of each. They go to `states/slot<n>.state` in the user folder (about
+  40 MB each). A state loads only into the build that wrote it, and a save waits while a movie plays. For scripted
+  runs: `--save-state FILE --save-state-at N` and `--load-state FILE`.
 - **PC SETTINGS in the game's own Options screen.** A ninth line under SAVE SETTINGS TO MEMORY CARD opens pages
   drawn in the game's font and steered with the pad: **Video** (display mode, resolution, render scale, frame rate,
   anti-aliasing, texture smoothing, upscaling and its filter, texture pack, pause in background, fast forward; APPLY

@@ -417,7 +417,7 @@ Save states' LOAD and SAVE), Triangle or Circle to go back. The controls are reb
 bottom of PC SETTINGS closes the game (press Cross twice).
 
 **Widescreen** (Video: Widescreen, off by default; `widescreen = on` in `video.ini`, `PS2X_WIDESCREEN=1`): one- and
-two-player matches are drawn 16:9, showing more at the sides with nothing stretched. Menus, movies, loading screens
+two-player matches are drawn 16:9, showing more at the sides with nothing stretched, the HUD at the screen's edges. Menus, movies, loading screens
 and three- or four-player split screens stay 4:3.
 
 The picture stays 4:3 inside the window. Video can present at game rate, a fixed higher rate, or the monitor's rate

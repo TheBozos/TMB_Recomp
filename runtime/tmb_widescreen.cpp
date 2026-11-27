@@ -17,6 +17,17 @@
 // pause keeps the match's view: so the views go back to 640 before the dialog starts (its picture 4:3, centred), and the
 // match's next frame end widens them again.
 //
+// The HUD (a match's, one or two players over and under): its two clusters are hier meshes on coordinate systems the
+// game hangs in front of the camera each frame (Hud::updateHUDPosition 0x13CC90: the view's matrix, its translation
+// plus the cluster's camera-space offset, Hud + 0x810 the radar's, + 0x820 the weapon's, x right, y the depth). Seen
+// through the same focal length D (viewport + 0) they keep their 4:3 places; for the 16:9 picture each goes out by
+// the width gained on its side, (w - 640) / 2 pixels, that is x - / + that * y / D for the call (the offsets put back
+// after it, so a narrowed view finds them as the game set them). The radar's centre and its blips follow (computed in
+// the same call); the markers and bars over the cars are the world's. (The game reaches both Hud functions by a jump
+// from TheGame's HudUpdateHUDPosition 0x15BD20 and HudUpdate 0x15BD40, which are the ones overridden.) The HUD's text
+// drawn from a 640 layout (Hud::Update 0x13D908: the ammo count and KILLS on the right, DEMO in the middle) goes with its cluster: x past 400
+// by the width gained, x past 240 by half of it, from the view's left edge (fontBuildPrim's).
+//
 // Off (the default) or in the headless program (no hooks), nothing changes: replays and the reference check are the
 // game's own picture.
 
@@ -33,7 +44,10 @@ namespace tmb::widescreen
     namespace
     {
         constexpr uint32_t kViews = 0x004DFCD0u, kNumViews = 0x004FBC44u, kViewTweakSetFov = 0x001FDEA0u,
-                           kDisplayDialog = 0x00163500u;
+                           kDisplayDialog = 0x00163500u, kHudPositionCall = 0x0015BD20u, kHudUpdateCall = 0x0015BD40u,
+                           kFontPrintXY = 0x001C44A8u, kFontPrintCenteredXY = 0x001C44D8u;
+        constexpr uint32_t kViewFovH = 0x004FBC04u, kHuds = 0x001ABE50u, kHudStride = 0xA00u, kRadarOffset = 0x810u,
+                           kWeaponOffset = 0x820u;
         constexpr uint16_t kNarrow = 640, kWide = 853; // 640 * 4 / 3
         constexpr float kWideAspect = 16.0f / 9.0f;
 
@@ -56,6 +70,13 @@ namespace tmb::widescreen
             return value;
         }
         void setHalf(uint8_t *rdram, uint32_t address, uint16_t value) { std::memcpy(rdram + (address & 0x1FFFFFEu), &value, 2); }
+        float flt(const uint8_t *rdram, uint32_t address)
+        {
+            float value;
+            std::memcpy(&value, rdram + (address & 0x1FFFFFCu), 4);
+            return value;
+        }
+        void setFlt(uint8_t *rdram, uint32_t address, float value) { std::memcpy(rdram + (address & 0x1FFFFFCu), &value, 4); }
 
         // The view's viewport (0 none).
         uint32_t viewport(const uint8_t *rdram, uint32_t view)
@@ -166,5 +187,68 @@ namespace tmb::widescreen
         }
     }
 
-    void install(tmb::Registry &runtime) { runtime.registerFunction(kDisplayDialog, &displayDialogOverride); }
+
+    namespace
+    {
+        // TheGame::HudUpdateHUDPosition(this, i) (0x15BD20, which jumps on to Hud::updateHUDPosition of the Hud at
+        // TheGame + 0x1ABE50 + i * 0xA00): the clusters' offsets out by the width gained, for the call (above).
+        void updateHudPositionOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            // The focal length every view is given (viewTweakSetFov's viewFovH), while the match's views are wide.
+            const uint32_t hud = getRegU32(ctx, 4) + kHuds + getRegU32(ctx, 5) * kHudStride;
+            const float d = flt(rdram, kViewFovH);
+            if (!bozo::port::nativeGraphics(runtime) || !wide() || !(d > 1.0f))
+            {
+                HudUpdateHUDPosition__7TheGamei_0x15bd20(rdram, ctx, runtime);
+                return;
+            }
+            const float gained = (kWide - kNarrow) * 0.5f;
+            const float radar = flt(rdram, hud + kRadarOffset), weapon = flt(rdram, hud + kWeaponOffset);
+            setFlt(rdram, hud + kRadarOffset, radar - gained * flt(rdram, hud + kRadarOffset + 4u) / d);
+            setFlt(rdram, hud + kWeaponOffset, weapon + gained * flt(rdram, hud + kWeaponOffset + 4u) / d);
+            // On a copy of the context: the call ends here (it never leaves), so the offsets go back after all of it.
+            R5900Context copy = *ctx;
+            copy.leaving = 0;
+            HudUpdateHUDPosition__7TheGamei_0x15bd20(rdram, &copy, runtime);
+            setFlt(rdram, hud + kRadarOffset, radar);
+            setFlt(rdram, hud + kWeaponOffset, weapon);
+            ctx->pc = getRegU32(ctx, 31);
+        }
+
+        bool g_inHudUpdate = false;
+        void hudUpdateOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            g_inHudUpdate = true;
+            HudUpdate__7TheGamei_0x15bd40(rdram, ctx, runtime); // on to Hud::Update
+            g_inHudUpdate = false;
+        }
+        // fontSpritePrintXY / CenteredXY (font, x, y, text) from Hud::Update: x from its 640 layout, moved with its cluster.
+        void shiftHudText(R5900Context *ctx)
+        {
+            if (!g_inHudUpdate || !wide())
+                return;
+            const int32_t x = static_cast<int32_t>(getRegU32(ctx, 5));
+            const int32_t gained = kWide - kNarrow;
+            SET_GPR_U32(ctx, 5, static_cast<uint32_t>(x > 400 ? x + gained : x > 240 ? x + gained / 2 : x));
+        }
+        void fontPrintXYOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            shiftHudText(ctx);
+            fontSpritePrintXY__FiiiPc_0x1c44a8(rdram, ctx, runtime);
+        }
+        void fontPrintCenteredXYOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            shiftHudText(ctx);
+            fontSpritePrintCenteredXY__FiiiPc_0x1c44d8(rdram, ctx, runtime);
+        }
+    }
+
+    void install(tmb::Registry &runtime)
+    {
+        runtime.registerFunction(kDisplayDialog, &displayDialogOverride);
+        runtime.registerFunction(kHudPositionCall, &updateHudPositionOverride);
+        runtime.registerFunction(kHudUpdateCall, &hudUpdateOverride);
+        runtime.registerFunction(kFontPrintXY, &fontPrintXYOverride);
+        runtime.registerFunction(kFontPrintCenteredXY, &fontPrintCenteredXYOverride);
+    }
 }

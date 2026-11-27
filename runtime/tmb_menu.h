@@ -32,6 +32,8 @@ namespace tmb::menu
     };
     void setHooks(Hooks hooks);
     Hooks currentHooks();
+    // The pages are open over the pause menu (tmb_2d.cpp: displayDialog's darkening left out under them).
+    bool pausePagesOpen();
 
     // A save state was loaded: the pages close (what they showed is gone).
     void stateLoaded();

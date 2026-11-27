@@ -113,7 +113,7 @@ those comparisons from actual native play. [docs/RECOMP_NOTES.md](docs/RECOMP_NO
 | Original heat haze enabled by default | ✅ |
 | Multi-player split-screen, 2 to 4 players; frame-keyed scripts for unattended checks | ✅ |
 | Settings (F2): controls, video, cheats; windowed / fullscreen / borderless | ✅ |
-| PC SETTINGS in the game's Options screen: video, cheats and save states with the pad | ✅ |
+| PC SETTINGS in the game's Options screen and pause menu: video, cheats and save states with the pad | ✅ |
 | Widescreen 16:9 in one- and two-player matches (more at the sides, HUD unstretched; menus stay 4:3) | ✅ |
 | Save states (F5 save, F7 load, ten slots; `--save-state` / `--load-state` for scripted runs) | ✅ |
 | Higher internal resolution (2× by default; Video's render scale) | ✅ |
@@ -411,8 +411,8 @@ use physical US positions:
 | F8 | Capture consecutive presents (the sequence settings below). |
 | F9 | Start/stop a capture burst, ten captures per second. |
 
-In the game, **Options → PC SETTINGS** (the last line, under the memory card lines) has the same Video, Cheats and
-Save states with the pad: Up / Down to choose, Left / Right to change, Cross to open or act (Video's APPLY AND SAVE,
+In the game, **Options → PC SETTINGS** (the last line, under the memory card lines), and **PC SETTINGS** in the pause
+menu during a match, have the same Video, Cheats and Save states with the pad: Up / Down to choose, Left / Right to change, Cross to open or act (Video's APPLY AND SAVE,
 Save states' LOAD and SAVE), Triangle or Circle to go back. The controls are rebound in F2. **QUIT GAME** at the
 bottom of PC SETTINGS closes the game (press Cross twice).
 

@@ -35,6 +35,11 @@ namespace tmb::widescreen
     float screenWidth();
 }
 
+namespace tmb::menu
+{
+    bool pausePagesOpen();
+}
+
 namespace tmb::textures
 {
     std::shared_ptr<const bozo::render::Texture> font();
@@ -823,7 +828,7 @@ namespace tmb::twod
         // towards (0, 0, 10) (alpha 0x21, the font's (Cs - Cd) As + Cd). Its kick is patched out (dialogKick).
         void dialogDim(uint8_t *rdram, uint32_t gp)
         {
-            if (gp == 0u)
+            if (gp == 0u || tmb::menu::pausePagesOpen()) // the PC SETTINGS pages over the pause: undimmed (runtime/tmb_menu.cpp)
                 return;
             const View v = viewOf(rdram, word(rdram, gp + kGpCurView));
             const float left = static_cast<float>(v.cx - (v.w >> 1)), top = static_cast<float>(v.cy - (v.h >> 1));

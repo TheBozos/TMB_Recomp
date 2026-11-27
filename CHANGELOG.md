@@ -15,6 +15,8 @@ under "Unreleased" as they land, then move them under the new version's heading 
   AND SAVE writes `video.ini`), **Cheats** (unlock everything, infinite health / ammo / energy, no AI, weak enemies;
   at once) and **Save states** (the slot, LOAD, SAVE, as F5 / F7). Triangle or Circle goes back. The controls stay in
   F2.
+- **PC SETTINGS in the pause menu** too: a fifth line under RESUME, QUIT, SET VIBRATION and ADJUST REAR VIEW (a
+  fourth with several players) opens the same pages in the pause menu's style, on the pausing player's pad.
 - **QUIT GAME** at the bottom of PC SETTINGS: Cross, then Cross again, ends the game and closes the window.
 - **Widescreen (16:9)**, off by default: in F2's Video tab, PC SETTINGS → Video, or `widescreen = on` in `video.ini`
   (`PS2X_WIDESCREEN=1`). In one-player and two-player matches the game draws a 16:9 picture: it shows more at the

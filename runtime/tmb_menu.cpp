@@ -1,4 +1,5 @@
-// PC SETTINGS in the game's own Options screen: a ninth line under the game's eight, and behind it pages drawn with the
+// PC SETTINGS in the game's own Options screen (a ninth line under the game's eight) and in its pause menu (a line under
+// its own, below), and behind it pages drawn with the
 // game's font and steered with the pad, for what the settings window (F2) offers besides the controls: Video (the
 // window's settings, applied and saved to video.ini; widescreen: runtime/tmb_widescreen.cpp), Cheats
 // (runtime/tmb_cheats.cpp's switches, at once) and Save states (the slot, load, save), and QUIT GAME (a second Cross
@@ -33,6 +34,7 @@
 #include "tmb_menu.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -63,6 +65,14 @@ namespace tmb::menu
         constexpr uint32_t kFontSetColor = 0x001C4258u, kFontSetSizes = 0x001C4700u, kFontSetCursor = 0x001C47B8u,
                            kFontPrint = 0x001C47D8u, kFontPrintCentered = 0x001C4568u, kPlaySound = 0x00179720u,
                            kBlankSliders = 0x0019DE38u;
+        // The pause menu (pauseLevelOverlay 0x166960, in displayDialog's own loop; types 0 and 16 the pause).
+        constexpr uint32_t kPauseOverlay = 0x00166960u, kMenuSelection = 0x00167AF8u, kPauseExit = 0x00167670u,
+                           kPauseSelectionReturn = 0x00166AE4u, kPauseExitReturn = 0x00166D64u, kPauseReturn0 = 0x001637E4u,
+                           kPauseReturn16 = 0x001637F4u;
+        constexpr uint32_t kSetMenuFont = 0x00167810u, kSetTitleFont = 0x00167AC8u, kFontSetSize = 0x001C4330u,
+                           kFontPrintXY = 0x001C44A8u, kFontPrintCenteredXY = 0x001C44D8u, kPlayRtSound = 0x00179768u,
+                           kInputGetInput = 0x001D8770u, kInputGetPlayerPad = 0x001D8658u;
+        constexpr uint32_t kCurrentMenuSelection = 0x004FAD30u, kPlayerThatPaused = 0x004FAE64u;
         constexpr uint32_t kScreen = 0x004FB144u, kTransitioning = 0x004FB1ACu, kSubScreen = 0x004FB2F0u, kLine = 0x004FB2F4u;
         constexpr uint32_t kShellPointer = 0x004FAD28u, kShellSound = 0x1A144u;
         constexpr uint32_t kLeft = 0x004FB360u, kRight = 0x004FB364u, kUp = 0x004FB368u, kDown = 0x004FB36Cu,
@@ -101,6 +111,7 @@ namespace tmb::menu
             PS2Runtime *rt;
             R5900Context copy;
             uint32_t text = 0u;
+            bool pause = false; // the pause menu's pages: its pad, sounds and fonts (pixels, not sub-pixels)
 
             Guest(uint8_t *memory, const R5900Context *ctx, PS2Runtime *runtime) : rdram(memory), rt(runtime), copy(*ctx)
             {
@@ -119,6 +130,7 @@ namespace tmb::menu
                 copy.pc = address;
                 fn(rdram, &copy, rt);
             }
+            uint32_t result() const { return getRegU32(&copy, 2); }
             uint32_t string(const std::string &s)
             {
                 const size_t n = std::min<size_t>(s.size(), 255u);
@@ -128,6 +140,14 @@ namespace tmb::menu
             }
             void sound(int which)
             {
+                if (pause)
+                {
+                    // The pause's own sounds (getCurrentMenuSelection, checkInputForPauseExit): 0x2C down, 0x2B up,
+                    // 0x2A accept.
+                    const uint32_t code = which == kSoundDown || which == kSoundValue ? 0x2Cu : which == kSoundAccept ? 0x2Au : 0x2Bu;
+                    call(&playRTShellSound__Fi_0x179768, kPlayRtSound, {code});
+                    return;
+                }
                 const uint32_t shell = word(rdram, kShellPointer);
                 if (shell != 0u)
                     call(&playShellSFXSound__10ShellSoundi_0x179720, kPlaySound, {shell + kShellSound, static_cast<uint32_t>(which)});
@@ -204,6 +224,7 @@ namespace tmb::menu
             int monitorRefresh = 0;
             std::string status; // a line under the page: what Cross did
             bool quitArmed = false; // QUIT GAME pressed once: a second Cross quits
+            bool inPause = false;   // opened from the pause menu (its style and pad), not the Options screen
         } g_menu;
 
         std::string upper(std::string s)
@@ -522,13 +543,70 @@ namespace tmb::menu
             }
         }
 
+        // The pages in the pause's own style: its fonts (setTitleFont's title; the selected line at size 0x12 in
+        // (0x78, 0x6E, 0x00), the others at 0x10 in (0x46, 0x46, 0x46), as setMenuFont), in pixels of the paused view.
+        void drawPause(Guest &g, const Menu &m, const std::vector<Row> &rows)
+        {
+            g.call(&setTitleFont__Fv_0x167ac8, kSetTitleFont, {});
+            g.call(&fontSpritePrintCenteredXY__FiiiPc_0x1c44d8, kFontPrintCenteredXY,
+                   {0u, 0x140u, 0x12u, g.string(m.page == Page::Top ? "PC SETTINGS" : pageName(m.page))});
+            const int32_t top = m.page == Page::Top ? 0x40 : 0x26, spacing = 0xB;
+            for (size_t i = 0; i < rows.size(); ++i)
+            {
+                const Row &r = rows[i];
+                const bool selected = static_cast<int>(i) == m.line && !r.info;
+                const uint32_t y = static_cast<uint32_t>(top + static_cast<int32_t>(i) * spacing);
+                g.call(&fontSetSize__Fii_0x1c4330, kFontSetSize, {0u, selected ? 0x12u : 0x10u});
+                if (selected)
+                    g.color(0x78u, 0x6Eu, 0x00u);
+                else
+                    g.color(0x46u, 0x46u, 0x46u);
+                if (m.page == Page::Top)
+                    g.call(&fontSpritePrintCenteredXY__FiiiPc_0x1c44d8, kFontPrintCenteredXY, {0u, 0x140u, y, g.string(r.label)});
+                else
+                {
+                    g.call(&fontSpritePrintXY__FiiiPc_0x1c44a8, kFontPrintXY, {0u, 0x3Cu, y, g.string(r.label)});
+                    if (!r.value.empty())
+                        g.call(&fontSpritePrintCenteredXY__FiiiPc_0x1c44d8, kFontPrintCenteredXY,
+                               {0u, 0x1C0u, y, g.string(selected ? "\\ " + r.value + " ]" : r.value)});
+                }
+            }
+            if (!m.status.empty())
+            {
+                g.call(&fontSetSize__Fii_0x1c4330, kFontSetSize, {0u, 0x10u});
+                g.color(0x78u, 0x6Eu, 0x00u);
+                g.call(&fontSpritePrintCenteredXY__FiiiPc_0x1c44d8, kFontPrintCenteredXY,
+                       {0u, 0x140u, static_cast<uint32_t>(top + static_cast<int32_t>(rows.size()) * spacing + 4), g.string(m.status)});
+            }
+        }
+
         // A frame of the open pages: the pad's presses (uiGetInput's flags), then the page drawn.
         void runPage(Guest &g)
         {
             Menu &m = g_menu;
             const Hooks h = hooks();
-            g.call(&uiGetInput__Fv_0x199880, kUiGetInput, {});
-            const auto pressed = [&](uint32_t flag) { return word(g.rdram, flag) != 0u; };
+            // This frame's press: the Options page's from uiGetInput's flags; the pause's from the pausing player's pad
+            // (inputGetInput, one press a frame in uiGetInput's order), as the pause reads it.
+            uint32_t press = 0u;
+            if (g.pause)
+            {
+                g.call(&inputGetPlayerPad__Fi_0x1d8658, kInputGetPlayerPad, {word(g.rdram, kPlayerThatPaused)});
+                const uint32_t pad = g.result();
+                static constexpr std::pair<uint32_t, uint32_t> kMasks[] = {{0x40u, kDown}, {0x10u, kUp}, {0x4000u, kCross}, {0x80u, kLeft},
+                                                                          {0x20u, kRight}, {0x1000u, kTriangle}, {0x2000u, kCircle}};
+                for (const auto &[mask, flag] : kMasks)
+                {
+                    g.call(&inputGetInput__Fii_0x1d8770, kInputGetInput, {mask, pad});
+                    if (g.result() != 0u)
+                    {
+                        press = flag;
+                        break;
+                    }
+                }
+            }
+            else
+                g.call(&uiGetInput__Fv_0x199880, kUiGetInput, {});
+            const auto pressed = [&](uint32_t flag) { return g.pause ? press == flag : word(g.rdram, flag) != 0u; };
             std::vector<Row> rows = rowsOf(m, h);
             if (m.page != Page::Closed && rows.empty())
                 m.page = Page::Top, rows = rowsOf(m, h);
@@ -628,6 +706,11 @@ namespace tmb::menu
             }
 
         draw:
+            if (g.pause)
+            {
+                drawPause(g, m, rows);
+                return;
+            }
             // The page's sliders hidden, as the game's controls page hides them (uiOptions shows them again on its page).
             g.call(&blankSliders__Fi_0x19de38, kBlankSliders, {0u});
             // Drawn: the title, then each line (the selected one larger and brighter, as the game's), its value to the right.
@@ -686,6 +769,7 @@ namespace tmb::menu
                     setWord(rdram, kCross, 0u); // not the game's accept-and-leave
                     sound = kSoundAccept;
                     open(g_menu, Page::Top, hooks());
+                    g_menu.inPause = false;
                 }
                 setWord(rdram, kLeft, 0u);
                 setWord(rdram, kRight, 0u);
@@ -700,7 +784,7 @@ namespace tmb::menu
         // uiOptions: the game's page and the PC SETTINGS line under it, or, while they are open, the PC pages instead.
         void uiOptionsOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
-            if (g_menu.page != Page::Closed && (!active(runtime) || !optionsPageIdle(rdram)))
+            if (g_menu.page != Page::Closed && (g_menu.inPause || !active(runtime) || !optionsPageIdle(rdram)))
                 g_menu.page = Page::Closed;
             const bool pages = g_menu.page != Page::Closed;
             if (!pages)
@@ -724,9 +808,78 @@ namespace tmb::menu
             if (pages)
                 ctx->pc = getRegU32(ctx, 31); // jr $ra: the game's page not run
         }
+
+        // ---- The pause menu (displayDialog's pauseLevelOverlay, types 0 and 16) ----
+        // getCurrentMenuSelection(count, pad) moves the cursor (gCurrentMenuSelection) on the pausing player's pad,
+        // wrapping at `count` (4 in one player: RESUME, QUIT, SET VIBRATION, ADJUST REAR VIEW; 3 with more players);
+        // checkInputForPauseExit returns 2 for Cross; at index `count` the game keeps a hidden TWEAK action, which Cross
+        // there would run. So: for the pause's call (return 0x166AE4) the count is one more (PC SETTINGS at `count`),
+        // Cross there (return 0x166D64) opens the pages instead, and pauseLevelOverlay draws the line after its menu,
+        // or, while the pages are open, the pages instead (displayDialog's loop goes on: 3D, font flush, frame).
+        uint32_t g_pauseCount = 0u;
+        bool g_pauseMenuShown = false; // the overlay drew its menu this frame (not the QUIT confirmation or the save)
+        std::chrono::steady_clock::time_point g_lastPause{};
+
+        void menuSelectionOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            if (getRegU32(ctx, 31) == kPauseSelectionReturn && active(runtime))
+            {
+                g_pauseCount = getRegU32(ctx, 4);
+                g_pauseMenuShown = true;
+                SET_GPR_U32(ctx, 4, g_pauseCount + 1u);
+            }
+            getCurrentMenuSelection__Fii_0x167af8(rdram, ctx, runtime);
+        }
+
+        void pauseExitOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t ra = getRegU32(ctx, 31);
+            checkInputForPauseExit__Fi_0x167670(rdram, ctx, runtime);
+            if (ctx->leaving || ra != kPauseExitReturn || !active(runtime) || !g_pauseMenuShown)
+                return;
+            if (getRegU32(ctx, 2) == 2u && word(rdram, kCurrentMenuSelection) == g_pauseCount)
+            {
+                SET_GPR_U32(ctx, 2, 0u); // the pause stays (not TWEAK)
+                open(g_menu, Page::Top, hooks());
+                g_menu.inPause = true;
+            }
+        }
+
+        void pauseOverlayOverride(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+        {
+            const uint32_t ra = getRegU32(ctx, 31);
+            const bool pause = (ra == kPauseReturn0 || ra == kPauseReturn16) && active(runtime);
+            if (pause)
+            {
+                // A new pause (the overlay not called for a while) starts on the game's menu.
+                const auto now = std::chrono::steady_clock::now();
+                if (now - g_lastPause > std::chrono::milliseconds(500) && g_menu.inPause)
+                    g_menu.page = Page::Closed;
+                g_lastPause = now;
+                if (g_menu.inPause && g_menu.page != Page::Closed)
+                {
+                    Guest g(rdram, ctx, runtime);
+                    g.pause = true;
+                    runPage(g);
+                    SET_GPR_U32(ctx, 2, 0u); // the dialog stays
+                    ctx->pc = ra;
+                    return;
+                }
+            }
+            g_pauseMenuShown = false;
+            pauseLevelOverlay__Fv_0x166960(rdram, ctx, runtime);
+            if (!pause || ctx->leaving || !g_pauseMenuShown)
+                return;
+            Guest g(rdram, ctx, runtime);
+            g.pause = true;
+            g.call(&setMenuFont__Fi_0x167810, kSetMenuFont, {g_pauseCount}); // highlighted as the game's lines
+            g.call(&fontSpritePrintCenteredXY__FiiiPc_0x1c44d8, kFontPrintCenteredXY,
+                   {0u, 0x140u, 0x61u + 0xBu * g_pauseCount, g.string("PC SETTINGS")});
+        }
     }
 
     Hooks currentHooks() { return hooks(); }
+    bool pausePagesOpen() { return g_menu.inPause && g_menu.page != Page::Closed; }
 
     void setHooks(Hooks h)
     {
@@ -740,5 +893,8 @@ namespace tmb::menu
     {
         runtime.registerFunction(kUiGetInput, &uiGetInputOverride);
         runtime.registerFunction(kUiOptions, &uiOptionsOverride);
+        runtime.registerFunction(kMenuSelection, &menuSelectionOverride);
+        runtime.registerFunction(kPauseExit, &pauseExitOverride);
+        runtime.registerFunction(kPauseOverlay, &pauseOverlayOverride);
     }
 }

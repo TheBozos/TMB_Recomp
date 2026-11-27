@@ -64,6 +64,7 @@ namespace tmb::menu
 namespace tmb::widescreen
 {
     void update(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, bool match);
+    void install(tmb::Registry &runtime);
 }
 
 namespace tmb::meshes
@@ -1152,6 +1153,7 @@ namespace
         runtime.registerFunction(kMtapGetConnection, &mtapGetConnection);
         tmb::cheats::install(runtime); // TMB_NO_AI, infinite health / ammo / energy, weak enemies (runtime/tmb_cheats.cpp)
         tmb::menu::install(runtime); // PC SETTINGS in the game's Options screen (runtime/tmb_menu.cpp)
+        tmb::widescreen::install(runtime); // the dialogs over a widescreen match back at 640 (runtime/tmb_widescreen.cpp)
         if (const char *fx = std::getenv("TMB_FX_TEST"); fx && *fx)
         {
             g_fxTest.period = std::max(0.5, std::atof(fx));

@@ -21,7 +21,10 @@ under "Unreleased" as they land, then move them under the new version's heading 
 - **Widescreen (16:9)**, off by default: in F2's Video tab, PC SETTINGS → Video, or `widescreen = on` in `video.ini`
   (`PS2X_WIDESCREEN=1`). In one-player and two-player matches the game draws a 16:9 picture: it shows more at the
   sides (its own views made wider, culling and all), nothing is stretched, and the HUD keeps its shape. The menus,
-  movies and loading screens stay 4:3, centred, and three- and four-player split screens stay 4:3.
+  movies and loading screens stay 4:3, centred, and three- and four-player split screens stay 4:3. The pause menu and
+  the other dialogs over a match (results, won, lost) are shown 4:3 and centred. The HUD goes to the 16:9 edges: the
+  radar, name and health to the left, the weapons, energy and lives to the right; the markers over the cars stay
+  on them.
 
 ## [0.6.0] - 2026-11-11
 

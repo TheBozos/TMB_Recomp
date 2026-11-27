@@ -3,6 +3,18 @@
 Use a scratch `PS2X_USER_DIR` for every automated run. Keep game data and generated code out of Git and release ZIPs.
 Publication is separate from a successful build; this checklist records what was actually verified.
 
+v0.7.0 was published on 2026-11-27 after tagged CI and the owner's release request. Its draft assets were checked
+locally before publication:
+- both player ZIPs pass the SHA-256 and package audits, carry an identical 8,003-file payload, and are stamped with
+  the release commit and engine `b29bc39`; the sources ZIP matches its hash;
+- a fresh install in a path with spaces and accents was built offline from the disc with only the bundled kit. The
+  build was stopped and resumed, then the game played and exited normally, with menu/movie timing passing;
+- the v0.6.0 install was updated by its own updater, rebuilt and played; the v0.3.2 updater accepted the migration
+  ZIP. Player data was kept in both update cases;
+- on the fresh install, the launcher's Enhanced textures made 2,191 replacements;
+- the release's new features (PC SETTINGS in the Options screen and the pause menu, QUIT GAME, widescreen, its HUD
+  and dialogs, the quit-music fix) were played by the owner on the development PC before the tag.
+
 v0.6.0 was published on 2026-11-11 after tagged CI and the owner's release request. Its draft assets were checked
 locally before publication:
 - both player ZIPs pass the SHA-256 and package audits, carry an identical 7,974-file payload, and are stamped with

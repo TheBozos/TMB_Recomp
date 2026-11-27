@@ -26,6 +26,11 @@ under "Unreleased" as they land, then move them under the new version's heading 
   radar, name and health to the left, the weapons, energy and lives to the right; the markers over the cars stay
   on them.
 
+### Fixed
+
+- Quitting a match from the pause menu no longer leaves the match's music playing over the menus (BozoEngine's
+  989SND driver now stops a bank's sounds when the game unloads it).
+
 ## [0.6.0] - 2026-11-11
 
 ### Added
